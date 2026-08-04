@@ -1,0 +1,18 @@
+[ 2025-12-12 08:48:34,999 ] 84 root - INFO - Generating prediction...
+[ 2025-12-12 08:48:35,001 ] 302 currency_prediction.data_ingestion - INFO - [INGESTION] Loading C:\Users\LENOVO\Desktop\Sri Lanka AI Challenge 2026\models\currency-volatility-prediction\artifacts\data\currency_data_20251209.csv
+[ 2025-12-12 08:48:35,294 ] 78 currency_prediction.predictor - INFO - [PREDICTOR] Model loaded: 24 features
+[ 2025-12-12 08:48:36,235 ] 92 root - INFO - [USD_LKR] \u2713 Prediction generated using trained model
+[ 2025-12-12 08:48:36,236 ] 212 currency_prediction.predictor - INFO - [PREDICTOR] \u2713 Saved prediction to C:\Users\LENOVO\Desktop\Sri Lanka AI Challenge 2026\models\currency-volatility-prediction\output\predictions\currency_prediction_20251213.json
+[ 2025-12-12 08:48:36,237 ] 103 root - INFO - 
+==================================================
+[ 2025-12-12 08:48:36,237 ] 104 root - INFO - USD/LKR PREDICTION FOR 2025-12-13
+[ 2025-12-12 08:48:36,238 ] 105 root - INFO - ==================================================
+[ 2025-12-12 08:48:36,238 ] 106 root - INFO - Current Rate:   308.33 LKR/USD
+[ 2025-12-12 08:48:36,238 ] 107 root - INFO - Predicted Rate: 301.59 LKR/USD
+[ 2025-12-12 08:48:36,238 ] 108 root - INFO - Expected Change: -2.184%
+[ 2025-12-12 08:48:36,238 ] 109 root - INFO - Direction: \U0001f4c8 LKR strengthening
+[ 2025-12-12 08:48:36,238 ] 110 root - INFO - Volatility: high
+[ 2025-12-12 08:48:36,238 ] 113 root - INFO - Weekly Trend: +1.33%
+[ 2025-12-12 08:48:36,238 ] 115 root - INFO - Monthly Trend: +2.26%
+[ 2025-12-12 08:48:36,238 ] 117 root - INFO - ==================================================
+[ 2025-12-12 08:48:36,238 ] 118 root - INFO - Saved to: C:\Users\LENOVO\Desktop\Sri Lanka AI Challenge 2026\models\currency-volatility-prediction\output\predictions\currency_prediction_20251213.json

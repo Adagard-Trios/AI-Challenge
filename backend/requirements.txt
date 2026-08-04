@@ -1,0 +1,149 @@
+# ---------------------------------------------------------
+# CPU-only PyTorch wheels.
+# Without this, `torch` on Linux resolves to the CUDA build and drags in
+# ~2.5 GB of nvidia-* wheels that are useless on CPU hosts (Render, HF Spaces).
+# ---------------------------------------------------------
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+# ---------------------------------------------------------
+# Core LangGraph & LangChain (Fully Compatible)
+# ---------------------------------------------------------
+langgraph
+langchain
+langchain-core
+langchain-community
+langchain-groq
+
+# ---------------------------------------------------------
+# LLM Providers
+# ---------------------------------------------------------
+groq
+
+# ---------------------------------------------------------
+# Data Processing
+# ---------------------------------------------------------
+pydantic
+python-dotenv
+python-dateutil
+pytz
+pandas
+
+# ---------------------------------------------------------
+# Web Scraping
+# ---------------------------------------------------------
+requests
+beautifulsoup4
+lxml
+
+# ---------------------------------------------------------
+# Financial Data
+# ---------------------------------------------------------
+yfinance
+
+# ---------------------------------------------------------
+# Browser Automation
+# ---------------------------------------------------------
+playwright
+
+# ---------------------------------------------------------
+# API Server
+# ---------------------------------------------------------
+fastapi
+uvicorn[standard]
+websockets
+python-multipart
+
+# ---------------------------------------------------------
+# PDF / File Utilities
+# ---------------------------------------------------------
+pypdf
+
+# ---------------------------------------------------------
+# Development & Testing
+# ---------------------------------------------------------
+pytest
+pytest-asyncio
+pytest-cov
+black
+flake8
+
+# ---------------------------------------------------------
+# LangSmith & Agent Evaluation (Industry-Level Testing)
+# ---------------------------------------------------------
+langsmith>=0.1.0
+deepeval>=0.21.0
+ragas>=0.1.0
+
+# ---------------------------------------------------------
+# Dashboard (Optional)
+# ---------------------------------------------------------
+streamlit
+plotly
+
+# ---------------------------------------------------------
+# Database & Vector Stores
+# ---------------------------------------------------------
+neo4j
+langchain-neo4j
+chromadb
+langchain-chroma
+langchain-text-splitters
+sentence-transformers
+
+
+# Anomaly Detection Pipeline - Requirements
+
+# ML & Clustering
+optuna
+scikit-learn
+hdbscan
+umap-learn
+
+# Language Detection
+fasttext-wheel
+lingua-language-detector
+
+# NLP & Transformers
+transformers
+sentence-transformers
+torch==2.9.1+cpu
+
+# MLflow & Tracking
+mlflow
+dagshub
+
+# Database
+pymongo
+
+# Data Processing
+pandas
+numpy
+pyyaml
+
+# Airflow (managed by Astro)
+# apache-airflow>=2.7
+
+# Utilities
+joblib
+tqdm
+
+optuna
+
+python-dotenv
+pandas
+numpy 
+pymongo
+certifi
+pymongo[srv]
+scikit-learn
+mlflow
+pyaml
+dagshub
+fastapi
+uvicorn
+python-multipart
+yfinance
+tensorflow
+streamlit
+plotly
+tf_keras

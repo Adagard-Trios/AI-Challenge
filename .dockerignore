@@ -1,0 +1,47 @@
+# Docker build context is the REPO ROOT (see render.yaml: dockerContext: .).
+# Without this file the context includes ~3.5 GB of local-only artifacts.
+
+# Virtualenvs / node deps — reinstalled inside the image
+**/.venv
+**/venv
+**/node_modules
+
+# Python bytecode & caches
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+
+# Next.js build output — the frontend is NOT part of the backend image
+frontend/.next
+frontend/out
+
+# VCS & editor
+.git
+.gitignore
+.github
+.claude
+**/.vscode
+**/.idea
+
+# Local runtime state — the Render Disk supplies these at /app/backend/data
+backend/data
+backend/datasets
+backend/logs
+*.log
+**/mlruns
+
+# NOTE: backend/src/utils/.sessions/*.json is deliberately NOT excluded — the
+# Playwright scrapers read it for authenticated social scraping, and the original
+# image shipped it too. It DOES mean live account cookies are baked into the
+# image layer. See DEPLOY.md "Security".
+
+# Secrets — injected as Render env vars, never baked into the image
+.env
+**/.env
+
+# Docs / assets not needed at runtime
+*.pdf
+DEPLOY.md
+demo

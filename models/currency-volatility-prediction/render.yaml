@@ -1,0 +1,32 @@
+# Render Blueprint — Currency Volatility (USD/LKR) inference service
+#
+# Apply: New -> Blueprint -> this repo, pointing at
+# models/currency-volatility-prediction/render.yaml.
+#
+# NOTE: live inference additionally needs artifacts/models/training_config.json,
+# which is not committed. Without it the service answers on its fallback tier and
+# /model/status reports "live_inference_available": false.
+
+services:
+  - type: web
+    name: slac2026-currency
+    runtime: docker
+    rootDir: models/currency-volatility-prediction
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+
+    region: singapore
+    plan: standard          # 2 GB — TensorFlow import needs the headroom
+
+    healthCheckPath: /health
+
+    disk:
+      name: currency-output
+      mountPath: /app/output
+      sizeGB: 1
+
+    envVars:
+      - key: CORS_ALLOW_ORIGINS
+        sync: false
+      - key: PYTHONUNBUFFERED
+        value: "1"

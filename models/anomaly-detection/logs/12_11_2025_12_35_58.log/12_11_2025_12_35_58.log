@@ -1,0 +1,109 @@
+[ 2025-12-11 12:35:58,420 ] 38 root - INFO - 
+============================================================
+[ 2025-12-11 12:35:58,420 ] 39 root - INFO - ANOMALY DETECTION TRAINING PIPELINE
+[ 2025-12-11 12:35:58,420 ] 40 root - INFO - Started at: 2025-12-11 12:35:58
+[ 2025-12-11 12:35:58,420 ] 41 root - INFO - Models to train: ['dbscan', 'kmeans', 'hdbscan', 'isolation_forest', 'lof']
+[ 2025-12-11 12:35:58,420 ] 42 root - INFO - MLflow experiment: anomaly_detection_feeds
+[ 2025-12-11 12:35:58,420 ] 43 root - INFO - ============================================================
+
+[ 2025-12-11 12:35:58,420 ] 37 data_ingestion - INFO - [DataIngestion] Initialized
+[ 2025-12-11 12:35:58,420 ] 38 data_ingestion - INFO -   SQLite: C:\Users\LENOVO\Desktop\Sri Lanka AI Challenge 2026\data\feeds\feed_cache.db
+[ 2025-12-11 12:35:58,420 ] 39 data_ingestion - INFO -   CSV Dir: C:\Users\LENOVO\Desktop\Sri Lanka AI Challenge 2026\datasets\political_feeds
+[ 2025-12-11 12:35:58,420 ] 40 data_ingestion - INFO -   Output: C:\Users\LENOVO\Desktop\Sri Lanka AI Challenge 2026\models\anomaly-detection\artifacts\data_ingestion
+[ 2025-12-11 12:35:58,420 ] 48 root - INFO - Starting data ingestion...
+[ 2025-12-11 12:35:58,420 ] 193 data_ingestion - INFO - [DataIngestion] Starting data ingestion...
+[ 2025-12-11 12:35:58,420 ] 52 data_ingestion - WARNING - [DataIngestion] SQLite DB not found: C:\Users\LENOVO\Desktop\Sri Lanka AI Challenge 2026\data\feeds\feed_cache.db
+[ 2025-12-11 12:35:58,430 ] 107 data_ingestion - INFO - [DataIngestion] Loaded 0 records from economic_feeds_202512.csv
+[ 2025-12-11 12:35:58,439 ] 107 data_ingestion - INFO - [DataIngestion] Loaded 26 records from intelligence_feeds_202512.csv
+[ 2025-12-11 12:35:58,443 ] 107 data_ingestion - INFO - [DataIngestion] Loaded 13 records from political_feeds_202512.csv
+[ 2025-12-11 12:35:58,447 ] 107 data_ingestion - INFO - [DataIngestion] Loaded 35 records from social_feeds_202512.csv
+[ 2025-12-11 12:35:58,449 ] 107 data_ingestion - INFO - [DataIngestion] Loaded 7 records from weather_feeds_202512.csv
+[ 2025-12-11 12:35:58,453 ] 115 data_ingestion - INFO - [DataIngestion] Total 81 records from 5 CSV files
+[ 2025-12-11 12:35:58,457 ] 143 data_ingestion - INFO - [DataIngestion] Deduplicated: removed 18 duplicates
+[ 2025-12-11 12:35:58,459 ] 182 data_ingestion - INFO - [DataIngestion] Filtered: removed 13 short texts
+[ 2025-12-11 12:35:58,470 ] 235 data_ingestion - INFO - [DataIngestion] Saved 50 records to C:\Users\LENOVO\Desktop\Sri Lanka AI Challenge 2026\models\anomaly-detection\artifacts\data_ingestion\ingested_data_20251211_123558.parquet
+[ 2025-12-11 12:35:58,475 ] 249 data_ingestion - INFO - [DataIngestion] \u2713 Complete: 50 records
+[ 2025-12-11 12:35:58,475 ] 50 root - INFO - \u2713 Data ingestion completed
+[ 2025-12-11 12:35:58,486 ] 39 data_validation - INFO - [DataValidation] Initialized with schema: C:\Users\LENOVO\Desktop\Sri Lanka AI Challenge 2026\models\anomaly-detection\data_schema\schema.yaml
+[ 2025-12-11 12:35:58,488 ] 55 root - INFO - Starting data validation...
+[ 2025-12-11 12:35:58,488 ] 195 data_validation - INFO - [DataValidation] Validating: C:\Users\LENOVO\Desktop\Sri Lanka AI Challenge 2026\models\anomaly-detection\artifacts\data_ingestion\ingested_data_20251211_123558.parquet
+[ 2025-12-11 12:35:58,525 ] 206 data_validation - INFO - [DataValidation] Loaded 50 records
+[ 2025-12-11 12:35:58,528 ] 225 data_validation - INFO - [DataValidation] \u2713 All validations passed
+[ 2025-12-11 12:35:58,540 ] 260 data_validation - INFO - [DataValidation] \u2713 Complete: 50/50 valid records
+[ 2025-12-11 12:35:58,540 ] 59 root - INFO - \u2713 Data validation completed
+[ 2025-12-11 12:35:58,543 ] 73 vectorizer - INFO - [Vectorizer] Using device: cpu
+[ 2025-12-11 12:36:02,635 ] 66 data_transformation - WARNING - [DataTransformation] Vectorization API not available: HTTPConnectionPool(host='localhost', port=8001): Max retries exceeded with url: /health (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x00000253124DAA10>: Failed to establish a new connection: [WinError 10061] No connection could be made because the target machine actively refused it'))
+[ 2025-12-11 12:36:02,636 ] 67 data_transformation - INFO - [DataTransformation] Using local vectorization (no LLM insights)
+[ 2025-12-11 12:36:02,636 ] 69 data_transformation - INFO - [DataTransformation] Initialized
+[ 2025-12-11 12:36:02,638 ] 70 data_transformation - INFO -   Models cache: C:\Users\LENOVO\Desktop\Sri Lanka AI Challenge 2026\models\anomaly-detection\models_cache
+[ 2025-12-11 12:36:02,638 ] 71 data_transformation - INFO -   Vectorization API: disabled (using local)
+[ 2025-12-11 12:36:02,638 ] 64 root - INFO - Starting data transformation...
+[ 2025-12-11 12:36:02,639 ] 346 data_transformation - INFO - [DataTransformation] Starting transformation: C:\Users\LENOVO\Desktop\Sri Lanka AI Challenge 2026\models\anomaly-detection\artifacts\data_validation\validated_data_20251211_123558.parquet
+[ 2025-12-11 12:36:02,669 ] 351 data_transformation - INFO - [DataTransformation] Loaded 50 records
+[ 2025-12-11 12:36:02,669 ] 158 data_transformation - INFO - [DataTransformation] Detecting languages...
+[ 2025-12-11 12:36:02,956 ] 78 language_detector - INFO - [LanguageDetector] Loaded FastText model from C:\Users\LENOVO\Desktop\Sri Lanka AI Challenge 2026\models\anomaly-detection\models_cache\lid.176.bin
+[ 2025-12-11 12:36:02,958 ] 93 language_detector - INFO - [LanguageDetector] Initialized Lingua detector
+[ 2025-12-11 12:36:02,999 ] 173 data_transformation - INFO - [DataTransformation] Language distribution:
+[ 2025-12-11 12:36:02,999 ] 175 data_transformation - INFO -   english: 37 (74.0%)
+[ 2025-12-11 12:36:02,999 ] 175 data_transformation - INFO -   tamil: 12 (24.0%)
+[ 2025-12-11 12:36:02,999 ] 175 data_transformation - INFO -   sinhala: 1 (2.0%)
+[ 2025-12-11 12:36:02,999 ] 189 data_transformation - INFO - [DataTransformation] Extracting temporal features...
+[ 2025-12-11 12:36:03,007 ] 223 data_transformation - INFO - [DataTransformation] Extracting engagement features...
+[ 2025-12-11 12:36:03,010 ] 261 data_transformation - INFO - [DataTransformation] Extracting text features...
+[ 2025-12-11 12:36:03,012 ] 278 data_transformation - INFO - [DataTransformation] Vectorizing texts with BERT models...
+[ 2025-12-11 12:36:03,016 ] 94 vectorizer - INFO - [Vectorizer] Loading model: distilbert-base-uncased
+[ 2025-12-11 12:36:06,566 ] 108 vectorizer - INFO - [Vectorizer] \u2713 Loaded distilbert-base-uncased (english)
+[ 2025-12-11 12:36:11,088 ] 94 vectorizer - INFO - [Vectorizer] Loading model: l3cube-pune/tamil-bert
+[ 2025-12-11 12:36:14,148 ] 108 vectorizer - INFO - [Vectorizer] \u2713 Loaded l3cube-pune/tamil-bert (tamil)
+[ 2025-12-11 12:36:18,022 ] 94 vectorizer - INFO - [Vectorizer] Loading model: keshan/SinhalaBERTo
+[ 2025-12-11 12:36:22,676 ] 108 vectorizer - INFO - [Vectorizer] \u2713 Loaded keshan/SinhalaBERTo (sinhala)
+[ 2025-12-11 12:36:23,938 ] 306 data_transformation - INFO - [DataTransformation] Building feature matrix...
+[ 2025-12-11 12:36:23,939 ] 330 data_transformation - INFO - [DataTransformation] Feature matrix shape: (50, 776)
+[ 2025-12-11 12:36:23,977 ] 454 data_transformation - INFO - [DataTransformation] \u2713 Complete: (50, 776)
+[ 2025-12-11 12:36:23,978 ] 68 root - INFO - \u2713 Data transformation completed
+[ 2025-12-11 12:36:26,279 ] 103 model_trainer - INFO - [ModelTrainer] MLflow configured: https://dagshub.com/sliitguy/sri-lanka-ai-challenge-2026.mlflow
+[ 2025-12-11 12:36:26,308 ] 77 model_trainer - INFO - [ModelTrainer] Initialized
+[ 2025-12-11 12:36:26,355 ] 78 model_trainer - INFO -   Models to train: ['dbscan', 'kmeans', 'hdbscan', 'isolation_forest', 'lof']
+[ 2025-12-11 12:36:26,389 ] 79 model_trainer - INFO -   Optuna trials: 50
+[ 2025-12-11 12:36:26,390 ] 73 root - INFO - Starting model training...
+[ 2025-12-11 12:36:26,390 ] 371 model_trainer - INFO - [ModelTrainer] Starting training: C:\Users\LENOVO\Desktop\Sri Lanka AI Challenge 2026\models\anomaly-detection\artifacts\data_transformation\features_20251211_123623.npy
+[ 2025-12-11 12:36:26,393 ] 376 model_trainer - INFO - [ModelTrainer] Loaded features: (50, 776)
+[ 2025-12-11 12:36:27,296 ] 392 model_trainer - WARNING - [ModelTrainer] MLflow run start error: API request to endpoint /api/2.0/mlflow/runs/create failed with error code 403 != 200. Response body: ''
+[ 2025-12-11 12:36:27,296 ] 400 model_trainer - INFO - [ModelTrainer] Training dbscan...
+[ 2025-12-11 12:36:30,594 ] 331 model_trainer - INFO - [ModelTrainer] dbscan best params: {'eps': 0.42370073557699317, 'min_samples': 2}
+[ 2025-12-11 12:36:30,597 ] 332 model_trainer - INFO - [ModelTrainer] dbscan best score: 0.8456
+[ 2025-12-11 12:36:31,087 ] 437 model_trainer - INFO - [ModelTrainer] \u2713 dbscan complete
+[ 2025-12-11 12:36:31,088 ] 400 model_trainer - INFO - [ModelTrainer] Training kmeans...
+[ 2025-12-11 12:36:36,271 ] 331 model_trainer - INFO - [ModelTrainer] kmeans best params: {'n_clusters': 2, 'n_init': 20}
+[ 2025-12-11 12:36:36,275 ] 332 model_trainer - INFO - [ModelTrainer] kmeans best score: 0.4484
+[ 2025-12-11 12:36:36,795 ] 437 model_trainer - INFO - [ModelTrainer] \u2713 kmeans complete
+[ 2025-12-11 12:36:36,796 ] 400 model_trainer - INFO - [ModelTrainer] Training hdbscan...
+[ 2025-12-11 12:36:37,885 ] 331 model_trainer - INFO - [ModelTrainer] hdbscan best params: {'min_cluster_size': 12, 'min_samples': 4}
+[ 2025-12-11 12:36:37,886 ] 332 model_trainer - INFO - [ModelTrainer] hdbscan best score: 0.4609
+[ 2025-12-11 12:36:38,254 ] 437 model_trainer - INFO - [ModelTrainer] \u2713 hdbscan complete
+[ 2025-12-11 12:36:38,261 ] 400 model_trainer - INFO - [ModelTrainer] Training isolation_forest...
+[ 2025-12-11 12:36:53,388 ] 331 model_trainer - INFO - [ModelTrainer] isolation_forest best params: {'contamination': 0.09823025045826593, 'n_estimators': 129}
+[ 2025-12-11 12:36:53,388 ] 332 model_trainer - INFO - [ModelTrainer] isolation_forest best score: -0.0000
+[ 2025-12-11 12:36:54,125 ] 437 model_trainer - INFO - [ModelTrainer] \u2713 isolation_forest complete
+[ 2025-12-11 12:36:54,127 ] 400 model_trainer - INFO - [ModelTrainer] Training lof...
+[ 2025-12-11 12:36:55,717 ] 331 model_trainer - INFO - [ModelTrainer] lof best params: {'n_neighbors': 43, 'contamination': 0.09260931098753758}
+[ 2025-12-11 12:36:55,717 ] 332 model_trainer - INFO - [ModelTrainer] lof best score: -0.0000
+[ 2025-12-11 12:36:56,175 ] 437 model_trainer - INFO - [ModelTrainer] \u2713 lof complete
+[ 2025-12-11 12:36:56,175 ] 475 model_trainer - INFO - [ModelTrainer] Training complete in 29.8s
+[ 2025-12-11 12:36:56,176 ] 476 model_trainer - INFO - [ModelTrainer] Best model: kmeans
+[ 2025-12-11 12:36:56,176 ] 486 model_trainer - INFO - [ModelTrainer] Training embedding-only model for Vectorizer Agent...
+[ 2025-12-11 12:36:56,176 ] 490 model_trainer - INFO - [ModelTrainer] Embedding-only shape: (50, 768)
+[ 2025-12-11 12:36:56,530 ] 505 model_trainer - INFO - [ModelTrainer] Embedding-only model saved: C:\Users\LENOVO\Desktop\Sri Lanka AI Challenge 2026\models\anomaly-detection\artifacts\model_trainer\isolation_forest_embeddings_only.joblib
+[ 2025-12-11 12:36:56,530 ] 506 model_trainer - INFO - [ModelTrainer] This model is for real-time inference by Vectorizer Agent
+[ 2025-12-11 12:36:56,530 ] 77 root - INFO - \u2713 Model training completed
+[ 2025-12-11 12:36:56,530 ] 100 root - INFO - 
+============================================================
+[ 2025-12-11 12:36:56,530 ] 101 root - INFO - PIPELINE RESULTS
+[ 2025-12-11 12:36:56,530 ] 102 root - INFO - ============================================================
+[ 2025-12-11 12:36:56,530 ] 103 root - INFO - Status: success
+[ 2025-12-11 12:36:56,530 ] 104 root - INFO - Best model: kmeans
+[ 2025-12-11 12:36:56,535 ] 105 root - INFO - Anomalies detected: 5
+[ 2025-12-11 12:36:56,535 ] 106 root - INFO - MLflow run: 
+[ 2025-12-11 12:36:56,535 ] 107 root - INFO - ============================================================
+
+[ 2025-12-11 12:36:56,535 ] 109 root - INFO - \u2713 Pipeline completed successfully!

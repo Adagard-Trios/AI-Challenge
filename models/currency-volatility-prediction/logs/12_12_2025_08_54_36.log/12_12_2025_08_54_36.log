@@ -1,0 +1,82 @@
+[ 2025-12-12 08:54:49,586 ] 34 root - INFO - 
+============================================================
+[ 2025-12-12 08:54:49,587 ] 35 root - INFO - CURRENCY PREDICTION PIPELINE - TRAINING
+[ 2025-12-12 08:54:49,587 ] 36 root - INFO - Started at: 2025-12-12 08:54:49
+[ 2025-12-12 08:54:49,587 ] 37 root - INFO - ============================================================
+[ 2025-12-12 08:54:49,587 ] 40 root - INFO - [USD_LKR] Starting data ingestion...
+[ 2025-12-12 08:54:49,588 ] 252 currency_prediction.data_ingestion - INFO - [INGESTION] Starting complete data ingestion...
+[ 2025-12-12 08:54:49,606 ] 63 currency_prediction.data_ingestion - INFO - [CURRENCY] Fetching USDLKR=X data for 2y...
+[ 2025-12-12 08:54:58,781 ] 90 currency_prediction.data_ingestion - INFO - [CURRENCY] \u2713 Fetched 520 records for USDLKR=X
+[ 2025-12-12 08:54:58,781 ] 107 currency_prediction.data_ingestion - INFO - [INDICATORS] Fetching cse_index (^CSE)...
+[ 2025-12-12 08:54:58,782 ] 63 currency_prediction.data_ingestion - INFO - [CURRENCY] Fetching ^CSE data for 2y...
+[ 2025-12-12 08:54:58,970 ] 281 yfinance - ERROR - $^CSE: possibly delisted; no price data found  (period=2y)
+[ 2025-12-12 08:54:58,971 ] 70 currency_prediction.data_ingestion - WARNING - [CURRENCY] No data for ^CSE, trying alternative...
+[ 2025-12-12 08:54:59,087 ] 281 yfinance - ERROR - $^CSE: possibly delisted; no price data found  (period=2y)
+[ 2025-12-12 08:54:59,088 ] 94 currency_prediction.data_ingestion - ERROR - [CURRENCY] Error fetching ^CSE: No data available for ^CSE
+[ 2025-12-12 08:54:59,089 ] 127 currency_prediction.data_ingestion - WARNING - [INDICATORS] \u2717 No data for cse_index
+[ 2025-12-12 08:54:59,089 ] 107 currency_prediction.data_ingestion - INFO - [INDICATORS] Fetching gold (GC=F)...
+[ 2025-12-12 08:54:59,089 ] 63 currency_prediction.data_ingestion - INFO - [CURRENCY] Fetching GC=F data for 2y...
+[ 2025-12-12 08:54:59,610 ] 90 currency_prediction.data_ingestion - INFO - [CURRENCY] \u2713 Fetched 505 records for GC=F
+[ 2025-12-12 08:54:59,611 ] 125 currency_prediction.data_ingestion - INFO - [INDICATORS] \u2713 gold: 505 records
+[ 2025-12-12 08:54:59,612 ] 107 currency_prediction.data_ingestion - INFO - [INDICATORS] Fetching oil (CL=F)...
+[ 2025-12-12 08:54:59,612 ] 63 currency_prediction.data_ingestion - INFO - [CURRENCY] Fetching CL=F data for 2y...
+[ 2025-12-12 08:54:59,800 ] 90 currency_prediction.data_ingestion - INFO - [CURRENCY] \u2713 Fetched 505 records for CL=F
+[ 2025-12-12 08:54:59,802 ] 125 currency_prediction.data_ingestion - INFO - [INDICATORS] \u2713 oil: 505 records
+[ 2025-12-12 08:54:59,802 ] 107 currency_prediction.data_ingestion - INFO - [INDICATORS] Fetching usd_index (DX-Y.NYB)...
+[ 2025-12-12 08:54:59,802 ] 63 currency_prediction.data_ingestion - INFO - [CURRENCY] Fetching DX-Y.NYB data for 2y...
+[ 2025-12-12 08:55:00,020 ] 90 currency_prediction.data_ingestion - INFO - [CURRENCY] \u2713 Fetched 505 records for DX-Y.NYB
+[ 2025-12-12 08:55:00,021 ] 125 currency_prediction.data_ingestion - INFO - [INDICATORS] \u2713 usd_index: 505 records
+[ 2025-12-12 08:55:00,021 ] 107 currency_prediction.data_ingestion - INFO - [INDICATORS] Fetching india_inr (INRUSD=X)...
+[ 2025-12-12 08:55:00,021 ] 63 currency_prediction.data_ingestion - INFO - [CURRENCY] Fetching INRUSD=X data for 2y...
+[ 2025-12-12 08:55:00,436 ] 90 currency_prediction.data_ingestion - INFO - [CURRENCY] \u2713 Fetched 521 records for INRUSD=X
+[ 2025-12-12 08:55:00,438 ] 125 currency_prediction.data_ingestion - INFO - [INDICATORS] \u2713 india_inr: 521 records
+[ 2025-12-12 08:55:00,480 ] 176 currency_prediction.data_ingestion - INFO - [MERGE] Combined data: 520 rows, 27 columns
+[ 2025-12-12 08:55:00,508 ] 242 currency_prediction.data_ingestion - INFO - [TECHNICAL] Added 41 technical features
+[ 2025-12-12 08:55:00,571 ] 285 currency_prediction.data_ingestion - INFO - [INGESTION] \u2713 Complete! Saved 500 records to C:\Users\LENOVO\Desktop\Sri Lanka AI Challenge 2026\models\currency-volatility-prediction\artifacts\data\currency_data_20251212.csv
+[ 2025-12-12 08:55:00,571 ] 286 currency_prediction.data_ingestion - INFO - [INGESTION] Features: ['date', 'open', 'high', 'low', 'close', 'volume', 'symbol', 'gold_open', 'gold_high', 'gold_low', 'gold_close', 'gold_volume', 'oil_open', 'oil_high', 'oil_low', 'oil_close', 'oil_volume', 'usd_index_open', 'usd_index_high', 'usd_index_low', 'usd_index_close', 'usd_index_volume', 'india_inr_open', 'india_inr_high', 'india_inr_low', 'india_inr_close', 'india_inr_volume', 'daily_return', 'daily_range', 'sma_5', 'sma_10', 'sma_20', 'ema_5', 'ema_10', 'volatility_5', 'volatility_20', 'momentum_5', 'momentum_10', 'rsi_14', 'macd', 'macd_signal', 'bb_middle', 'bb_upper', 'bb_lower', 'bb_position', 'day_of_week', 'day_sin', 'day_cos', 'month', 'month_sin', 'month_cos']
+[ 2025-12-12 08:55:00,611 ] 45 root - INFO - [USD_LKR] \u2713 Data ingestion completed: 500 records
+[ 2025-12-12 08:55:00,611 ] 48 root - INFO - [USD_LKR] Starting model training...
+[ 2025-12-12 08:55:00,613 ] 275 currency_prediction.model_trainer - INFO - [GRU] Starting training...
+[ 2025-12-12 08:55:00,614 ] 171 currency_prediction.model_trainer - INFO - [GRU] Using 24 features
+[ 2025-12-12 08:55:00,621 ] 197 currency_prediction.model_trainer - INFO - [GRU] Data prepared:
+[ 2025-12-12 08:55:00,622 ] 198 currency_prediction.model_trainer - INFO -   X_train: (376, 30, 24), y_train: (376, 1)
+[ 2025-12-12 08:55:00,622 ] 199 currency_prediction.model_trainer - INFO -   X_test: (94, 30, 24), y_test: (94, 1)
+[ 2025-12-12 08:55:00,809 ] 255 currency_prediction.model_trainer - INFO - [GRU] Model built: 27745 parameters
+[ 2025-12-12 08:55:00,854 ] 389 currency_prediction.model_trainer - INFO - Model: "sequential"
+\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510
+\u2502 Layer (type)                    \u2502 Output Shape           \u2502       Param # \u2502
+\u251c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2524
+\u2502 gru (GRU)                       \u2502 (None, 30, 64)         \u2502        17,280 \u2502
+\u251c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2524
+\u2502 batch_normalization             \u2502 (None, 30, 64)         \u2502           256 \u2502
+\u2502 (BatchNormalization)            \u2502                        \u2502               \u2502
+\u251c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2524
+\u2502 dropout (Dropout)               \u2502 (None, 30, 64)         \u2502             0 \u2502
+\u251c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2524
+\u2502 gru_1 (GRU)                     \u2502 (None, 32)             \u2502         9,408 \u2502
+\u251c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2524
+\u2502 batch_normalization_1           \u2502 (None, 32)             \u2502           128 \u2502
+\u2502 (BatchNormalization)            \u2502                        \u2502               \u2502
+\u251c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2524
+\u2502 dropout_1 (Dropout)             \u2502 (None, 32)             \u2502             0 \u2502
+\u251c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2524
+\u2502 dense (Dense)                   \u2502 (None, 16)             \u2502           528 \u2502
+\u251c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2524
+\u2502 dense_1 (Dense)                 \u2502 (None, 8)              \u2502           136 \u2502
+\u251c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2524
+\u2502 dense_2 (Dense)                 \u2502 (None, 1)              \u2502             9 \u2502
+\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518
+ Total params: 27,745 (108.38 KB)
+ Trainable params: 27,553 (107.63 KB)
+ Non-trainable params: 192 (768.00 B)
+
+[ 2025-12-12 08:55:00,855 ] 86 currency_prediction.model_trainer - INFO - [MLflow] \u2713 Configured with DagsHub credentials for sliitguy
+[ 2025-12-12 08:55:00,856 ] 89 currency_prediction.model_trainer - INFO - [MLflow] \u2713 Tracking URI: https://dagshub.com/sliitguy/sri-lanka-ai-challenge-2026.mlflow
+[ 2025-12-12 08:56:11,107 ] 366 currency_prediction.model_trainer - INFO - [GRU] Training complete!
+[ 2025-12-12 08:56:11,108 ] 367 currency_prediction.model_trainer - INFO -   MAE: 0.1331 LKR
+[ 2025-12-12 08:56:11,108 ] 368 currency_prediction.model_trainer - INFO -   RMSE: 5.4985 LKR
+[ 2025-12-12 08:56:11,108 ] 369 currency_prediction.model_trainer - INFO -   Direction Accuracy: 50.5%
+[ 2025-12-12 08:56:12,382 ] 83 absl - WARNING - You are saving your model as an HDF5 file via `model.save()` or `keras.saving.save_model(model)`. This file format is considered legacy. We recommend using instead the native Keras format, e.g. `model.save('my_model.keras')` or `keras.saving.save_model(model, 'my_model.keras')`. 
+[ 2025-12-12 08:56:12,476 ] 397 currency_prediction.model_trainer - INFO - [GRU] \u2713 Model saved to C:\Users\LENOVO\Desktop\Sri Lanka AI Challenge 2026\models\currency-volatility-prediction\artifacts\models\gru_usd_lkr.h5
+[ 2025-12-12 08:56:12,476 ] 52 root - INFO - [USD_LKR] \u2713 Model training completed
+[ 2025-12-12 08:56:12,477 ] 64 root - INFO - [USD_LKR] \u2713 Pipeline completed successfully!

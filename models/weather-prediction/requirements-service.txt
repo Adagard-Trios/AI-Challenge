@@ -1,0 +1,22 @@
+# Serving-only dependencies for service.py.
+#
+# Deliberately NOT requirements.txt: that file is the training set (mlflow,
+# dagshub, pymongo...) and — despite this model loading .h5 files — it omits
+# TensorFlow entirely. Installing it would give a bigger image that still cannot
+# run inference.
+#
+# tensorflow-cpu, not tensorflow: on Linux the default wheel bundles CUDA
+# libraries that are dead weight on a CPU host.
+
+fastapi
+uvicorn[standard]
+
+tensorflow-cpu==2.20.0
+tf-keras            # legacy .h5 loading under Keras 3
+
+joblib
+numpy
+pandas
+scikit-learn
+pyyaml
+python-dotenv

@@ -1,0 +1,91 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Environment files
+.env
+
+# LangGraph
+.langgraph_api
+
+# =============================================================================
+# BROWSER DATA (Playwright/Chromium session files - very large)
+# =============================================================================
+.browser_data/
+**/.*_browser_data/
+**/.browser_data/
+**/ShaderCache/
+**/GraphiteDawnCache/
+**/GrShaderCache/
+**/.sessions/
+**/Session Storage/
+**/Local Storage/
+**/Service Worker/
+
+# =============================================================================
+# ML MODEL ARTIFACTS (Large files - don't push to Git)
+# =============================================================================
+
+# Trained model weights (large binary files) - EXCEPT LFS tracked ones
+# Note: We use git lfs for .h5 and .joblib model files we want to push
+# *.h5
+# *.hdf5
+# *.joblib
+# *.pkl
+*.pickle
+*.pt
+*.pth
+*.onnx
+*.pb
+
+# Model output directories (training intermediates - regenerable)
+**/Artifacts/
+**/artifacts/data_ingestion/
+**/artifacts/data_validation/
+**/artifacts/data_transformation/
+**/artifacts/model_evaluation/
+models/*/output/
+models/*/models_cache/
+models/*/checkpoints/
+
+# Data files
+*.parquet
+*.npy
+*.csv
+
+# Airflow local state
+models/*/.astro/
+
+# MLflow artifacts (tracked separately)
+mlruns/
+mlartifacts/
+
+# =============================================================================
+# DATA FILES (Can be large)
+# =============================================================================
+data/
+datasets/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# ChromaDB persistence (can be large)
+chroma_db/
+
+# =============================================================================
+# KEEP THESE (source code, configs)
+# =============================================================================
+# The models/ folders themselves ARE tracked for:
+# - main.py, src/, dags/ (pipeline code)
+# - requirements.txt, setup.py (dependencies)
+# - data_schema/ (validation configs)
+# - README.md (documentation)

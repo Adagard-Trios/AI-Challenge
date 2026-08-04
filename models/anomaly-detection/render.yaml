@@ -1,0 +1,52 @@
+# Render Blueprint — Anomaly Detection inference service
+#
+# Apply: New -> Blueprint -> this repo, pointing at
+# models/anomaly-detection/render.yaml.
+#
+# Heaviest of the four: PyTorch + sentence-transformers + BERT weights. The
+# Dockerfile bakes models_cache/ at build time (~1.5 GB, several minutes). To skip
+# it, set the DOWNLOAD_MODELS=0 build arg — the service then runs on the
+# keyword/severity heuristic tier, matching the monolith's own fallback.
+
+services:
+  - type: web
+    name: slac2026-anomaly
+    runtime: docker
+    rootDir: models/anomaly-detection
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+
+    region: singapore
+    # torch + sentence-transformers + a BERT model resident in memory.
+    # Bump to 'pro' (4 GB) if you see OOM restarts under load.
+    plan: standard          # 2 GB
+
+    healthCheckPath: /health
+
+    # Persist the downloaded embedding/language models so restarts don't refetch.
+    disk:
+      name: anomaly-cache
+      mountPath: /app/models_cache
+      sizeGB: 5
+
+    envVars:
+      - key: CORS_ALLOW_ORIGINS
+        sync: false
+
+      # Embedding-based scoring. Leave "0" for the first deploy so the service
+      # answers immediately on the keyword/severity tier; flip to "1" once you
+      # have confirmed models_cache/ is warm (see /model/status).
+      # With a cold cache and this on, the first /detect blocks for minutes
+      # downloading BERT weights.
+      - key: ANOMALY_ML_ENABLED
+        value: "0"
+
+      # Allow runtime downloads from HuggingFace. Off by default: a cache miss
+      # then fails fast to the heuristic tier instead of hanging on the network.
+      - key: ANOMALY_ALLOW_DOWNLOAD
+        value: "0"
+
+      - key: HF_HOME
+        value: /app/models_cache
+      - key: PYTHONUNBUFFERED
+        value: "1"

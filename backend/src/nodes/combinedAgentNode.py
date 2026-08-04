@@ -6,11 +6,12 @@ UPDATED: Supports 'Opportunity' tracking and new Scoring Logic
 """
 
 from __future__ import annotations
-import uuid
+import json
 import logging
-import time
+import re
+import uuid
 from datetime import datetime
-from typing import Dict, Any, List
+from typing import Any, Dict, List, Optional
 
 # Import storage manager for production-grade persistence
 from src.storage.storage_manager import StorageManager
@@ -56,39 +57,112 @@ class CombinedAgentNode:
     # LLM POST FILTER - Quality control and enhancement
     # =========================================================================
 
-    def _llm_filter_post(self, summary: str, domain: str = "unknown") -> Dict[str, Any]:
+    # Posts per LLM call. The filter used to run once per post, serially,
+    # inside a 60s loop -- 50-150 sequential Groq calls per cycle, which is both
+    # slow and the reason rate limiting was hit routinely. Batching by domain
+    # brings a typical cycle to roughly one call per agent.
+    LLM_FILTER_BATCH_SIZE = 12
+
+    # Per-post input budget inside a batch. Lower than the 1500 used for a
+    # single post, since a dozen share one context window.
+    LLM_FILTER_INPUT_CHARS = 600
+
+    @staticmethod
+    def _guess_region(summary: str) -> str:
+        lowered = summary.lower()
+        return (
+            "sri_lanka"
+            if any(kw in lowered for kw in ["sri lanka", "colombo", "kandy", "galle"])
+            else "world"
+        )
+
+    def _unfiltered_result(self, summary: str) -> Dict[str, Any]:
         """
-        LLM-based post filtering and enhancement.
+        The honest failure shape.
 
-        Returns:
-            Dict with:
-            - keep: bool (True if post should be displayed)
-            - enhanced_summary: str (200-word max, cleaned summary)
-            - severity: str (low/medium/high/critical)
-            - fake_news_score: float (0.0-1.0, higher = more likely fake)
-            - region: str (sri_lanka/world)
-            - confidence_boost: float (0.0-0.3, based on corroboration)
+        The old fallback returned severity="medium" and fake_news_score=0.3 --
+        values no model produced. A throttled run therefore filled the dashboard
+        with invented scores that were indistinguishable from real ones, and
+        only a logger.warning recorded it.
+
+        severity and fake_news_score are None here, which the caller reads as
+        "unknown": it falls back to the agent's own keyword-derived severity and
+        applies no fake-news penalty. llm_filtered=False travels with the event
+        so downstream consumers can tell verified from unverified.
         """
-        if not summary or len(summary.strip()) < 20:
-            return {"keep": False, "reason": "too_short"}
+        words = summary.split()
+        return {
+            "keep": True,
+            "enhanced_summary": " ".join(words[:200]) if len(words) > 200 else summary,
+            "severity": None,
+            "fake_news_score": None,
+            "region": self._guess_region(summary),
+            "confidence_boost": 0.0,
+            "original_summary": summary,
+            "llm_filtered": False,
+        }
 
-        # Limit input to prevent token overflow
-        summary_input = summary[:1500]
+    def _parse_batch_response(self, content: str, count: int) -> Dict[int, Dict]:
+        """
+        Parse one batch reply into {index: verdict}.
 
-        filter_prompt = f"""Analyze this news post for quality and classification:
+        Indices missing from the reply are simply absent, so the caller marks
+        them unfiltered rather than assuming a verdict.
+        """
+        content = content.strip()
+        if content.startswith("```"):
+            content = re.sub(r"^```\w*\n?", "", content)
+            content = re.sub(r"\n?```$", "", content)
 
-POST: {summary_input}
+        parsed = json.loads(content)
+        if isinstance(parsed, dict):
+            # Tolerate {"results": [...]} as well as a bare array.
+            parsed = parsed.get("results") or parsed.get("posts") or [parsed]
+        if not isinstance(parsed, list):
+            raise ValueError(f"expected a JSON array, got {type(parsed).__name__}")
+
+        verdicts: Dict[int, Dict] = {}
+        for position, entry in enumerate(parsed):
+            if not isinstance(entry, dict):
+                continue
+            # Prefer the model's own id; fall back to positional order.
+            try:
+                idx = int(entry.get("id", position))
+            except (TypeError, ValueError):
+                idx = position
+            if 0 <= idx < count:
+                verdicts[idx] = entry
+        return verdicts
+
+    def _llm_filter_batch(
+        self, summaries: List[str], domain: str
+    ) -> List[Dict[str, Any]]:
+        """Filter and enhance up to LLM_FILTER_BATCH_SIZE posts in one call."""
+        numbered = "\n\n".join(
+            f"[{i}] {s[: self.LLM_FILTER_INPUT_CHARS]}"
+            for i, s in enumerate(summaries)
+        )
+
+        filter_prompt = f"""Analyze these {len(summaries)} news posts for quality and classification.
+
 DOMAIN: {domain}
 
-Respond with JSON only (no markdown, no explanation):
-{{
+POSTS:
+{numbered}
+
+Respond with a JSON array only (no markdown, no explanation), one object per
+post, using the post's bracketed number as "id":
+[
+  {{
+    "id": 0,
     "keep": true/false,
     "fake_news_probability": 0.0-1.0,
     "severity": "low/medium/high/critical",
     "region": "sri_lanka/world",
     "enhanced_summary": "Cleaned, concise summary (max 200 words)",
     "is_meaningful": true/false
-}}
+  }}
+]
 
 Rules:
 1. keep=false if: spam, ads, meaningless text, or fake_news_probability > 0.7
@@ -96,75 +170,108 @@ Rules:
 3. region: "sri_lanka" if about Sri Lanka, otherwise "world"
 4. enhanced_summary: Clean, professional, max 200 words. Keep key facts.
 5. is_meaningful: false if no actionable intelligence or just social chatter
+6. Return exactly {len(summaries)} objects, ids 0 to {len(summaries) - 1}.
 
-JSON only:"""
+JSON array only:"""
 
         try:
             response = self.llm.invoke(filter_prompt)
             content = (
                 response.content if hasattr(response, "content") else str(response)
             )
+            verdicts = self._parse_batch_response(content, len(summaries))
+        except Exception as exc:
+            logger.warning(
+                "[LLM_FILTER] %s batch of %d failed (%s); "
+                "posts pass through unfiltered and are marked as such",
+                domain,
+                len(summaries),
+                exc,
+            )
+            return [self._unfiltered_result(s) for s in summaries]
 
-            # Parse JSON response
-            import json
-            import re
+        missing = len(summaries) - len(verdicts)
+        if missing:
+            logger.warning(
+                "[LLM_FILTER] %s batch returned %d/%d verdicts; the rest are "
+                "marked unfiltered",
+                domain,
+                len(verdicts),
+                len(summaries),
+            )
 
-            # Clean up response - extract JSON
-            content = content.strip()
-            if content.startswith("```"):
-                content = re.sub(r"^```\w*\n?", "", content)
-                content = re.sub(r"\n?```$", "", content)
+        results = []
+        for i, summary in enumerate(summaries):
+            verdict = verdicts.get(i)
+            if verdict is None:
+                results.append(self._unfiltered_result(summary))
+                continue
 
-            result = json.loads(content)
+            try:
+                fake_score = float(verdict.get("fake_news_probability", 0.5))
+            except (TypeError, ValueError):
+                fake_score = 0.5
 
-            # Validate required fields
-            keep = result.get("keep", False) and result.get("is_meaningful", False)
-            fake_score = float(result.get("fake_news_probability", 0.5))
-
-            # Reject high fake news probability
+            keep = bool(verdict.get("keep", False)) and bool(
+                verdict.get("is_meaningful", False)
+            )
             if fake_score > 0.7:
                 keep = False
 
-            # Calculate corroboration boost
-            confidence_boost = self._calculate_corroboration_boost(summary)
-
-            # Limit enhanced summary to 200 words
-            enhanced = result.get("enhanced_summary", summary)
-            words = enhanced.split()
+            enhanced = verdict.get("enhanced_summary") or summary
+            words = str(enhanced).split()
             if len(words) > 200:
                 enhanced = " ".join(words[:200])
 
-            return {
-                "keep": keep,
-                "enhanced_summary": enhanced,
-                "severity": result.get("severity", "medium"),
-                "fake_news_score": fake_score,
-                "region": result.get("region", "sri_lanka"),
-                "confidence_boost": confidence_boost,
-                "original_summary": summary,
-            }
+            results.append(
+                {
+                    "keep": keep,
+                    "enhanced_summary": enhanced,
+                    "severity": verdict.get("severity"),
+                    "fake_news_score": fake_score,
+                    "region": verdict.get("region", "sri_lanka"),
+                    "confidence_boost": self._calculate_corroboration_boost(summary),
+                    "original_summary": summary,
+                    "llm_filtered": True,
+                }
+            )
+        return results
 
-        except Exception as e:
-            logger.warning(f"[LLM_FILTER] Error processing post: {e}")
-            # Fallback: keep post but with default values
-            words = summary.split()
-            truncated = " ".join(words[:200]) if len(words) > 200 else summary
-            return {
-                "keep": True,
-                "enhanced_summary": truncated,
-                "severity": "medium",
-                "fake_news_score": 0.3,
-                "region": (
-                    "sri_lanka"
-                    if any(
-                        kw in summary.lower()
-                        for kw in ["sri lanka", "colombo", "kandy", "galle"]
-                    )
-                    else "world"
-                ),
-                "confidence_boost": 0.0,
-                "original_summary": summary,
-            }
+    def _llm_filter_posts(
+        self, posts: List[Dict[str, Any]]
+    ) -> List[Optional[Dict[str, Any]]]:
+        """
+        Filter every post, batching one LLM call per domain chunk.
+
+        Returns a list aligned 1:1 with `posts`. None means the post was
+        rejected before reaching the model (too short to judge).
+        """
+        results: List[Optional[Dict[str, Any]]] = [None] * len(posts)
+
+        by_domain: Dict[str, List[int]] = {}
+        for i, post in enumerate(posts):
+            summary = str(post.get("summary", ""))
+            if not summary or len(summary.strip()) < 20:
+                results[i] = {"keep": False, "reason": "too_short"}
+                continue
+            by_domain.setdefault(str(post.get("domain", "unknown")), []).append(i)
+
+        calls = 0
+        for domain, indices in by_domain.items():
+            for start in range(0, len(indices), self.LLM_FILTER_BATCH_SIZE):
+                chunk = indices[start : start + self.LLM_FILTER_BATCH_SIZE]
+                summaries = [str(posts[i].get("summary", "")) for i in chunk]
+                calls += 1
+                for i, result in zip(chunk, self._llm_filter_batch(summaries, domain)):
+                    results[i] = result
+
+        logger.info(
+            "[LLM_FILTER] %d posts across %d domains in %d LLM call(s)",
+            sum(len(v) for v in by_domain.values()),
+            len(by_domain),
+            calls,
+        )
+        return results
 
     def _calculate_corroboration_boost(self, summary: str) -> float:
         """
@@ -302,8 +409,7 @@ JSON only:"""
             f"{dedup_stats['semantic_matches']} semantic dups"
         )
 
-        # Step 4: Rank by risk_score + severity boost + Opportunity Logic
-        severity_boost_map = {"low": 0.0, "medium": 0.05, "high": 0.15, "critical": 0.3}
+        # Step 4: Rank by severity + Opportunity Logic
 
         # Severity is the only signal every agent actually emits, so it carries
         # the base score rather than acting as a bonus on top of a risk_score
@@ -357,7 +463,11 @@ JSON only:"""
             f"[FeedAggregatorAgent] Processing {len(ranked)} posts through LLM filter..."
         )
 
-        for ins in ranked:
+        # One call per domain chunk rather than one per post.
+        llm_results = self._llm_filter_posts(ranked)
+        unverified_count = 0
+
+        for ins, llm_result in zip(ranked, llm_results):
             event_id = ins.get("source_event_id") or str(uuid.uuid4())
             original_summary = str(ins.get("summary", ""))
             domain = ins.get("domain", "unknown")
@@ -366,8 +476,6 @@ JSON only:"""
             base_confidence = round(calculate_score(ins), 3)
             timestamp = datetime.utcnow().isoformat()
 
-            # Run through LLM filter
-            llm_result = self._llm_filter_post(original_summary, domain)
             llm_processed += 1
 
             # Skip if LLM says don't keep
@@ -376,16 +484,27 @@ JSON only:"""
                 logger.debug(f"[LLM_FILTER] Filtered out: {original_summary[:60]}...")
                 continue
 
-            # Use LLM-enhanced data
-            summary = llm_result.get("enhanced_summary", original_summary)
-            severity = llm_result.get("severity", original_severity)
+            # Use LLM-enhanced data where the model actually produced it.
+            # severity and fake_news_score are None when the call failed, so the
+            # agent's own keyword-derived severity stands and no fake-news
+            # penalty is applied -- rather than the old fallback, which invented
+            # severity="medium" and fake_news_score=0.3 and let them reach the
+            # dashboard indistinguishable from real verdicts.
+            llm_filtered = bool(llm_result.get("llm_filtered", False))
+            if not llm_filtered:
+                unverified_count += 1
+
+            summary = llm_result.get("enhanced_summary") or original_summary
+            severity = llm_result.get("severity") or original_severity
             region = llm_result.get("region", "sri_lanka")
-            fake_score = llm_result.get("fake_news_score", 0.0)
+            fake_score = llm_result.get("fake_news_score")
             confidence_boost = llm_result.get("confidence_boost", 0.0)
+
+            fake_penalty = (fake_score * 0.2) if fake_score is not None else 0.0
 
             # Final confidence = base + corroboration boost - fake penalty
             final_confidence = min(
-                1.0, max(0.0, base_confidence + confidence_boost - (fake_score * 0.2))
+                1.0, max(0.0, base_confidence + confidence_boost - fake_penalty)
             )
 
             # FRONTEND-COMPATIBLE FORMAT
@@ -399,7 +518,8 @@ JSON only:"""
                 "severity": severity,
                 "impact_type": impact_type,
                 "region": region,  # NEW: for sidebar filtering
-                "fake_news_score": fake_score,  # NEW: for transparency
+                "fake_news_score": fake_score,  # None when unverified
+                "llm_filtered": llm_filtered,  # False = model never judged this
                 "timestamp": timestamp,
             }
             converted.append(classified)
@@ -425,6 +545,16 @@ JSON only:"""
         logger.info(
             f"[FeedAggregatorAgent] LLM Filter: {llm_processed} processed, {filtered_count} filtered out"
         )
+        if unverified_count:
+            # Loud on purpose. This is the state the old fallback hid: events
+            # reaching the dashboard that no model ever actually judged.
+            logger.warning(
+                "[FeedAggregatorAgent] %d of %d events were NOT verified by the "
+                "LLM (call failed or verdict missing) and carry the agent's own "
+                "severity with llm_filtered=False",
+                unverified_count,
+                len(converted),
+            )
         logger.info(
             f"[FeedAggregatorAgent] ===== PRODUCED {len(converted)} QUALITY EVENTS ====="
         )
@@ -594,9 +724,8 @@ JSON only:"""
         ), 3)
 
         # Political and regulatory activity drives compliance risk.
-        snapshot["compliance_volatility"] = round(safe_avg(
-            domain_risks.get("political", [])
-        ), 3)
+        political_scores = domain_risks.get("political", [])
+        snapshot["compliance_volatility"] = round(safe_avg(political_scores), 3)
 
         # Economic signals, plus competitor/market intelligence.
         snapshot["market_instability"] = round(safe_avg(

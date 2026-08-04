@@ -66,6 +66,9 @@ pytest-asyncio
 pytest-cov
 black
 flake8
+# Driven directly by tests/unit/test_no_undefined_names.py, which fails the
+# build on a NameError that no test happens to execute.
+pyflakes
 
 # ---------------------------------------------------------
 # LangSmith & Agent Evaluation (Industry-Level Testing)

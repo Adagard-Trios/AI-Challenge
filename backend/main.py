@@ -20,6 +20,7 @@ import sys
 import os
 import logging
 import threading
+from collections import OrderedDict
 import time
 import uuid  # CRITICAL: Was missing, needed for event_id generation
 
@@ -1569,7 +1570,9 @@ def get_model_status(_user=Depends(require_user)):
             for f in output_dir.glob("*.joblib"):
                 models_found.append(f.name)
 
-        loaded = _anomaly_model is not None
+        # The global is _anomaly_models, a {language: model} dict. The singular
+        # name never existed, so this raised NameError on every call.
+        loaded = bool(_anomaly_models)
 
         return {
             "model_loaded": loaded,

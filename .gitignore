@@ -89,3 +89,6 @@ chroma_db/
 # - requirements.txt, setup.py (dependencies)
 # - data_schema/ (validation configs)
 # - README.md (documentation)
+
+# Runtime logs from local runs (models/*/logs/ are historical and intentionally kept)
+backend/logs/

@@ -2,26 +2,16 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies including Playwright requirements
-RUN apt-get update && apt-get install -y \
+# No browser, and none of Chromium's ~20 shared libraries.
+#
+# Social collection runs in the user's connector on their own machine, so the
+# server never drives a browser. That removes roughly 300 MB from the image and,
+# more importantly, removes Chromium's 100-300 MB resident footprint from a
+# 512 MB instance -- which is what the agent loop used to tip over.
+#
+# curl is kept solely for the container health check.
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
-    wget \
-    gnupg \
-    libnss3 \
-    libnspr4 \
-    libatk1.0-0 \
-    libatk-bridge2.0-0 \
-    libcups2 \
-    libdrm2 \
-    libxkbcommon0 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxfixes3 \
-    libxrandr2 \
-    libgbm1 \
-    libasound2 \
-    libpango-1.0-0 \
-    libcairo2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install the SLIM runtime set, not requirements.txt.
@@ -34,9 +24,9 @@ RUN apt-get update && apt-get install -y \
 COPY backend/requirements-service.txt .
 RUN pip install --no-cache-dir -r requirements-service.txt
 
-# Install Playwright and browsers
-RUN pip install playwright && \
-    playwright install chromium --with-deps
+# NOTE: `playwright install chromium` was here. Removed with the browser itself;
+# see the apt block above. If a future server-side scraper needs a browser, put
+# it in its own service rather than back into this one.
 
 # Copy application code
 COPY . .

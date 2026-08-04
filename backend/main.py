@@ -9,7 +9,7 @@ Production-Ready Real-Time Intelligence Platform Backend
 
 Updated: Resilient WebSocket handling for long scraping operations (60s+ cycles)
 """
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Dict, Any, List, Set, Optional
@@ -1568,21 +1568,77 @@ def get_model_status():
 # ============================================
 
 # Lazy-loaded RAG instance
-_rag_instance = None
+# RAG instances, keyed by user.
+#
+# This was a single process-global. RogerRAG carries chat_history on the
+# instance (src/rag.py), so one shared instance means every caller appends to
+# and reads from the SAME conversation. Single-tenant that was merely odd;
+# multi-user it is a cross-user leak -- user B's next question arrives with
+# user A's conversation as context, and /api/rag/clear wipes it for everyone.
+#
+# An LRU cap matters more than it looks: each instance holds an unbounded
+# history, and this runs in a 512 MB container.
+_rag_instances: "OrderedDict[str, Any]" = None  # type: ignore[assignment]
+_rag_lock = threading.Lock()
+_RAG_MAX_INSTANCES = 8
+_RAG_MAX_HISTORY = 20        # turns retained per user
 
 
-def _get_rag():
-    """Get or create RAG instance"""
-    global _rag_instance
-    if _rag_instance is None:
+def _get_rag(user_key: str = "anonymous"):
+    """Get or create this user's RAG instance."""
+    global _rag_instances
+    from collections import OrderedDict
+
+    with _rag_lock:
+        if _rag_instances is None:
+            _rag_instances = OrderedDict()
+
+        existing = _rag_instances.get(user_key)
+        if existing is not None:
+            _rag_instances.move_to_end(user_key)
+            # Keep history bounded; RogerRAG appends without a limit.
+            history = getattr(existing, "chat_history", None)
+            if isinstance(history, list) and len(history) > _RAG_MAX_HISTORY:
+                del history[:-_RAG_MAX_HISTORY]
+            return existing
+
         try:
             from src.rag import RogerRAG
-            _rag_instance = RogerRAG()
-            logger.info("[RAG API] ✓ RAG instance initialized")
+            instance = RogerRAG()
         except Exception as e:
             logger.error(f"[RAG API] Failed to initialize RAG: {e}")
             return None
-    return _rag_instance
+
+        _rag_instances[user_key] = instance
+        while len(_rag_instances) > _RAG_MAX_INSTANCES:
+            evicted, _ = _rag_instances.popitem(last=False)
+            logger.info("[RAG API] evicted RAG instance for %s (LRU)", evicted)
+
+        logger.info("[RAG API] ✓ RAG instance initialized for %s", user_key)
+        return instance
+
+
+def _rag_key(user) -> str:
+    """Conversation scope. Falls back to a shared scope when auth is off."""
+    return getattr(user, "id", None) or "anonymous"
+
+
+def _optional_user(*args, **kwargs):
+    """
+    Resolve the caller when auth is available, else None.
+
+    Indirection so the RAG endpoints work whether or not the auth package
+    imported -- bootstrap deliberately degrades rather than taking down a
+    service that ran fine without it.
+    """
+    return None
+
+
+if _AUTH_READY:
+    try:
+        from auth.dependencies import optional_user as _optional_user  # noqa: F811
+    except Exception:  # pragma: no cover
+        logger.warning("[RAG API] auth dependency unavailable; chats share one scope")
 
 
 
@@ -1602,7 +1658,7 @@ class ChatResponse(BaseModel):
 
 
 @app.post("/api/rag/chat", response_model=ChatResponse)
-def rag_chat(request: ChatRequest):
+def rag_chat(request: ChatRequest, _user=Depends(_optional_user)):
     """
     Chat with the RAG system.
     
@@ -1615,7 +1671,7 @@ def rag_chat(request: ChatRequest):
         AI response with sources
     """
     try:
-        rag = _get_rag()
+        rag = _get_rag(_rag_key(_user))
         if not rag:
             return ChatResponse(
                 answer="RAG system not available. Please check server logs.",
@@ -1661,10 +1717,10 @@ def rag_stats():
 
 
 @app.post("/api/rag/clear")
-def rag_clear_history():
+def rag_clear_history(_user=Depends(_optional_user)):
     """Clear RAG chat history"""
     try:
-        rag = _get_rag()
+        rag = _get_rag(_rag_key(_user))
         if rag:
             rag.clear_history()
             return {"message": "Chat history cleared", "success": True}

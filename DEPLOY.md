@@ -61,6 +61,72 @@ passes long before the first (lazy) model load.
 
 ---
 
+## 0.5 Social accounts: the connector
+
+Social collection does **not** run on this server. It runs in `connector/`, on the
+user's own machine.
+
+```
+USER'S MACHINE                        RENDER
+┌────────────────────────────┐       ┌──────────────┐
+│ python -m connector run     │       │ backend      │
+│  · sessions encrypted here  │──────▶│  /api/ingest │
+│  · Playwright here          │ posts │  no browser  │
+│  · user's own IP            │       │  no cookies  │
+└────────────────────────────┘       └──────────────┘
+```
+
+Two reasons, and they reinforce each other:
+
+- **Credentials never transit.** The server has nowhere to put a cookie — see
+  `backend/auth/models.py`, and the test that fails if a cookie-shaped column ever
+  appears. A database compromise yields no account access.
+- **Requests come from the user's own IP**, carrying a session created on that
+  same IP. Presenting a residential session from a datacenter is one of the
+  strongest bot signals there is, and no browser-flag tuning addresses it.
+
+Setup:
+
+```bash
+# in the dashboard: Settings → Accounts → Get pairing code
+python -m connector pair 123-456-789 --server https://roger-backend.onrender.com
+python -m connector connect linkedin      # opens a real browser; you log in
+python -m connector run "Sri Lanka economy"
+```
+
+**Connecting requires a desktop, once per platform.** Every platform stores its
+login in an httpOnly cookie (`auth_token`, `xs`, `sessionid`, `li_at` — verified
+against real captures), which no web page can read. There is no bookmarklet or
+mobile path that can capture a session. Everything else works on a phone.
+
+`connector connect --paste <file>` accepts a DevTools export, so the pipeline is
+testable before signed installers exist.
+
+**Terms of service.** Automated collection violates the terms of X, LinkedIn,
+Facebook and Instagram regardless of how the session was obtained or where it
+runs. Accounts can be restricted. Local collection lowers the risk; it does not
+remove it. The UI states this before anyone connects.
+
+---
+
+## 0.6 Auth
+
+`AUTH_ENFORCED=0` by default: routes resolve a user when a token is present and
+work anonymously otherwise, so the frontend can migrate before cutover.
+
+| Variable | Required when enforced | Notes |
+|---|---|---|
+| `DATABASE_URL` | **yes** | Postgres. **Neon free** — Render's own free Postgres is *deleted* after 30 days. Refuses to start without it, rather than falling back to a SQLite file that Render wipes on every restart. |
+| `AUTH_SECRET` | **yes** | `python -c "import secrets; print(secrets.token_urlsafe(48))"` |
+| `AUTH_ENFORCED` | — | `1` to require auth |
+| `BOOTSTRAP_ADMIN_EMAIL` / `_PASSWORD` | — | Seeds the first admin, once, only when no users exist |
+
+Cutover: deploy → create the admin → log in → confirm → set `AUTH_ENFORCED=1`.
+One env var, instantly revertible. `/api/status` stays public (`render.yaml` uses
+it as the health check).
+
+---
+
 ## 1. Backend → Render
 
 Backend = FastAPI + LangGraph (`backend/`), deployed as a **Docker** service on Render.
@@ -80,8 +146,15 @@ Verify the wiring with **`GET /api/status`** and **`GET /api/models/health`** �
 
 ### 1.1 Why Docker and not a Python service
 
-The app needs Playwright + Chromium and its system libraries for the scrapers. Render's native
-Python runtime can't install those. `backend/Dockerfile` already handles it.
+Reproducible builds and full control of the base image. Note the original reason —
+Playwright + Chromium — no longer applies: the browser was removed once collection
+moved to the connector, taking ~400 MB out of the image and Chromium's
+100-300 MB resident footprint off a 512 MB instance.
+
+**Known cost of that removal:** two session-*free* scrapers, `rivernet`
+(`utils.py:513`) and the weather nowcast (`utils.py:2093`), are browser-driven and
+so no longer work server-side. They need no user account, so they belong in a small
+browser-capable service or an HTTP rewrite — not back in this image.
 
 ### 1.2 Two requirement sets — this is what fixes the OOM
 

@@ -34,10 +34,10 @@ Apply each blueprint separately: **New → Blueprint →** this repo → point a
 
 | Service | Endpoints | Plan | Notes |
 |---|---|---|---|
-| `slac2026-weather` | `/health` `/model/status` `/predict` `/predict/{district}` | standard | TensorFlow |
-| `slac2026-currency` | `/health` `/model/status` `/predict` | standard | TensorFlow |
-| `slac2026-stock` | `/health` `/model/status` `/predict` `/predict/{symbol}` | **starter** | no TensorFlow — unpickles via scikit-learn |
-| `slac2026-anomaly` | `/health` `/model/status` `POST /detect` | standard | PyTorch + BERT |
+| `slac2026-weather` | `/health` `/model/status` `/predict` `/predict/{district}` | free | TensorFlow — **tight on 512 MB** |
+| `slac2026-currency` | `/health` `/model/status` `/predict` | free | TensorFlow — **tight on 512 MB** |
+| `slac2026-stock` | `/health` `/model/status` `/predict` `/predict/{symbol}` | free | no TensorFlow — the one that fits comfortably |
+| `slac2026-anomaly` | `/health` `/model/status` `POST /detect` | free | fine on the default heuristic tier; ML tier will OOM |
 
 `/health` never touches TensorFlow or Torch, so it answers instantly and Render's health check
 passes long before the first (lazy) model load.
@@ -75,10 +75,6 @@ MODEL_SERVICE_TIMEOUT = 60      # optional, seconds
 Verify the wiring with **`GET /api/status`** and **`GET /api/models/health`** — the latter reports
 `mode: in-process | remote` and reachability per model.
 
----
-
-## 1. Backend → Render
-
 ### 1.1 Why Docker and not a Python service
 
 The app needs Playwright + Chromium and its system libraries for the scrapers. Render's native
@@ -95,12 +91,14 @@ agents into one process. Measured install size is **3.12 GB** (TensorFlow 1.3 GB
 | **Standard** | 2 GB | Minimum viable; expect tight headroom |
 | **Pro** | 4 GB | Recommended if the service gets OOM-killed under load |
 
-`render.yaml` ships with `plan: standard`. Bump to `pro` there if you see OOM restarts.
+**`render.yaml` ships with `plan: free` by request.** By the table above that is expected to OOM
+during import — the backend is the one service that genuinely needs a paid plan. Change `plan:` to
+`standard` in `render.yaml` when you want it to actually stay up.
 
 ### 1.3 Deploy
 
 **Blueprint (recommended)** — Dashboard → **New** → **Blueprint** → select this repo. It reads
-`render.yaml` and provisions the service, disk and env-var slots.
+`render.yaml` and provisions the service and env-var slots.
 
 **Manual** — New → Web Service → Docker, then set:
 
@@ -109,7 +107,7 @@ agents into one process. Measured install size is **3.12 GB** (TensorFlow 1.3 GB
 | Dockerfile Path | `./backend/Dockerfile` |
 | Docker Build Context | `.` (**repo root — not `backend/`**) |
 | Health Check Path | `/api/status` |
-| Disk mount path | `/app/backend/data` (10 GB) |
+| Disk | none — free tier does not support persistent disks |
 
 The build context **must** be the repo root: the image needs `models/`, which is a sibling of
 `backend/`, because `main.py` resolves it as `Path(__file__).parent.parent / "models"`.
@@ -140,13 +138,23 @@ bind `$PORT`. The gate makes it a no-op. Trained artifacts are already committed
 
 Retrain locally or via the Airflow DAGs in `airflow/`, then commit the updated artifacts.
 
-### 1.6 Persistent disk
+### 1.6 Storage is ephemeral on the free plan
 
 `backend/data/` holds the SQLite dedup cache and the ChromaDB vector store. **Render's filesystem is
-ephemeral** — without the disk, every deploy and restart wipes all collected intelligence and the
-dedup layer starts from zero.
+ephemeral, and the free plan cannot mount a persistent disk** — so every deploy, restart and
+spin-down wipes all collected intelligence and the dedup layer restarts from zero. The agent loop
+re-collects, but nothing accumulates across restarts.
 
-Trade-off: attaching a disk pins the service to **one instance** and **disables zero-downtime
+To persist it, move to a paid plan and add a disk back to `render.yaml`:
+
+```yaml
+    disk:
+      name: roger-data
+      mountPath: /app/backend/data
+      sizeGB: 10
+```
+
+Trade-off once you do: a disk pins the service to **one instance** and **disables zero-downtime
 deploys**. Acceptable here — the app runs a singleton 60s agent loop and isn't horizontally
 scalable anyway.
 
@@ -226,12 +234,23 @@ extra configuration needed.
    call them directly from the browser); let them redeploy.
 7. Open the Vercel URL — the dashboard should populate within ~2 minutes of the backend's agent loop.
 
-### Cost note
+### Plan note
 
-Five Render services is real money. Only the backend is mandatory; each model service is opt-in and
-independently removable. The blueprints ship with `standard` (2 GB) for the three heavy models and
-`starter` (512 MB) for stock. Dropping all four model services and running everything in-process —
-the default — costs one service.
+**All five blueprints ship with `plan: free`.** That costs nothing, and it comes with three
+constraints worth knowing before you debug a "broken" deploy:
+
+| Constraint | Effect |
+|---|---|
+| 512 MB RAM | The backend (3.12 GB of deps) is expected to OOM during import. Weather and currency are borderline once TensorFlow loads. Stock and anomaly (heuristic tier) are fine. |
+| No persistent disks | Free plans cannot mount one. SQLite/ChromaDB state and generated predictions are wiped on every restart. |
+| Spin-down after ~15 min idle | The next request pays a full cold start — minutes for the TensorFlow/PyTorch services. |
+
+Realistically: **stock and anomaly run well on free**; weather and currency will be flaky; the
+backend needs `standard` (2 GB) to stay up. Raise `plan:` per service as needed — they are
+independent, so you can pay for only the backend and leave the four model services free.
+
+Remember the model services are opt-in: leaving all four `*_SERVICE_URL` vars unset runs every
+model in-process and costs exactly one service.
 
 ---
 
@@ -254,9 +273,10 @@ the default — costs one service.
 |---|---|---|
 | Build pulls `nvidia-cuda-*` wheels, image ~6 GB | CPU pin missing | `backend/requirements.txt` must keep `--extra-index-url https://download.pytorch.org/whl/cpu` and `torch==2.9.1+cpu` |
 | Build runs out of disk / times out | Build context too large | Ensure `.dockerignore` exists at the **repo root** (excludes `node_modules`, `.venv`, `.next`) |
-| Service restarts in a loop, "Out of memory" | Plan too small, or auto-train ran | Set `DISABLE_AUTO_TRAIN=1`; upgrade to `pro` |
+| Service unreachable after a quiet period | Free tier spins down after ~15 min idle | Expected; first request pays a cold start. Paid plans stay warm |
+| Service restarts in a loop, "Out of memory" | Free tier is 512 MB, or auto-train ran | Set `DISABLE_AUTO_TRAIN=1`; raise `plan:` to `standard`/`pro` |
 | Health check never passes | Cold start slower than the window | Raise the grace period; confirm `$PORT` is not overridden |
-| All feeds vanish after a deploy | No persistent disk | Attach the disk at `/app/backend/data` |
+| All feeds vanish after a deploy | Free tier has no persistent disk — expected | Move to a paid plan and attach a disk at `/app/backend/data` |
 | Anomaly + Stock panels empty, rest fine | Only one env-var name set | Set `NEXT_PUBLIC_API_BASE` too (§2.2) |
 | Browser console: CORS error | Origin not allowlisted | Set `CORS_ALLOW_ORIGINS` to the exact Vercel origin, no trailing slash |
 | Vercel build: "Module not found: clsx" | `npm install` re-resolved deps | Restore `npm ci` |

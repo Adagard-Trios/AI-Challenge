@@ -16,14 +16,17 @@ services:
     dockerContext: .
 
     region: singapore
-    plan: standard          # 2 GB — TensorFlow import needs the headroom
+
+    # ⚠ FREE TIER = 512 MB RAM. TensorFlow import (~400-600 MB RSS) needs more
+    # headroom than this; expect OOM restarts under load. 'standard' (2 GB) is the
+    # safe choice. Note this service already answers on its fallback tier because
+    # artifacts/models/training_config.json is not committed, so /predict may not
+    # reach TensorFlow at all — see DEPLOY.md.
+    plan: free
 
     healthCheckPath: /health
 
-    disk:
-      name: currency-output
-      mountPath: /app/output
-      sizeGB: 1
+    # NOTE: no 'disk:' — not available on the free plan. /app/output is ephemeral.
 
     envVars:
       - key: CORS_ALLOW_ORIGINS

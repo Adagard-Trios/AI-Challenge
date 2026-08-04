@@ -17,17 +17,18 @@ services:
     dockerContext: .
 
     region: singapore
-    # torch + sentence-transformers + a BERT model resident in memory.
-    # Bump to 'pro' (4 GB) if you see OOM restarts under load.
-    plan: standard          # 2 GB
+
+    # ⚠ FREE TIER = 512 MB RAM. PyTorch plus a resident BERT model does not fit —
+    # but it only loads them when ANOMALY_ML_ENABLED=1, which is "0" below. On the
+    # default keyword/severity tier this service is light and free is fine.
+    # Turning the ML tier on at this plan will OOM. Use 'standard'/'pro' for that.
+    plan: free
 
     healthCheckPath: /health
 
-    # Persist the downloaded embedding/language models so restarts don't refetch.
-    disk:
-      name: anomaly-cache
-      mountPath: /app/models_cache
-      sizeGB: 5
+    # NOTE: no 'disk:' — not available on the free plan. This costs nothing here:
+    # the Dockerfile bakes models_cache/ into the image at build time, so the
+    # weights live in an image layer rather than on a mounted volume.
 
     envVars:
       - key: CORS_ALLOW_ORIGINS

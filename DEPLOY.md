@@ -322,9 +322,18 @@ model in-process and costs exactly one service.
 ## 4. Security
 
 - **`backend/src/utils/.sessions/*.json` contains live session cookies** for real Facebook,
-  Instagram, LinkedIn, Reddit and X accounts. They are committed to the repo *and* baked into the
-  Docker image (deliberately — the scrapers need them for authenticated access). Anyone with repo or
-  image access can hijack those sessions. Rotate them if this repo is or becomes public.
+  Instagram, LinkedIn, Reddit and X accounts, and is a **local-only artifact**.
+  - *Not* in git — `.gitignore:27` is `**/.sessions/`; verified 0 files tracked and 0 in history.
+  - *Not* in a Render image — Render builds from the git clone, so the directory is simply absent.
+    This is also why every session-dependent scraper currently returns
+    `{"error": "No <Platform> session found"}` in production.
+  - **Was** copied into any image built locally, because the build context is the working tree and
+    `.dockerignore` did not exclude it. Fixed — `.dockerignore` now excludes `**/.sessions` and
+    `**/*storage_state.json`. **Rotate those five accounts**: an image layer keeps the file even
+    after a later `RUN rm`.
+
+  Sessions are moving to the user's own machine (see the connector). The server will not store
+  social credentials at all.
 - `CORS_ALLOW_ORIGINS` defaults to `*`. When it is `*`, credentials are automatically disabled
   (the CORS spec forbids that combination and browsers reject it). Set a real origin in production.
 - `GROQ_API_KEY` must only ever come from the Render dashboard — never commit it. `.env` is

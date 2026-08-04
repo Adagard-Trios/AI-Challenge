@@ -40,6 +40,14 @@ class IntelligenceAgentState(TypedDict, total=False):
     worker_results: Annotated[List[Dict[str, Any]], operator.add]
     latest_worker_results: Annotated[List[Dict[str, Any]], operator.add]
 
+    # ===== LLM ANALYSIS =====
+    # Written at node :543, read at node :557. Undeclared until now, so
+    # LangGraph discarded it and every LLM-curated insight was lost. Combined
+    # with the envelope-vs-post bug in the fallback (node :627), this agent's
+    # only surviving output was a single executive-summary insight per run.
+    llm_summary: str
+    llm_insights: List[Dict[str, Any]]
+
     # ===== CHANGE DETECTION =====
     last_alerts_hash: Optional[int]
     change_detected: bool

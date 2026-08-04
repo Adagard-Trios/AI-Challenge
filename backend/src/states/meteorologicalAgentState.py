@@ -40,6 +40,14 @@ class MeteorologicalAgentState(TypedDict, total=False):
     worker_results: Annotated[List[Dict[str, Any]], operator.add]
     latest_worker_results: List[Dict[str, Any]]
 
+    # ===== RIVER / FLOOD =====
+    # Written by collect_official_sources (node :176), read by the bulletin
+    # builder (node :532). It was NOT declared here, and LangGraph discards any
+    # returned key the schema does not declare -- so all 15 reads got {} and
+    # every flood insight, plus the FLOOD MONITORING ALERT block, was
+    # unreachable while the scrape still ran and still cost a round trip.
+    river_data: Dict[str, Any]
+
     # ===== CHANGE DETECTION =====
     last_alerts_hash: Optional[int]
     change_detected: bool

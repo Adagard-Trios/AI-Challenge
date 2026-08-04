@@ -40,6 +40,20 @@ class SocialAgentState(TypedDict, total=False):
     worker_results: Annotated[List[Dict[str, Any]], operator.add]
     latest_worker_results: List[Dict[str, Any]]
 
+    # ===== LLM ANALYSIS =====
+    # Written by generate_llm_summary (node :690), read by the feed builder
+    # (node :699). Undeclared until now, so LangGraph dropped it and the log
+    # printed the contradiction two lines apart:
+    #     "LLM generated 5 unique insights"  -> "Added 0 LLM-generated insights"
+    # Every curated insight the LLM was paid to produce was discarded, and the
+    # raw-post fallback ran every single time.
+    llm_summary: str
+    llm_insights: List[Dict[str, Any]]
+
+    # Written by the user-targets module (node :438, :532). Same problem; lower
+    # impact only because the same data also reaches worker_results.
+    user_target_results: List[Dict[str, Any]]
+
     # ===== CHANGE DETECTION =====
     last_alerts_hash: Optional[int]
     change_detected: bool

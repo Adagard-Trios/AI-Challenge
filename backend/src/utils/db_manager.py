@@ -237,9 +237,19 @@ class Neo4jManager:
             return 0
 
     def close(self):
-        """Close Neo4j connection"""
+        """
+        Close the Neo4j connection.
+
+        Nulls self.driver afterwards. It previously did not, so every
+        `if manager.driver` guard still passed after close() and the next call
+        ran a session on a closed driver. The resulting exception was caught by
+        get_post_count's `except: return 0`, so all five agents printed
+        "Neo4j Total Posts: 0" on every run even against a healthy, fully
+        populated database -- and aggregator_stats reported 0 to its caller.
+        """
         if self.driver:
             self.driver.close()
+            self.driver = None
             logger.info("[NEO4J] Connection closed")
 
 

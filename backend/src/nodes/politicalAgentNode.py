@@ -14,6 +14,7 @@ from datetime import datetime
 from src.states.politicalAgentState import PoliticalAgentState
 from src.utils.tool_factory import create_tool_set
 from src.llms.groqllm import GroqLLM
+from pathlib import Path
 
 
 class PoliticalAgentNode:
@@ -676,7 +677,22 @@ Source: Multi-platform aggregation (Twitter, Facebook, LinkedIn, Instagram, Redd
         stored_csv = 0
 
         # Setup CSV dataset
-        dataset_dir = os.getenv("DATASET_PATH", "./datasets/political_feeds")
+        # Anchored under backend/data/, the one directory that is a
+        # mounted volume in docker-compose and a Render Disk in prod.
+        #
+        # This was os.getenv("DATASET_PATH", "./datasets/political_feeds") -- CWD-relative,
+        # gitignored, and outside every mounted volume, so in Docker the CSVs
+        # landed in the container's writable layer and were DESTROYED on every
+        # restart. os.makedirs and the "Created new CSV dataset" log both
+        # reported success the whole time.
+        #
+        # DATASET_PATH is still honoured, but it is a single global: pointing it
+        # anywhere collapses all five domains into one directory, so the domain
+        # subdirectory is appended to it rather than replaced by it.
+        from src.storage.config import DATA_DIR as _DATA_DIR
+
+        _dataset_root = os.getenv("DATASET_PATH") or str(Path(_DATA_DIR) / "datasets")
+        dataset_dir = os.path.join(_dataset_root, "political_feeds")
         os.makedirs(dataset_dir, exist_ok=True)
 
         csv_filename = f"political_feeds_{datetime.now().strftime('%Y%m')}.csv"
@@ -838,6 +854,14 @@ Source: Multi-platform aggregation (Twitter, Facebook, LinkedIn, Instagram, Redd
         except Exception as e:
             print(f"  ⚠️ CSV file error: {e}")
 
+        # Read the totals BEFORE closing. These lines used to run after
+        # close(), which meant get_post_count() hit a closed driver, threw, and
+        # was swallowed by its own `except: return 0` -- so every agent printed
+        # "Neo4j Total Posts: 0" on every run even against a healthy, fully
+        # populated database.
+        neo4j_total = neo4j_manager.get_post_count() if neo4j_manager.driver else 0
+        chroma_total = chroma_manager.get_document_count() if chroma_manager else 0
+
         # Close database connections
         neo4j_manager.close()
 
@@ -851,11 +875,8 @@ Source: Multi-platform aggregation (Twitter, Facebook, LinkedIn, Instagram, Redd
         print(f"  Stored in CSV: {stored_csv}")
         print(f"  Dataset Path: {csv_path}")
 
-        # Get database counts
-        neo4j_total = neo4j_manager.get_post_count() if neo4j_manager.driver else 0
-        chroma_total = (
-            chroma_manager.get_document_count() if chroma_manager.collection else 0
-        )
+        # Counts were read above, before close(). Re-reading here would hit a
+        # closed driver and silently report 0.
 
         print("\n  💾 DATABASE TOTALS")
         print(f"  Neo4j Total Posts: {neo4j_total}")

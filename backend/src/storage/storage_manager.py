@@ -110,16 +110,31 @@ class StorageManager:
         confidence_score: float,
         timestamp: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        dedup_key: Optional[str] = None,
     ):
         """
         Store event in all databases.
         Should only be called AFTER is_duplicate() returns False.
+
+        ``dedup_key`` is the text that ``is_duplicate()`` was called with. It
+        matters whenever the stored summary differs from the one that was
+        checked -- which is exactly what the feed aggregator does: it looks up
+        the raw agent summary, then an LLM rewrites it, then the *rewrite* was
+        being stored.
+
+        SQLite keys on md5(text[:120].lower()) (sqlite_cache.py:47), so storing
+        the rewrite while looking up the original meant the hashes could never
+        match and exact-match dedup never fired once. With the graph running
+        every 60 seconds, the same events were re-emitted to the feed forever,
+        each one logged "✓ UNIQUE EVENT".
+
+        Defaults to ``summary`` so existing callers keep their behaviour.
         """
         timestamp = timestamp or datetime.utcnow().isoformat()
 
         try:
-            # Store in SQLite cache
-            self.sqlite_cache.add_entry(summary, event_id)
+            # Key the exact-match tier on what was actually checked.
+            self.sqlite_cache.add_entry(dedup_key or summary, event_id)
 
             # Store in ChromaDB for semantic search
             chroma_metadata = {

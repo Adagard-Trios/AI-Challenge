@@ -601,8 +601,15 @@ Source: Multi-platform aggregation (Twitter, Facebook, LinkedIn, Instagram, Redd
         import os
 
         # Initialize database managers
-        neo4j_manager = Neo4jManager()
-        chroma_manager = ChromaDBManager()
+        # Domain MUST be passed. Both managers default to "political"
+        # (db_manager.py:56, :262), so constructing them bare made all five
+        # agents write :PoliticalPost with domain="political" -- destroying
+        # domain separation in the knowledge graph, making domain-filtered RAG
+        # return everything, and sharing the URL-uniqueness constraint so a
+        # post scraped by two agents became a cross-domain false duplicate and
+        # the second agent silently stored nothing.
+        neo4j_manager = Neo4jManager(domain="economical")
+        chroma_manager = ChromaDBManager(domain="economical")
 
         # Get all worker results from state
         all_worker_results = state.get("worker_results", [])

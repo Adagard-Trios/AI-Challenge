@@ -172,13 +172,19 @@ JSON only:"""
         More sources reporting similar news = higher confidence.
         """
         try:
-            # Check for similar news in ChromaDB
+            # Each corroborating source adds 0.1, capped at 0.3.
+            #
+            # This used to be `min(0.3, 0.1)` -- a constant 0.1 whenever ANY
+            # match existed. The comment described counting sources; the code
+            # never counted anything, so a story corroborated by six outlets
+            # scored exactly the same as one corroborated by a single tweet.
             similar = self.storage.chromadb.find_similar(summary, threshold=0.75)
-            if similar:
-                # Each corroborating source adds 0.1 confidence, max 0.3
-                return min(0.3, 0.1)
-            return 0.0
-        except Exception:
+            if not similar:
+                return 0.0
+            corroborations = len(similar) if isinstance(similar, (list, tuple)) else 1
+            return min(0.3, 0.1 * corroborations)
+        except Exception as exc:
+            logger.debug("[Corroboration] lookup failed: %s", exc)
             return 0.0
 
     # =========================================================================
@@ -299,19 +305,34 @@ JSON only:"""
         # Step 4: Rank by risk_score + severity boost + Opportunity Logic
         severity_boost_map = {"low": 0.0, "medium": 0.05, "high": 0.15, "critical": 0.3}
 
+        # Severity is the only signal every agent actually emits, so it carries
+        # the base score rather than acting as a bonus on top of a risk_score
+        # that is never set.
+        #
+        # The previous formula was `risk_score + boost + opp_boost`, and NO node
+        # anywhere sets risk_score -- so base was always 0.0 and the ceiling was
+        # 0.0 + 0.3 + 0.2 + 0.1 = 0.6, below the 0.7 threshold at :528. The
+        # "High Priority Events" tile was therefore mathematically pinned at 0,
+        # and avg_confidence sat near 0.1, making every event look low-confidence.
+        severity_base_map = {"low": 0.25, "medium": 0.45, "high": 0.7, "critical": 0.9}
+
         def calculate_score(item: Dict[str, Any]) -> float:
-            """Calculate composite score for Risks AND Opportunities"""
-            base = float(item.get("risk_score", 0.0))
+            """Composite score for Risks AND Opportunities."""
             severity = str(item.get("severity", "low")).lower()
             impact = str(item.get("impact_type", "risk")).lower()
 
-            boost = severity_boost_map.get(severity, 0.0)
+            # Honour risk_score when an agent does provide one; otherwise fall
+            # back to severity. Either way the range reaches 1.0.
+            explicit = item.get("risk_score")
+            base = (
+                float(explicit) if explicit not in (None, "", 0, 0.0)
+                else severity_base_map.get(severity, 0.25)
+            )
 
-            # Opportunities are also "High Priority" events, so we boost them too
-            # to make sure they appear at the top of the feed
-            opp_boost = 0.2 if impact == "opportunity" else 0.0
+            # Opportunities are High Priority too -- keep them near the top.
+            opp_boost = 0.1 if impact == "opportunity" else 0.0
 
-            return base + boost + opp_boost
+            return min(1.0, base + opp_boost)
 
         # Sort descending by score
         ranked = sorted(unique, key=calculate_score, reverse=True)
@@ -383,7 +404,13 @@ JSON only:"""
             }
             converted.append(classified)
 
-            # Store in all databases (SQLite, ChromaDB, Neo4j)
+            # Store in all databases (SQLite, ChromaDB, Neo4j).
+            #
+            # dedup_key is the ORIGINAL summary -- the text is_duplicate() was
+            # called with further up. `summary` here is the LLM's rewrite, and
+            # storing that as the dedup key meant the md5 could never match the
+            # next cycle's lookup, so exact-match dedup never fired and the same
+            # events were re-emitted every 60 seconds forever.
             self.storage.store_event(
                 event_id=event_id,
                 summary=summary,
@@ -392,6 +419,7 @@ JSON only:"""
                 impact_type=impact_type,
                 confidence_score=final_confidence,
                 timestamp=timestamp,
+                dedup_key=original_summary,
             )
 
         logger.info(
@@ -550,22 +578,30 @@ JSON only:"""
         def safe_avg(lst):
             return sum(lst) / len(lst) if lst else 0.0
 
-        # Calculate domain-specific risk scores
-        # Mobility -> Logistics Friction
-        mobility_scores = domain_risks.get("mobility", []) + domain_risks.get(
-            "social", []
-        )  # Social unrest affects logistics
-        snapshot["logistics_friction"] = round(safe_avg(mobility_scores), 3)
+        # Domain-specific risk scores.
+        #
+        # These buckets used to read domain_risks.get("mobility") and
+        # .get("market") -- strings no agent has ever emitted. The five real
+        # domains are social, political, economical, meteorological and
+        # intelligence, so those lookups always returned []. Worse,
+        # "meteorological" was mapped to nothing at all, meaning weather never
+        # influenced the risk radar despite being one of the five agents and the
+        # one most likely to disrupt logistics.
 
-        # Political -> Compliance Volatility
-        political_scores = domain_risks.get("political", [])
-        snapshot["compliance_volatility"] = round(safe_avg(political_scores), 3)
+        # Social unrest and weather both impede movement of goods.
+        snapshot["logistics_friction"] = round(safe_avg(
+            domain_risks.get("social", []) + domain_risks.get("meteorological", [])
+        ), 3)
 
-        # Market/Economic -> Market Instability
-        market_scores = domain_risks.get("market", []) + domain_risks.get(
-            "economical", []
-        )
-        snapshot["market_instability"] = round(safe_avg(market_scores), 3)
+        # Political and regulatory activity drives compliance risk.
+        snapshot["compliance_volatility"] = round(safe_avg(
+            domain_risks.get("political", [])
+        ), 3)
+
+        # Economic signals, plus competitor/market intelligence.
+        snapshot["market_instability"] = round(safe_avg(
+            domain_risks.get("economical", []) + domain_risks.get("intelligence", [])
+        ), 3)
 
         # NEW: Opportunity Index
         # Higher score means stronger positive signals

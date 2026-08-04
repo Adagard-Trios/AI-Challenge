@@ -18,14 +18,19 @@ services:
 
     region: singapore          # closest to Sri Lanka; also: oregon, frankfurt, ohio, virginia
 
-    # ⚠ FREE TIER = 512 MB RAM, and this service does not fit.
-    # Importing main.py pulls in TensorFlow (1.3 GB on disk), PyTorch (414 MB),
-    # ChromaDB, sentence-transformers and six LangGraph agents — measured at
-    # 3.12 GB installed, and well over 512 MB resident. Expect the instance to be
-    # OOM-killed during import, before it can bind $PORT.
-    # Free also spins down after ~15 min without inbound traffic; the next request
-    # pays a multi-minute cold start for those same imports.
-    # To actually run this service, use 'standard' (2 GB) or 'pro' (4 GB).
+    # FREE TIER = 512 MB RAM. This fits — but only because the image installs
+    # backend/requirements-service.txt (slim) rather than requirements.txt.
+    #
+    # Measured on a clean venv from the slim set: `import main` settles at
+    # ~210 MB RSS with 46 routes and zero heavy modules loaded.
+    #
+    # The earlier OOM came from requirements.txt pulling torch + transformers:
+    # the backend never imports them itself, but langchain_groq imports
+    # `transformers` if it is installed, which imports `torch`. Not installing
+    # them removes ~3 GB of stack. See requirements-service.txt.
+    #
+    # Still true on free: the service spins down after ~15 min without inbound
+    # traffic, and the next request pays a cold start.
     plan: free
 
     healthCheckPath: /api/status

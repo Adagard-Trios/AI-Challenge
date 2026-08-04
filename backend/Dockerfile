@@ -24,9 +24,15 @@ RUN apt-get update && apt-get install -y \
     libcairo2 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements and install Python dependencies
-COPY backend/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Install the SLIM runtime set, not requirements.txt.
+#
+# requirements.txt is the local-dev set and pulls TensorFlow + PyTorch + the
+# training stack (3.12 GB installed) so the models can run in-process. In
+# deployment they run as their own services and the backend calls them over
+# HTTP, so none of that is needed — and installing it is what OOM-kills a
+# 512 MB instance. See the header of requirements-service.txt.
+COPY backend/requirements-service.txt .
+RUN pip install --no-cache-dir -r requirements-service.txt
 
 # Install Playwright and browsers
 RUN pip install playwright && \

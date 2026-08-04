@@ -1,0 +1,102 @@
+# Slim runtime deps for the deployed backend (Render web service).
+#
+# WHY THIS FILE EXISTS
+# --------------------
+# requirements.txt is the full local-dev set: it also installs TensorFlow,
+# PyTorch and the training stack so main.py can load the four ML models
+# *in-process*. That set measures 3.12 GB installed and OOMs a 512 MB instance.
+#
+# In deployment the models run as their own Render services and the backend
+# reaches them over HTTP (see src/model_gateway.py), so none of that is needed.
+#
+# THE ACCIDENTAL 3 GB
+# -------------------
+# The backend has no module-level import of torch/tensorflow anywhere. But
+# langchain_groq.chat_models imports `transformers` *if it happens to be
+# installed*, and transformers then imports torch. Verified: blocking both
+# modules still lets `from langchain_groq import ChatGroq` and ChatGroq(...)
+# work fine — it is a soft dependency. Simply not installing them removes the
+# import, and with it the bulk of resident memory.
+#
+# ChromaDB is unaffected: chromadb_store.py passes CHROMADB_EMBEDDING_MODEL as
+# collection *metadata* only, so Chroma uses its bundled ONNX embedder rather
+# than sentence-transformers.
+#
+# CONSEQUENCE
+# -----------
+# The in-process model fallback cannot work with this set. Every model endpoint
+# requires its <MODEL>_SERVICE_URL to be set, or it returns the gateway's
+# unavailable response. That is the intended deployed topology.
+#
+# Use requirements.txt for local development where in-process models are wanted.
+
+# --- Core LangGraph & LangChain ---
+langgraph
+langchain
+langchain-core
+langchain-community
+langchain-groq
+
+# --- LLM provider ---
+groq
+
+# --- Data processing ---
+pydantic
+python-dotenv
+python-dateutil
+pytz
+pandas
+numpy
+pyyaml
+
+# --- Web scraping ---
+requests
+beautifulsoup4
+lxml
+playwright
+
+# Required, not optional: src/utils/utils.py:21 imports yfinance at module level
+# for the CSE stock scraper tool. Omitting it breaks `import main` outright.
+yfinance
+
+# Lazily imported at main.py:1264 in the anomaly in-process fallback. Tiny
+# (~300 KB); included so that path raises a useful error rather than ImportError.
+joblib
+
+# --- API server ---
+fastapi
+uvicorn[standard]
+websockets
+python-multipart
+httpx
+
+# --- Storage / vector stores ---
+neo4j
+langchain-neo4j
+chromadb
+langchain-chroma
+langchain-text-splitters
+
+# --- Tracing (optional at runtime, cheap to install) ---
+langsmith>=0.1.0
+
+# --- File utilities ---
+pypdf
+certifi
+tqdm
+
+# ---------------------------------------------------------
+# DELIBERATELY OMITTED — these are why the full set is 3.12 GB:
+#
+#   torch, transformers, sentence-transformers  -> only reachable via
+#       langchain_groq's soft import; not used by any backend code path
+#   tensorflow, tf_keras                        -> in-process weather/currency
+#   scikit-learn, joblib                        -> in-process stock/anomaly
+#   hdbscan, umap-learn, optuna                 -> model *training* only
+#   fasttext-wheel, lingua-language-detector    -> anomaly language detection
+#   mlflow, dagshub                             -> experiment tracking
+#   yfinance                                    -> model data ingestion
+#   streamlit, plotly                           -> the stock Streamlit dashboard
+#   pytest, black, flake8, deepeval, ragas      -> dev/test only
+#   pymongo                                     -> unused by the backend
+# ---------------------------------------------------------

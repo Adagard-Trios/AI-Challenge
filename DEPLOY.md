@@ -11,10 +11,13 @@ Six deployables, each with its own blueprint:
 | 5 | Anomaly model | `models/anomaly-detection/` | same folder | Render (Docker) |
 | 6 | Frontend | `frontend/` | `frontend/render.yaml` | Render web service (or Vercel) |
 
-**The model services are optional.** The backend runs all four models in-process by default, exactly
-as before. It only calls a model over HTTP when that model's `*_SERVICE_URL` is set — and if the
-call fails it silently falls back to in-process. So you can deploy just #1 and #6, then peel models
-off one at a time.
+**The model services are required in deployment, optional locally.**
+
+- *Locally* (full `requirements.txt`) the backend runs all four models in-process, exactly as
+  before, and only calls a model over HTTP when its `*_SERVICE_URL` is set.
+- *Deployed* the image installs the slim `requirements-service.txt`, which has no ML framework —
+  so each model must have its `*_SERVICE_URL` pointing at its own service. Without one, that
+  model's endpoints return the gateway's "unavailable" response. See §1.2.
 
 Deploy order: **model services → backend → frontend.** Each step needs the previous URL.
 
@@ -80,20 +83,28 @@ Verify the wiring with **`GET /api/status`** and **`GET /api/models/health`** �
 The app needs Playwright + Chromium and its system libraries for the scrapers. Render's native
 Python runtime can't install those. `backend/Dockerfile` already handles it.
 
-### 1.2 Plan sizing — read this before picking
+### 1.2 Two requirement sets — this is what fixes the OOM
 
-Importing `main.py` loads TensorFlow, PyTorch, ChromaDB, sentence-transformers and six LangGraph
-agents into one process. Measured install size is **3.12 GB** (TensorFlow 1.3 GB, PyTorch 414 MB).
-
-| Plan | RAM | Verdict |
+| File | Used by | Contents |
 |---|---|---|
-| Free / Starter | 512 MB | **Will not work** — OOMs during import, and Free spins down on idle (cold start is minutes) |
-| **Standard** | 2 GB | Minimum viable; expect tight headroom |
-| **Pro** | 4 GB | Recommended if the service gets OOM-killed under load |
+| `requirements.txt` | local dev | Full set, **3.12 GB installed** — includes TensorFlow, PyTorch and the training stack so models can run **in-process** |
+| `requirements-service.txt` | `backend/Dockerfile` | Slim runtime set — no TensorFlow, PyTorch, sklearn, mlflow or training deps |
 
-**`render.yaml` ships with `plan: free` by request.** By the table above that is expected to OOM
-during import — the backend is the one service that genuinely needs a paid plan. Change `plan:` to
-`standard` in `render.yaml` when you want it to actually stay up.
+The deployed backend does not need any ML framework: the four models run as their own services and
+the backend calls them over HTTP via `src/model_gateway.py`.
+
+**The subtle part.** The backend has *no module-level import* of torch or tensorflow anywhere.
+But `langchain_groq.chat_models` imports `transformers` **if it happens to be installed**, and
+`transformers` then imports `torch` — roughly 3 GB of resident stack pulled in by accident, purely
+because the packages were present. Verified by blocking both modules: `from langchain_groq import
+ChatGroq` and `ChatGroq(...)` still work. Not installing them removes the import entirely.
+
+ChromaDB is unaffected — `chromadb_store.py` passes `CHROMADB_EMBEDDING_MODEL` as collection
+*metadata* only, so Chroma uses its bundled ONNX embedder, not sentence-transformers.
+
+**Consequence:** with the slim set, the in-process fallback cannot work. Every model endpoint needs
+its `<MODEL>_SERVICE_URL` set, or the gateway returns its unavailable response. That is the intended
+deployed topology — deploy the four model blueprints first.
 
 ### 1.3 Deploy
 
@@ -307,7 +318,7 @@ model in-process and costs exactly one service.
 | Build pulls `nvidia-cuda-*` wheels, image ~6 GB | CPU pin missing | `backend/requirements.txt` must keep `--extra-index-url https://download.pytorch.org/whl/cpu` and `torch==2.9.1+cpu` |
 | Build runs out of disk / times out | Build context too large | Ensure `.dockerignore` exists at the **repo root** (excludes `node_modules`, `.venv`, `.next`) |
 | Service unreachable after a quiet period | Free tier spins down after ~15 min idle | Expected; first request pays a cold start. Paid plans stay warm |
-| Service restarts in a loop, "Out of memory" | Free tier is 512 MB, or auto-train ran | Set `DISABLE_AUTO_TRAIN=1`; raise `plan:` to `standard`/`pro` |
+| Service restarts in a loop, "Out of memory" | Image built from `requirements.txt` (3.12 GB) instead of `requirements-service.txt`, or auto-train ran | Confirm `backend/Dockerfile` installs `requirements-service.txt`; set `DISABLE_AUTO_TRAIN=1` |
 | Health check never passes | Cold start slower than the window | Raise the grace period; confirm `$PORT` is not overridden |
 | All feeds vanish after a deploy | Free tier has no persistent disk — expected | Move to a paid plan and attach a disk at `/app/backend/data` |
 | Anomaly + Stock panels empty, rest fine | Only one env-var name set | Set `NEXT_PUBLIC_API_BASE` too (§2.2) |
@@ -316,5 +327,7 @@ model in-process and costs exactly one service.
 | `[MODEL CHECK] ⚠ Anomaly Detection - No model found` | Pre-existing upstream quirk — `main.py` checks `artifacts/models`, files are in `artifacts/model_trainer/` | Harmless with `DISABLE_AUTO_TRAIN=1`; anomaly endpoints degrade gracefully |
 | `/api/models/health` shows `in-process` when you expected `remote` | `*_SERVICE_URL` unset or empty on the backend | Set it, then redeploy the backend |
 | Model endpoints answer but ignore the model service | Service unreachable — gateway fell back silently | Check backend logs for `[gateway] … call failed`; hit the service's `/health` directly |
+| Model endpoints return "unavailable" | `<MODEL>_SERVICE_URL` unset, and the slim image has no ML framework for the in-process path | Set the URL and deploy that model's blueprint |
+| Frontend deploy: `Publish directory ./out does not exist!` | Service was created as a static site; it is now a web service | Delete the Render service and re-apply `frontend/render.yaml` — Render cannot change service type in place |
 | First `/detect` on anomaly hangs for minutes | `ANOMALY_ML_ENABLED=1` with a cold `models_cache/` | Set it back to `0`, or warm the cache (`download_models.py`) before enabling |
 | Model service build fails on `requirements.txt` | Wrong file — that is the training set | Dockerfiles must install `requirements-service.txt` |

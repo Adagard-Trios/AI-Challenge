@@ -366,6 +366,7 @@ class ToolSet:
                 platforms = ["reddit", "twitter"]
 
             all_reviews = []
+            failures = []
 
             # Reddit reviews
             if "reddit" in platforms:
@@ -398,8 +399,12 @@ class ToolSet:
                                         "url": item.get("url", ""),
                                     }
                                 )
-                except:
-                    pass
+                except Exception as exc:
+                    # A bare `except: pass` here also caught KeyboardInterrupt,
+                    # and made total scraper failure indistinguishable from
+                    # "this product genuinely has no reviews".
+                    logger.warning("[product_reviews] reddit failed: %s", exc)
+                    failures.append({"platform": "reddit", "error": str(exc)})
 
             # Twitter reviews
             if "twitter" in platforms:
@@ -430,15 +435,23 @@ class ToolSet:
                                         "url": item.get("url", ""),
                                     }
                                 )
-                except:
-                    pass
+                except Exception as exc:
+                    logger.warning("[product_reviews] twitter failed: %s", exc)
+                    failures.append({"platform": "twitter", "error": str(exc)})
 
+            attempted = len(platforms)
             return json.dumps(
                 {
+                    # "ok" only when at least one platform actually answered.
+                    # Previously this returned a well-formed success object even
+                    # when every platform threw, so the Intelligence agent could
+                    # not tell "no reviews exist" from "nothing worked".
+                    "status": "error" if len(failures) == attempted and attempted else "ok",
                     "product": product_keyword,
                     "total_reviews": len(all_reviews),
                     "reviews": all_reviews,
                     "platforms_searched": platforms,
+                    "platforms_failed": failures,
                 },
                 default=str,
             )

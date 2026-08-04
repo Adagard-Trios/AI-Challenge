@@ -37,13 +37,26 @@ def load_intel_config() -> dict:
         "user_keywords": [],
         "user_products": [],
     }
+    if not os.path.exists(config_path):
+        # Genuinely not configured yet -- distinct from "configured but broken".
+        return default_config
+
     try:
-        if os.path.exists(config_path):
-            with open(config_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-    except Exception:
-        pass
-    return default_config
+        with open(config_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as exc:
+        # This was `except Exception: pass`, so a malformed config -- a file
+        # half-written by a concurrent API save, say -- silently became an empty
+        # config. The agent then printed the same "no user-defined targets
+        # configured" message it prints when nothing was ever configured, and
+        # the user's Intelligence Settings appeared to be ignored with no error
+        # anywhere in the system.
+        print(
+            f"[SocialAgent] ⚠️  intel_config.json exists at {config_path} but "
+            f"could not be read ({exc}). Falling back to EMPTY targets -- your "
+            f"configured keywords and profiles will NOT be collected this cycle."
+        )
+        return default_config
 
 
 class SocialAgentNode:
@@ -581,7 +594,13 @@ class SocialAgentNode:
                     world_data.extend(posts[:10])
                     geographic_data["world"].extend(posts[:10])
 
-            except Exception:
+            except Exception as exc:
+                # Was a silent `continue`. Dropping every parse failure
+                # without a word meant a scraper changing its output shape
+                # was indistinguishable from a genuinely quiet news cycle:
+                # the node printed "Categorized: 0, 0, 0" and returned
+                # successfully either way.
+                print(f"  ⚠️  Unparseable result skipped: {exc}")
                 continue
 
         # Create structured feeds

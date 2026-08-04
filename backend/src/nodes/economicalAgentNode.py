@@ -398,7 +398,13 @@ class EconomicalAgentNode:
                 elif category == "national":
                     national_data.extend(posts[:10])
 
-            except Exception:
+            except Exception as exc:
+                # Was a silent `continue`. Dropping every parse failure
+                # without a word meant a scraper changing its output shape
+                # was indistinguishable from a genuinely quiet news cycle:
+                # the node printed "Categorized: 0, 0, 0" and returned
+                # successfully either way.
+                print(f"  ⚠️  Unparseable result skipped: {exc}")
                 continue
 
         # Create structured feeds

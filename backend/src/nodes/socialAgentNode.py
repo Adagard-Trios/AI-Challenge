@@ -20,9 +20,17 @@ from src.llms.groqllm import GroqLLM
 
 
 def load_intel_config() -> dict:
-    """Load intel config from JSON file (same as main.py)."""
+    """
+    Load intel config from JSON file.
+
+    Path note: this read ../../data/intel_config.json, which has never existed,
+    so it always fell through to the empty defaults below -- meaning keywords and
+    profiles saved in the UI never reached the social agent, which is precisely
+    the agent they are meant to steer. The API writes src/config/intel_config.json
+    (see main.py INTEL_CONFIG_PATH); this now reads the same file.
+    """
     config_path = os.path.join(
-        os.path.dirname(__file__), "..", "..", "data", "intel_config.json"
+        os.path.dirname(__file__), "..", "config", "intel_config.json"
     )
     default_config = {
         "user_profiles": {"twitter": [], "facebook": [], "linkedin": []},

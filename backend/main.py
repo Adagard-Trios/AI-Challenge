@@ -839,8 +839,16 @@ def get_national_threat_score():
 # INTEL CONFIG API - User Keywords & Profiles
 # ============================================
 
-# Global intel config (loaded from file)
-INTEL_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "data", "intel_config.json")
+# Single source of truth for the intel config file.
+#
+# This used to point at backend/data/intel_config.json -- a file that has never
+# existed -- and was then REBOUND further down the module to src/config/. Because
+# load/save read the global at call time rather than def time, the live handlers
+# ended up reading one path while having been initialised from another. See the
+# note on the deleted duplicate handlers below.
+INTEL_CONFIG_PATH = os.path.join(
+    os.path.dirname(__file__), "src", "config", "intel_config.json"
+)
 
 # Default config structure
 DEFAULT_INTEL_CONFIG = {
@@ -881,59 +889,25 @@ def save_intel_config(config: dict) -> bool:
 intel_config = load_intel_config()
 
 
-@app.get("/api/intel/config")
-def get_intel_config():
-    """
-    Get current intelligence configuration.
-    
-    Returns user-defined keywords, products, and social profiles to monitor.
-    """
-    global intel_config
-    intel_config = load_intel_config()  # Refresh from file
-    return {
-        "status": "success",
-        "config": intel_config
-    }
-
-
-class IntelConfigUpdate(BaseModel):
-    user_profiles: dict = None
-    user_keywords: list = None
-    user_products: list = None
-
-
-@app.post("/api/intel/config")
-def update_intel_config(config_update: IntelConfigUpdate):
-    """
-    Update intelligence configuration.
-    
-    Accepts user-defined keywords, products, and social profiles.
-    Changes take effect on the next agent collection cycle.
-    """
-    global intel_config
-    
-    try:
-        # Update fields if provided
-        if config_update.user_profiles is not None:
-            intel_config["user_profiles"] = config_update.user_profiles
-        if config_update.user_keywords is not None:
-            intel_config["user_keywords"] = config_update.user_keywords
-        if config_update.user_products is not None:
-            intel_config["user_products"] = config_update.user_products
-        
-        # Save to file
-        if save_intel_config(intel_config):
-            logger.info(f"[Intel Config] Updated: {len(intel_config.get('user_keywords', []))} keywords, "
-                       f"{sum(len(v) for v in intel_config.get('user_profiles', {}).values())} profiles")
-            return {
-                "status": "updated",
-                "config": intel_config
-            }
-        else:
-            return {"status": "error", "error": "Failed to save configuration"}
-    except Exception as e:
-        logger.error(f"[Intel Config] Update error: {e}")
-        return {"status": "error", "error": str(e)}
+# NOTE: /api/intel/config GET and POST were ALSO registered here, and because
+# Starlette matches routes in registration order, these earlier copies were the
+# ones that served every request -- shadowing the correct implementations further
+# down the module.
+#
+# They are removed rather than fixed, because the pair below is already correct.
+# The bug they caused:
+#
+#   The POST merged into the module-global `intel_config` and wrote that out. On
+#   a fresh process that global held only the 3-key default (it was loaded from a
+#   path that does not exist), so a POST arriving before any GET wrote a 3-key
+#   document over the real 8-key file -- silently destroying operational_keywords,
+#   alert_thresholds, default_competitors and notes.
+#
+#   The UI masked this by always GETting on mount. Any direct POST, or a retry
+#   after a backend restart, would trigger it.
+#
+# The surviving handlers read-modify-write the file itself, so they cannot lose
+# keys they do not know about.
 
 
 def get_user_intel_config() -> dict:
@@ -1093,70 +1067,13 @@ def get_water_supply_status():
 # NOTE: Currency prediction endpoint moved to async version below (line ~1680)
 
 
-@app.get("/api/currency/history")
-def get_currency_history(days: int = 7):
-    """
-    Get historical USD/LKR exchange rate data.
-    
-    Args:
-        days: Number of days of history to return (default 7)
-    
-    Returns:
-        List of historical rates with date and close price.
-    """
-    try:
-        from pathlib import Path
-        import pandas as pd
+# NOTE: /api/currency/history was registered twice. This earlier copy shadowed
+# the one further down, which is strictly better: it selects the newest data
+# file by mtime rather than by lexical filename order, and returns
+# daily_return_pct alongside date/close/high/low. Both return
+# {status, days, history}, and the frontend reads only status and history,
+# so removing this one is transparent to callers.
 
-        # Path to currency data
-        data_dir = Path(__file__).parent.parent / "models" / "currency-volatility-prediction" / "artifacts" / "data"
-
-        # Find the data file
-        data_files = list(data_dir.glob("currency_data_*.csv")) if data_dir.exists() else []
-
-        if data_files:
-            # Get most recent data file
-            latest_file = max(data_files, key=lambda p: p.stem)
-            df = pd.read_csv(latest_file)
-
-            # Get last N days
-            df['date'] = pd.to_datetime(df['date'])
-            df = df.sort_values('date', ascending=False).head(days)
-            df = df.sort_values('date', ascending=True)
-
-            history = []
-            for _, row in df.iterrows():
-                history.append({
-                    "date": row['date'].strftime("%Y-%m-%d"),
-                    "close": float(row['close']),
-                    "high": float(row.get('high', row['close'])),
-                    "low": float(row.get('low', row['close']))
-                })
-
-            return {
-                "status": "success",
-                "history": history,
-                "days": len(history)
-            }
-
-        return {
-            "status": "no_data",
-            "message": "No historical data available. Run data ingestion first.",
-            "history": []
-        }
-
-    except Exception as e:
-        logger.error(f"[CurrencyAPI] Error fetching history: {e}")
-        return {
-            "status": "error",
-            "error": str(e),
-            "history": []
-        }
-
-
-# ============================================
-# TRENDING DETECTION ENDPOINTS
-# ============================================
 
 @app.get("/api/trending")
 def get_trending_topics(limit: int = 10):
@@ -1733,7 +1650,8 @@ def rag_clear_history():
 # INTELLIGENCE CONFIG ENDPOINTS (User-defined monitoring targets)
 # =============================================================================
 
-INTEL_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "src", "config", "intel_config.json")
+# INTEL_CONFIG_PATH is defined once, near the top of this module. It used to be
+# rebound here to a different path, which is what split reads from writes.
 
 
 def _ensure_intel_config() -> str:

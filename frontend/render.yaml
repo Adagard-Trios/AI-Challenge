@@ -1,0 +1,58 @@
+# Render Blueprint — Sri Lanka AI Challenge 2026 frontend (Next.js)
+#
+# Apply from the Render dashboard: New -> Blueprint -> this repo, then point the
+# blueprint at frontend/render.yaml.
+#
+# This is a STATIC SITE, not a web service. next.config.ts sets output: "export",
+# so `next build` emits a plain bundle to out/ and Render serves it from its CDN.
+# That matters on the free plan:
+#   - static sites never spin down (web services idle out after ~15 min)
+#   - no 512 MB runtime ceiling — there is no Node process at runtime
+#   - no cold starts
+#
+# The app was already fully client-rendered (ssr: false), so nothing is lost.
+
+services:
+  - type: web
+    name: slac2026-frontend
+    runtime: static
+    rootDir: frontend
+
+    # --include=dev is deliberate: typescript, tailwindcss and
+    # babel-plugin-react-compiler are devDependencies and are required to build.
+    # If NODE_ENV=production leaks into the build env, a bare `npm ci` would skip
+    # them and the build would fail.
+    #
+    # `npm ci` (not `npm install`): clsx and three @radix-ui packages are imported
+    # but not declared in package.json — they resolve only as hoisted transitives
+    # from the committed lockfile. `npm install` may re-resolve and break the build.
+    buildCommand: npm ci --include=dev && npm run build
+    staticPublishPath: ./out
+
+    # The app mounts react-router inside the single Next route, so deep links must
+    # all be served index.html and resolved client-side. Without this, a hard
+    # refresh on any path returns Render's 404 instead of the app.
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+
+    envVars:
+      # BUILD-TIME values — inlined into the JS bundle by `next build`.
+      # Changing either requires a redeploy (Clear cache & deploy), not a restart.
+      #
+      # Set BOTH to the backend's Render URL. The codebase reads two different
+      # names: 8 components use NEXT_PUBLIC_API_URL, while
+      # dashboard/AnomalyDetection.tsx and dashboard/StockPredictions.tsx use
+      # NEXT_PUBLIC_API_BASE. Setting only one leaves those two panels pointing at
+      # http://localhost:8000 in production.
+      #   e.g. https://roger-backend.onrender.com
+      - key: NEXT_PUBLIC_API_URL
+        sync: false
+      - key: NEXT_PUBLIC_API_BASE
+        sync: false
+
+      # Next 16 requires Node >= 20.9. Pinned because package.json has no engines
+      # field, so the build would otherwise follow Render's rolling default.
+      - key: NODE_VERSION
+        value: "22"

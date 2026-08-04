@@ -48,9 +48,9 @@ services:
       - key: DISABLE_AUTO_TRAIN
         value: "1"
 
-      # Lock CORS to the Vercel origin. Leaving this unset falls back to "*"
+      # Lock CORS to the frontend origin. Leaving this unset falls back to "*"
       # (with credentials disabled, per the CORS spec).
-      # e.g. https://your-app.vercel.app
+      # e.g. https://slac2026-frontend.onrender.com
       - key: CORS_ALLOW_ORIGINS
         sync: false
 

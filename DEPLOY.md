@@ -1,4 +1,4 @@
-# Deploying — Render + Vercel
+# Deploying — Render (+ Vercel option for the frontend)
 
 Six deployables, each with its own blueprint:
 
@@ -9,7 +9,7 @@ Six deployables, each with its own blueprint:
 | 3 | Currency model | `models/currency-volatility-prediction/` | same folder | Render (Docker) |
 | 4 | Stock model | `models/stock-price-prediction/` | same folder | Render (Docker) |
 | 5 | Anomaly model | `models/anomaly-detection/` | same folder | Render (Docker) |
-| 6 | Frontend | `frontend/` | — | Vercel |
+| 6 | Frontend | `frontend/` | `frontend/render.yaml` | Render static site (or Vercel) |
 
 **The model services are optional.** The backend runs all four models in-process by default, exactly
 as before. It only calls a model over HTTP when that model's `*_SERVICE_URL` is set — and if the
@@ -120,7 +120,7 @@ Set in the Render dashboard (the `sync: false` entries in `render.yaml` are deli
 |---|---|---|
 | `GROQ_API_KEY` | your Groq key | **Yes** — the app raises at import without it |
 | `DISABLE_AUTO_TRAIN` | `1` | **Yes** — see below |
-| `CORS_ALLOW_ORIGINS` | `https://<your-app>.vercel.app` | Strongly recommended |
+| `CORS_ALLOW_ORIGINS` | frontend origin, e.g. `https://slac2026-frontend.onrender.com` | Strongly recommended |
 | `SQLITE_DB_PATH` | `/app/backend/data/cache/feeds.db` | Pre-set in `render.yaml` |
 | `CHROMADB_PATH` | `/app/backend/data/chromadb` | Pre-set |
 | `CSV_EXPORT_DIR` | `/app/backend/data/feeds` | Pre-set |
@@ -182,18 +182,42 @@ curl https://<service>.onrender.com/api/currency/model/status  # {"model_exists"
 
 ---
 
-## 2. Frontend → Vercel
+## 2. Frontend → Render (static site) or Vercel
 
-Connect Vercel directly to this repo — it builds `frontend/` in place. There is no CI step for the
-frontend and none is needed; Vercel's own Git integration handles push-to-deploy.
+`frontend/next.config.ts` sets `output: "export"`, so `next build` emits a plain static bundle to
+`frontend/out/` (~1.6 MB) instead of running a Next server. The app was already fully
+client-rendered — `app/page.tsx` is `'use client'` and dynamic-imports the tree with `{ ssr: false }`
+— so nothing is lost, and there are no API routes, middleware, or `next/image` to block it.
 
-### 2.1 Project settings
+Pick **one** host.
+
+### 2A. Render — static site (recommended on free tier)
+
+Apply `frontend/render.yaml`: **New → Blueprint →** this repo → point at that file.
+
+A static site is a much better free-tier fit than a Node web service:
+
+| | Static site | Node web service |
+|---|---|---|
+| Spin-down after idle | **never** | ~15 min, then cold start |
+| Runtime memory limit | **n/a** (no process) | 512 MB |
+| Cost on free | free | free |
+
+The blueprint already sets the SPA rewrite (`/*` → `/index.html`). Without it, a hard refresh on any
+deep link returns Render's 404 instead of the app, because routing happens client-side in
+react-router inside the single Next route.
+
+### 2B. Vercel
+
+Connect Vercel directly to this repo — it builds `frontend/` in place, and its Git integration
+handles push-to-deploy (there is no CI step for the frontend, and none is needed).
 
 | Setting | Value |
 |---|---|
 | **Root Directory** | `frontend` ← **required**, this is a monorepo |
 | Framework Preset | Next.js (auto-detected) |
 | Install Command | `npm ci` (already in `frontend/vercel.json`) |
+| Output Directory | `out` ← set in `vercel.json`; static export does not emit `.next` |
 
 **Do not change the install command back to `npm install`.** Four packages — `clsx`,
 `@radix-ui/react-slot`, `@radix-ui/react-dialog`, `@radix-ui/react-collapsible` — are imported by the
@@ -218,8 +242,8 @@ a restart.
 ### 2.3 WebSocket
 
 `use-roger-data.ts` derives the socket URL as `API_BASE.replace('http','ws') + '/ws'`, so an
-`https://` backend correctly becomes `wss://…/ws`. Render supports WebSockets on paid plans; no
-extra configuration needed.
+`https://` backend correctly becomes `wss://…/ws`. The socket is opened by the browser directly to
+the backend, so hosting the frontend as a static site changes nothing here.
 
 ---
 

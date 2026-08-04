@@ -52,11 +52,15 @@ from .credentials import (
     validate,
 )
 from .hygiene import LaunchProfile, budget_for
+from .registry import REGISTRY, ScraperSpec, run, session_dependent_names, unavailable
 from .text import (
     clean_fb_text,
     clean_linkedin_text,
+    clean_twitter_text,
     extract_media_id_instagram,
+    extract_twitter_timestamp,
     fetch_caption_via_private_api,
+    parse_engagement,
 )
 
 __all__ = [
@@ -72,7 +76,10 @@ __all__ = [
     "get_credential_store", "missing_required", "set_credential_store", "validate",
     # hygiene
     "LaunchProfile", "budget_for",
+    # registry
+    "REGISTRY", "ScraperSpec", "run", "session_dependent_names", "unavailable",
     # text
-    "clean_fb_text", "clean_linkedin_text",
-    "extract_media_id_instagram", "fetch_caption_via_private_api",
+    "clean_fb_text", "clean_linkedin_text", "clean_twitter_text",
+    "extract_media_id_instagram", "extract_twitter_timestamp",
+    "fetch_caption_via_private_api", "parse_engagement",
 ]

@@ -33,6 +33,68 @@ def clean_linkedin_text(text: Optional[str]) -> str:
     return text.strip()
 
 
+def clean_twitter_text(text: Optional[str]) -> str:
+    """Strip t.co shorteners and feed chrome from tweet text."""
+    if not text:
+        return ""
+
+    text = re.sub(r"Show more", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"https://t\.co/\w+", "", text)
+    text = re.sub(r"pic\.twitter\.com/\w+", "", text)
+    text = re.sub(r"\s+", " ", text)
+    text = "\n".join(line.strip() for line in text.splitlines() if line.strip())
+
+    return text.strip()
+
+
+def extract_twitter_timestamp(tweet_element) -> Optional[str]:
+    """
+    Pull an ISO timestamp off a tweet article.
+
+    Prefers the <time datetime="..."> attribute, which is absolute; falls back
+    to the rendered relative text ("2h") only when the attribute is absent.
+    """
+    selectors = (
+        "time",
+        "[datetime]",
+        "a[href*='/status/'] time",
+        "div[data-testid='User-Name'] a[href*='/status/']",
+    )
+    for selector in selectors:
+        try:
+            loc = tweet_element.locator(selector)
+            if loc.count() == 0:
+                continue
+            element = loc.first
+            attr = element.get_attribute("datetime")
+            if attr:
+                return attr
+            rendered = element.inner_text()
+            if rendered:
+                return rendered.strip()
+        except Exception:
+            continue
+    return None
+
+
+def parse_engagement(value: Optional[str]) -> int:
+    """
+    Parse an aria-label engagement count.
+
+    Handles the abbreviated forms the UI renders at scale -- "1.2K likes",
+    "3M reposts" -- which a bare \\d+ regex reads as 1 and 3 respectively.
+    """
+    if not value:
+        return 0
+    match = re.search(r"([\d,]+(?:\.\d+)?)\s*([KMB])?", value, flags=re.IGNORECASE)
+    if not match:
+        return 0
+    number = float(match.group(1).replace(",", ""))
+    suffix = (match.group(2) or "").upper()
+    multiplier = {"K": 1_000, "M": 1_000_000, "B": 1_000_000_000}.get(suffix, 1)
+    return int(number * multiplier)
+
+
 def clean_fb_text(text: Optional[str]) -> str:
     """Strip Facebook feed chrome from post text."""
     if not text:

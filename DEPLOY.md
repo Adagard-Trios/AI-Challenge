@@ -176,6 +176,9 @@ curl https://<service>.onrender.com/api/currency/model/status  # {"model_exists"
 
 ## 2. Frontend → Vercel
 
+Connect Vercel directly to this repo — it builds `frontend/` in place. There is no CI step for the
+frontend and none is needed; Vercel's own Git integration handles push-to-deploy.
+
 ### 2.1 Project settings
 
 | Setting | Value |

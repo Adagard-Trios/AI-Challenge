@@ -1,45 +1,40 @@
-# Render Blueprint — Sri Lanka AI Challenge 2026 frontend (Next.js)
+# Render Blueprint — Sri Lanka AI Challenge 2026 frontend (Next.js 16)
 #
 # Apply from the Render dashboard: New -> Blueprint -> this repo, then point the
 # blueprint at frontend/render.yaml.
 #
-# This is a STATIC SITE, not a web service. next.config.ts sets output: "export",
-# so `next build` emits a plain bundle to out/ and Render serves it from its CDN.
-# That matters on the free plan:
-#   - static sites never spin down (web services idle out after ~15 min)
-#   - no 512 MB runtime ceiling — there is no Node process at runtime
-#   - no cold starts
-#
-# The app was already fully client-rendered (ssr: false), so nothing is lost.
+# Runs a real Next server (`next start`) rather than a static export, so server
+# features remain available: API routes, server actions, SSR, middleware.
 
 services:
   - type: web
     name: slac2026-frontend
-    runtime: static
+    runtime: node
     rootDir: frontend
 
+    region: singapore
+    plan: free
+
     # --include=dev is deliberate: typescript, tailwindcss and
-    # babel-plugin-react-compiler are devDependencies and are required to build.
-    # If NODE_ENV=production leaks into the build env, a bare `npm ci` would skip
-    # them and the build would fail.
+    # babel-plugin-react-compiler are devDependencies and are required to BUILD.
+    # If NODE_ENV=production leaks into the build environment, a bare `npm ci`
+    # skips devDependencies and the build fails.
     #
     # `npm ci` (not `npm install`): clsx and three @radix-ui packages are imported
     # but not declared in package.json — they resolve only as hoisted transitives
     # from the committed lockfile. `npm install` may re-resolve and break the build.
     buildCommand: npm ci --include=dev && npm run build
-    staticPublishPath: ./out
 
-    # The app mounts react-router inside the single Next route, so deep links must
-    # all be served index.html and resolved client-side. Without this, a hard
-    # refresh on any path returns Render's 404 instead of the app.
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
+    # Render injects $PORT and routes to it. `next start` does read PORT from the
+    # environment, but pass it explicitly so the binding is not implicit.
+    startCommand: npm start -- -p $PORT
+
+    healthCheckPath: /
 
     envVars:
-      # BUILD-TIME values — inlined into the JS bundle by `next build`.
-      # Changing either requires a redeploy (Clear cache & deploy), not a restart.
+      # BUILD-TIME values — Next inlines NEXT_PUBLIC_* into the client bundle at
+      # build time regardless of hosting model. Changing either requires a
+      # redeploy, not just a restart.
       #
       # Set BOTH to the backend's Render URL. The codebase reads two different
       # names: 8 components use NEXT_PUBLIC_API_URL, while
@@ -56,3 +51,12 @@ services:
       # field, so the build would otherwise follow Render's rolling default.
       - key: NODE_VERSION
         value: "22"
+
+    # Free-plan notes:
+    #   - 512 MB RAM. The running Next server is comfortable in that; the `next
+    #     build` step is the tighter part. If the build is OOM-killed, either
+    #     raise plan to 'starter'/'standard' for the build or set
+    #     NODE_OPTIONS=--max-old-space-size=460 to make V8 collect harder rather
+    #     than let the container OOM.
+    #   - Spins down after ~15 min without inbound traffic; the next visitor pays
+    #     a cold start while the Node server boots.

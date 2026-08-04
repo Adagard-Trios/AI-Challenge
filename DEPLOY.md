@@ -9,7 +9,7 @@ Six deployables, each with its own blueprint:
 | 3 | Currency model | `models/currency-volatility-prediction/` | same folder | Render (Docker) |
 | 4 | Stock model | `models/stock-price-prediction/` | same folder | Render (Docker) |
 | 5 | Anomaly model | `models/anomaly-detection/` | same folder | Render (Docker) |
-| 6 | Frontend | `frontend/` | `frontend/render.yaml` | Render static site (or Vercel) |
+| 6 | Frontend | `frontend/` | `frontend/render.yaml` | Render web service (or Vercel) |
 
 **The model services are optional.** The backend runs all four models in-process by default, exactly
 as before. It only calls a model over HTTP when that model's `*_SERVICE_URL` is set — and if the
@@ -182,30 +182,36 @@ curl https://<service>.onrender.com/api/currency/model/status  # {"model_exists"
 
 ---
 
-## 2. Frontend → Render (static site) or Vercel
+## 2. Frontend → Render (web service) or Vercel
 
-`frontend/next.config.ts` sets `output: "export"`, so `next build` emits a plain static bundle to
-`frontend/out/` (~1.6 MB) instead of running a Next server. The app was already fully
-client-rendered — `app/page.tsx` is `'use client'` and dynamic-imports the tree with `{ ssr: false }`
-— so nothing is lost, and there are no API routes, middleware, or `next/image` to block it.
+The frontend is a **dynamic app**: it polls the backend's REST endpoints, holds an open WebSocket for
+live feed updates, and re-renders continuously. It runs as a real Next server (`next start`), so
+server-side features stay available — API routes, server actions, SSR, middleware — even though the
+current dashboard renders client-side.
 
 Pick **one** host.
 
-### 2A. Render — static site (recommended on free tier)
+### 2A. Render — Node web service
 
 Apply `frontend/render.yaml`: **New → Blueprint →** this repo → point at that file.
 
-A static site is a much better free-tier fit than a Node web service:
+| Setting | Value |
+|---|---|
+| Runtime | `node` |
+| Root Directory | `frontend` |
+| Build | `npm ci --include=dev && npm run build` |
+| Start | `npm start -- -p $PORT` |
+| Plan | `free` |
 
-| | Static site | Node web service |
-|---|---|---|
-| Spin-down after idle | **never** | ~15 min, then cold start |
-| Runtime memory limit | **n/a** (no process) | 512 MB |
-| Cost on free | free | free |
+Two free-plan caveats:
 
-The blueprint already sets the SPA rewrite (`/*` → `/index.html`). Without it, a hard refresh on any
-deep link returns Render's 404 instead of the app, because routing happens client-side in
-react-router inside the single Next route.
+- **512 MB RAM.** The running Next server fits comfortably; `next build` is the tighter step. If the
+  build gets OOM-killed, raise `plan:` or set `NODE_OPTIONS=--max-old-space-size=460` so V8 collects
+  harder instead of letting the container OOM.
+- **Spin-down after ~15 min idle.** The next visitor pays a cold start while Node boots.
+
+`--include=dev` is required: `typescript`, `tailwindcss` and `babel-plugin-react-compiler` are
+devDependencies needed at build time, and a bare `npm ci` skips them if `NODE_ENV=production` is set.
 
 ### 2B. Vercel
 
@@ -217,14 +223,13 @@ handles push-to-deploy (there is no CI step for the frontend, and none is needed
 | **Root Directory** | `frontend` ← **required**, this is a monorepo |
 | Framework Preset | Next.js (auto-detected) |
 | Install Command | `npm ci` (already in `frontend/vercel.json`) |
-| Output Directory | `out` ← set in `vercel.json`; static export does not emit `.next` |
 
 **Do not change the install command back to `npm install`.** Four packages — `clsx`,
 `@radix-ui/react-slot`, `@radix-ui/react-dialog`, `@radix-ui/react-collapsible` — are imported by the
 UI but *not declared* in `package.json`. They resolve only as hoisted transitives from the committed
 lockfile. `npm install` may re-resolve and fail the build.
 
-### 2.2 Environment variables — set **both**
+### 2C. Environment variables — set **both** (either host)
 
 The codebase reads two different names: 8 files use `NEXT_PUBLIC_API_URL`, but
 `app/components/dashboard/AnomalyDetection.tsx` and `app/components/dashboard/StockPredictions.tsx`
@@ -239,11 +244,15 @@ NEXT_PUBLIC_API_BASE = https://<service>.onrender.com
 No trailing slash. These are inlined at build time — **changing them requires a redeploy**, not just
 a restart.
 
-### 2.3 WebSocket
+### 2D. WebSocket
 
 `use-roger-data.ts` derives the socket URL as `API_BASE.replace('http','ws') + '/ws'`, so an
-`https://` backend correctly becomes `wss://…/ws`. The socket is opened by the browser directly to
-the backend, so hosting the frontend as a static site changes nothing here.
+`https://` backend correctly becomes `wss://…/ws`. The socket is opened by the browser straight to
+the backend, so it never traverses the frontend server — the choice of host is irrelevant to it.
+
+Note the backend must be awake for the socket to connect. On free tier it spins down after ~15 min
+idle, so the first dashboard load after a quiet period sits on the loading screen until the backend
+cold-starts (`use-roger-data.ts` retries every 1 s and falls back to REST polling meanwhile).
 
 ---
 

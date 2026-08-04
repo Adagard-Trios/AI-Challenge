@@ -215,6 +215,7 @@ try:
     from auth import routes as _auth_routes
     from auth import ws_tickets as _ws_tickets
     from auth.config import settings as _auth_settings
+    from auth.dependencies import require_user
 
     _AUTH_READY = _auth_bootstrap.init()
     app.include_router(_auth_routes.router)
@@ -226,6 +227,13 @@ except Exception:  # noqa: BLE001
     _AUTH_READY = False
     _ws_tickets = None
     _auth_settings = None
+
+    # Routes below declare Depends(require_user). If the auth package failed to
+    # import we still need a callable with that name, or every route 500s at
+    # definition time -- turning an auth problem into a total outage, which is
+    # the opposite of degrading gracefully.
+    def require_user():  # type: ignore[misc]
+        return None
 
 # Global state
 current_state: Dict[str, Any] = {
@@ -698,12 +706,12 @@ def get_status():
 
 
 @app.get("/api/dashboard")
-def get_dashboard():
+def get_dashboard(_user=Depends(require_user)):
     return current_state.get("risk_dashboard_snapshot", {})
 
 
 @app.get("/api/feed")
-def get_feed():
+def get_feed(_user=Depends(require_user)):
     """Get current feed from memory"""
     return {
         "events": current_state.get("final_ranked_feed", []),
@@ -712,7 +720,7 @@ def get_feed():
 
 
 @app.get("/api/feeds")
-def get_feeds_from_db(limit: int = 100):
+def get_feeds_from_db(limit: int = 100, _user=Depends(require_user)):
     """Get feeds directly from database (for initial load)"""
     try:
         feeds = storage_manager.get_recent_feeds(limit=limit)
@@ -744,7 +752,7 @@ def get_feeds_from_db(limit: int = 100):
 
 
 @app.get("/api/feeds/by_district/{district}")
-def get_feeds_by_district(district: str, limit: int = 50):
+def get_feeds_by_district(district: str, limit: int = 50, _user=Depends(require_user)):
     """Get feeds for specific district"""
     try:
         all_feeds = storage_manager.get_recent_feeds(limit=200)
@@ -769,7 +777,7 @@ def get_feeds_by_district(district: str, limit: int = 50):
 
 
 @app.get("/api/rivernet")
-def get_rivernet_status():
+def get_rivernet_status(_user=Depends(require_user)):
     """Get real-time river monitoring data from RiverNet.lk"""
     try:
         from src.utils.utils import tool_rivernet_status
@@ -786,7 +794,7 @@ def get_rivernet_status():
 
 
 @app.get("/api/weather/historical")
-def get_historical_climate_data():
+def get_historical_climate_data(_user=Depends(require_user)):
     """
     Get 30-year historical flood pattern analysis.
     
@@ -813,7 +821,7 @@ def get_historical_climate_data():
 
 
 @app.get("/api/weather/threat")
-def get_national_threat_score():
+def get_national_threat_score(_user=Depends(require_user)):
     """
     Get national flood threat score (0-100).
     
@@ -952,7 +960,7 @@ def get_user_intel_config() -> dict:
 # ============================================
 
 @app.get("/api/power")
-def get_power_status():
+def get_power_status(_user=Depends(require_user)):
     """
     Get CEB power outage / load shedding status.
     
@@ -976,7 +984,7 @@ def get_power_status():
 
 
 @app.get("/api/fuel")
-def get_fuel_prices():
+def get_fuel_prices(_user=Depends(require_user)):
     """
     Get current fuel prices in Sri Lanka.
     
@@ -999,7 +1007,7 @@ def get_fuel_prices():
 
 
 @app.get("/api/economy")
-def get_economic_indicators():
+def get_economic_indicators(_user=Depends(require_user)):
     """
     Get key economic indicators from CBSL.
     
@@ -1022,7 +1030,7 @@ def get_economic_indicators():
 
 
 @app.get("/api/health")
-def get_health_alerts():
+def get_health_alerts(_user=Depends(require_user)):
     """
     Get health alerts and disease information.
     
@@ -1046,7 +1054,7 @@ def get_health_alerts():
 
 
 @app.get("/api/commodities")
-def get_commodity_prices():
+def get_commodity_prices(_user=Depends(require_user)):
     """
     Get prices for essential commodities.
     
@@ -1069,7 +1077,7 @@ def get_commodity_prices():
 
 
 @app.get("/api/water")
-def get_water_supply_status():
+def get_water_supply_status(_user=Depends(require_user)):
     """
     Get water supply disruption alerts from NWSDB.
     
@@ -1104,7 +1112,7 @@ def get_water_supply_status():
 
 
 @app.get("/api/trending")
-def get_trending_topics(limit: int = 10):
+def get_trending_topics(limit: int = 10, _user=Depends(require_user)):
     """
     Get currently trending topics.
     
@@ -1150,7 +1158,7 @@ def get_trending_topics(limit: int = 10):
 
 
 @app.get("/api/trending/topic/{topic}")
-def get_topic_history(topic: str, hours: int = 24):
+def get_topic_history(topic: str, hours: int = 24, _user=Depends(require_user)):
     """
     Get hourly mention history for a specific topic.
     
@@ -1187,7 +1195,7 @@ def get_topic_history(topic: str, hours: int = 24):
 
 
 @app.post("/api/trending/record")
-def record_topic_mention(topic: str, source: str = "manual", domain: str = "general"):
+def record_topic_mention(topic: str, source: str = "manual", domain: str = "general", _user=Depends(require_user)):
     """
     Record a topic mention (for testing/manual tracking).
     
@@ -1287,7 +1295,7 @@ def _load_anomaly_components():
 
 
 @app.post("/api/predict")
-def predict_anomaly(texts: List[str] = None, text: str = None):
+def predict_anomaly(texts: List[str] = None, text: str = None, _user=Depends(require_user)):
     """
     Run anomaly detection on text(s) using per-language models.
     
@@ -1393,7 +1401,7 @@ def predict_anomaly(texts: List[str] = None, text: str = None):
 
 
 @app.get("/api/anomalies")
-def get_anomalies(limit: int = 20, threshold: float = 0.5):
+def get_anomalies(limit: int = 20, threshold: float = 0.5, _user=Depends(require_user)):
     """
     Get recent feeds that are flagged as anomalies.
     
@@ -1537,7 +1545,7 @@ def get_anomalies(limit: int = 20, threshold: float = 0.5):
 
 
 @app.get("/api/model/status")
-def get_model_status():
+def get_model_status(_user=Depends(require_user)):
     """Get anomaly detection model status"""
     try:
         from pathlib import Path
@@ -1658,7 +1666,7 @@ class ChatResponse(BaseModel):
 
 
 @app.post("/api/rag/chat", response_model=ChatResponse)
-def rag_chat(request: ChatRequest, _user=Depends(_optional_user)):
+def rag_chat(request: ChatRequest, _user=Depends(require_user)):
     """
     Chat with the RAG system.
     
@@ -1701,7 +1709,7 @@ def rag_chat(request: ChatRequest, _user=Depends(_optional_user)):
 
 
 @app.get("/api/rag/stats")
-def rag_stats():
+def rag_stats(_user=Depends(require_user)):
     """Get RAG system statistics"""
     try:
         rag = _get_rag()
@@ -1717,7 +1725,7 @@ def rag_stats():
 
 
 @app.post("/api/rag/clear")
-def rag_clear_history(_user=Depends(_optional_user)):
+def rag_clear_history(_user=Depends(require_user)):
     """Clear RAG chat history"""
     try:
         rag = _get_rag(_rag_key(_user))
@@ -1754,7 +1762,7 @@ def _ensure_intel_config() -> str:
 
 
 @app.get("/api/intel/config")
-def get_intel_config():
+def get_intel_config(_user=Depends(require_user)):
     """
     Get current intelligence monitoring configuration.
     
@@ -1778,7 +1786,7 @@ class IntelConfigUpdate(BaseModel):
 
 
 @app.post("/api/intel/config")
-def update_intel_config(config: IntelConfigUpdate):
+def update_intel_config(config: IntelConfigUpdate, _user=Depends(require_user)):
     """
     Update intelligence monitoring configuration.
     
@@ -1812,7 +1820,7 @@ def update_intel_config(config: IntelConfigUpdate):
 
 
 @app.post("/api/intel/config/add")
-def add_intel_target(target_type: str, value: str, platform: Optional[str] = None):
+def add_intel_target(target_type: str, value: str, platform: Optional[str] = None, _user=Depends(require_user)):
     """
     Add a single monitoring target.
     
@@ -1864,7 +1872,7 @@ def add_intel_target(target_type: str, value: str, platform: Optional[str] = Non
 
 
 @app.delete("/api/intel/config/remove")
-def remove_intel_target(target_type: str, value: str, platform: Optional[str] = None):
+def remove_intel_target(target_type: str, value: str, platform: Optional[str] = None, _user=Depends(require_user)):
     """
     Remove a monitoring target.
     
@@ -1985,7 +1993,7 @@ def get_weather_predictor():
 
 
 @app.get("/api/weather/predictions")
-async def get_weather_predictions():
+async def get_weather_predictions(_user=Depends(require_user)):
     """
     Get weather predictions for all 25 Sri Lankan districts.
     
@@ -2033,7 +2041,7 @@ async def get_weather_predictions():
 
 
 @app.get("/api/weather/predictions/{district}")
-async def get_district_weather(district: str):
+async def get_district_weather(district: str, _user=Depends(require_user)):
     """Get weather prediction for a specific district."""
     remote = await model_gateway.call("weather", f"/predict/{district}")
     if remote is not None:
@@ -2077,7 +2085,7 @@ async def get_district_weather(district: str):
 
 
 @app.get("/api/weather/model/status")
-async def get_weather_model_status():
+async def get_weather_model_status(_user=Depends(require_user)):
     """Get weather prediction model status and training info."""
     remote = await model_gateway.call("weather", "/model/status")
     if remote is not None:
@@ -2134,7 +2142,7 @@ def get_currency_predictor():
 
 
 @app.get("/api/currency/prediction")
-async def get_currency_prediction():
+async def get_currency_prediction(_user=Depends(require_user)):
     """
     Get USD/LKR currency prediction for next day.
     
@@ -2197,7 +2205,7 @@ async def get_currency_prediction():
 
 
 @app.get("/api/currency/history")
-async def get_currency_history(days: int = 30):
+async def get_currency_history(days: int = 30, _user=Depends(require_user)):
     """Get historical USD/LKR rates."""
     from pathlib import Path
     import pandas as pd
@@ -2235,7 +2243,7 @@ async def get_currency_history(days: int = 30):
 
 
 @app.get("/api/currency/model/status")
-async def get_currency_model_status():
+async def get_currency_model_status(_user=Depends(require_user)):
     """Get currency prediction model status."""
     remote = await model_gateway.call("currency", "/model/status")
     if remote is not None:
@@ -2292,7 +2300,7 @@ def get_stock_predictor():
 
 
 @app.get("/api/stocks/predictions")
-async def get_stock_predictions():
+async def get_stock_predictions(_user=Depends(require_user)):
     """
     Get stock price predictions for all configured stocks.
     
@@ -2374,7 +2382,7 @@ async def get_stock_predictions():
 
 
 @app.get("/api/stocks/predictions/{symbol}")
-async def get_stock_prediction_by_symbol(symbol: str):
+async def get_stock_prediction_by_symbol(symbol: str, _user=Depends(require_user)):
     """Get prediction for a specific stock symbol."""
     predictor = get_stock_predictor()
 
@@ -2400,7 +2408,7 @@ async def get_stock_prediction_by_symbol(symbol: str):
 
 
 @app.get("/api/stocks/model/status")
-async def get_stock_model_status():
+async def get_stock_model_status(_user=Depends(require_user)):
     """Get stock prediction model status for all stocks."""
     remote = await model_gateway.call("stock", "/model/status")
     if remote is not None:

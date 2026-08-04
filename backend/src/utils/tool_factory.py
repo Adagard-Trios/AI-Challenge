@@ -100,6 +100,11 @@ class ToolSet:
 
         # Import implementation functions from utils
         # These are stateless functions that can be safely wrapped
+        # Only the session-FREE scrapers are still needed from utils.py. The
+        # eleven session/text helpers that used to be imported here went with
+        # the social tools when they moved to src/scrapers -- keeping the
+        # imports would make utils.py look load-bearing for social scraping
+        # when it no longer is.
         from src.utils.utils import (
             scrape_reddit_impl,
             scrape_local_news_impl,
@@ -107,16 +112,6 @@ class ToolSet:
             scrape_government_gazette_impl,
             scrape_parliament_minutes_impl,
             scrape_train_schedule_impl,
-            PLAYWRIGHT_AVAILABLE,
-            ensure_playwright,
-            load_playwright_storage_state_path,
-            create_or_restore_playwright_session,
-            clean_twitter_text,
-            extract_twitter_timestamp,
-            clean_fb_text,
-            clean_linkedin_text,
-            extract_media_id_instagram,
-            fetch_caption_via_private_api,
         )
 
         # ============================================

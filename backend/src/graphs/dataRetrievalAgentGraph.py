@@ -2,7 +2,7 @@
 dataRetrievalAgentGraph.py - Data Retrieval Agent Graph Builder
 """
 
-from langgraph.graph import StateGraph, START, END
+from langgraph.graph import StateGraph, END
 from src.llms.groqllm import GroqLLM
 from src.states.dataRetrievalAgentState import DataRetrievalAgentState
 from src.nodes.dataRetrievalAgentNode import DataRetrievalAgentNode
@@ -86,6 +86,23 @@ class DataRetrievalAgentGraph(DataRetrievalAgentNode):
         return workflow.compile()
 
 
-llm = GroqLLM().get_llm()
-graph_builder = DataRetrievalAgentGraph(llm)
-graph = graph_builder.build_data_retrieval_agent_graph()
+_graph = None
+
+
+def __getattr__(name):
+    """
+    Build the graph on first access instead of at import (PEP 562).
+
+    RogerFullGraph imports this module for its builder class, and building at
+    import meant that import constructed a full graph the importer then threw
+    away and rebuilt. Deferring keeps `langgraph.json` (which references
+    `...py:graph`) working unchanged.
+    """
+    if name == "graph":
+        global _graph
+        if _graph is None:
+            _graph = DataRetrievalAgentGraph(
+                GroqLLM().get_llm()
+            ).build_data_retrieval_agent_graph()
+        return _graph
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

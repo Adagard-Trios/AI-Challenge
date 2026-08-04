@@ -3,7 +3,6 @@ src/states/dataRetrievalAgentState.py
 Data Retrieval Agent State - handles scraping tasks
 """
 
-import operator
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from pydantic import BaseModel, Field

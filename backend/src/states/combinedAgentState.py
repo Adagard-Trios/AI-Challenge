@@ -4,7 +4,6 @@ COMPLETE - All original states preserved with proper typing and Reducer
 """
 
 from __future__ import annotations
-import operator
 from typing import Optional, List, Dict, Any, Annotated, Union
 from datetime import datetime
 from pydantic import BaseModel, Field

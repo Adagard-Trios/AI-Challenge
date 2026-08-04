@@ -42,7 +42,6 @@ class PoliticalAgentState(TypedDict, total=False):
 
     # ===== CHANGE DETECTION =====
     last_alerts_hash: Optional[int]
-    change_detected: bool
 
     # ===== SOCIAL MEDIA MONITORING =====
     social_media_results: Annotated[List[Dict[str, Any]], operator.add]

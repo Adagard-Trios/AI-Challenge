@@ -567,7 +567,12 @@ Generate a brief (3-5 sentences) executive summary highlighting the most importa
         river_status = river_summary.get("overall_status", "unknown")
         has_flood_alerts = river_summary.get("has_alerts", False)
 
-        change_detected = state.get("change_detected", False) or has_flood_alerts
+        # Was `state.get("change_detected", False) or has_flood_alerts`, but no
+        # node in any graph ever wrote change_detected -- it was declared in all
+        # five states and set by none, so the first operand was permanently
+        # False and the flood alert was doing all the work. Dropped rather than
+        # left in place implying a cross-cycle comparison that never happened.
+        change_detected = has_flood_alerts
         change_line = "⚠️ NEW ALERTS DETECTED\n" if change_detected else ""
 
         # Build river status section

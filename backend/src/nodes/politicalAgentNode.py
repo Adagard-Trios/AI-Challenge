@@ -581,25 +581,42 @@ Source: Multi-platform aggregation (Twitter, Facebook, LinkedIn, Instagram, Redd
                         detected_district = district.title()
                         break
 
-                # Determine severity based on keywords
+                # Determine severity based on keywords.
+                # "high" is reserved for instability. Routine governance
+                # (parliament sitting, a minister speaking, a bill tabled) is the
+                # baseline volume of this feed -- scoring it "high" put a 0.7 on
+                # essentially every political post and buried real escalation.
+                lowered = post_text.lower()
                 severity = "medium"
                 if any(
-                    kw in post_text.lower()
+                    kw in lowered
                     for kw in [
-                        "parliament",
-                        "president",
-                        "minister",
-                        "election",
-                        "policy",
-                        "bill",
+                        "protest",
+                        "crisis",
+                        "unrest",
+                        "curfew",
+                        "emergency",
+                        "no-confidence",
+                        "impeach",
+                        "resign",
+                        "strike",
                     ]
                 ):
                     severity = "high"
                 elif any(
-                    kw in post_text.lower()
-                    for kw in ["protest", "opposition", "crisis"]
+                    kw in lowered
+                    for kw in [
+                        "agreement",
+                        "reform",
+                        "investment",
+                        "aid",
+                        "development",
+                        "approved",
+                    ]
                 ):
-                    severity = "high"
+                    severity = "low"
+
+                impact = "opportunity" if severity == "low" else "risk"
 
                 domain_insights.append(
                     {
@@ -607,7 +624,7 @@ Source: Multi-platform aggregation (Twitter, Facebook, LinkedIn, Instagram, Redd
                         "domain": "political",
                         "summary": f"{detected_district} Political: {post_text[:200]}",
                         "severity": severity,
-                        "impact_type": "risk",
+                        "impact_type": impact,
                         "timestamp": timestamp,
                     }
                 )

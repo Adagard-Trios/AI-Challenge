@@ -28,7 +28,12 @@ class StorageConfig:
 
     # ChromaDB Configuration
     CHROMADB_PATH: str = os.getenv("CHROMADB_PATH", str(CHROMADB_DIR))
-    CHROMADB_COLLECTION: str = os.getenv("CHROMADB_COLLECTION", "Roger_feeds")
+    # Deliberately NOT "Roger_feeds" -- that collection belongs to
+    # utils/db_manager.ChromaDBManager, which stores chunked raw posts for RAG.
+    # This store holds orchestrator events and queries it for semantic dedup, so
+    # sharing one collection made every event match the raw post it was derived
+    # from and get discarded as a duplicate of its own source.
+    CHROMADB_COLLECTION: str = os.getenv("CHROMADB_COLLECTION", "Roger_events")
     CHROMADB_SIMILARITY_THRESHOLD: float = float(
         os.getenv("CHROMADB_SIMILARITY_THRESHOLD", "0.85")
     )

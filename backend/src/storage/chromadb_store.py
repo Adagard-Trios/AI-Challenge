@@ -20,6 +20,10 @@ except ImportError:
 
 from .config import config
 
+# Tags every document this store writes, so similarity queries can exclude
+# anything another writer put in the same collection.
+RECORD_TYPE = "orchestrator_event"
+
 
 class ChromaDBStore:
     """
@@ -77,7 +81,16 @@ class ChromaDBStore:
         threshold = threshold or config.CHROMADB_SIMILARITY_THRESHOLD
 
         try:
-            results = self.collection.query(query_texts=[summary], n_results=n_results)
+            # Restrict to records this store wrote. The collection name is
+            # env-overridable, so it can still be pointed at ChromaDBManager's
+            # raw-post corpus; without this filter the nearest neighbour of a new
+            # event is typically the post it was summarised from, which scores
+            # far above threshold and rejects the event as its own duplicate.
+            results = self.collection.query(
+                query_texts=[summary],
+                n_results=n_results,
+                where={"record_type": RECORD_TYPE},
+            )
 
             if not results["ids"] or not results["ids"][0]:
                 return None
@@ -130,8 +143,9 @@ class ChromaDBStore:
                     if value is not None and not isinstance(value, (dict, list)):
                         safe_metadata[key] = str(value)
 
-            # Add timestamp
+            # Add timestamp and the marker find_similar filters on
             safe_metadata["indexed_at"] = datetime.utcnow().isoformat()
+            safe_metadata["record_type"] = RECORD_TYPE
 
             self.collection.add(
                 ids=[event_id], documents=[summary], metadatas=[safe_metadata]

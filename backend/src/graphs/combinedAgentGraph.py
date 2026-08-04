@@ -1,11 +1,25 @@
 """
 combinedAgentGraph.py - Main entry point for the Combined Agent System.
+
+This is the orchestrator main.py runs in production.
+
+There is a second, similar orchestrator in RogerGraph.py (RogerFullGraph), used
+by app.py. Both classes were once called CombinedAgentGraphBuilder, so which one
+you got depended entirely on which module you imported. They are NOT
+interchangeable:
+
+  - Here, each domain agent is wrapped in a Python function that calls
+    subgraph.invoke({}) on a FRESH state and catches its exceptions, so one
+    failing agent degrades to zero insights instead of failing the cycle.
+    Five agents; no DataRetrievalAgent.
+  - RogerFullGraph adds the compiled subgraphs directly as LangGraph nodes, so
+    they share the parent state and an exception aborts the run. Six agents,
+    including DataRetrievalAgent.
 """
 
 from __future__ import annotations
 from typing import Dict, Any
 import logging
-from datetime import datetime
 
 from langgraph.graph import StateGraph, START, END
 
@@ -35,7 +49,7 @@ if not logger.handlers:
     logger.addHandler(ch)
 
 
-class CombinedAgentGraphBuilder:
+class CombinedAgentGraph:
     def __init__(self, llm):
         self.llm = llm
 
@@ -141,17 +155,40 @@ class CombinedAgentGraphBuilder:
         workflow.add_edge("FeedAggregatorAgent", "DataRefresherAgent")
         workflow.add_edge("DataRefresherAgent", "DataRefreshRouter")
 
-        workflow.add_conditional_edges(
-            "DataRefreshRouter",
-            lambda x: x.route if x.route else "END",
-            {"GraphInitiator": "GraphInitiator", "END": END},
-        )
+        # data_refresh_router returns {"route": "END"} unconditionally -- the
+        # 60s cadence is driven externally by main.py's run_graph_loop, not by
+        # looping inside the graph. The old conditional edge kept a
+        # "GraphInitiator" branch that nothing could select; had anything ever
+        # selected it, the graph would have re-entered itself and died on
+        # LangGraph's recursion limit rather than looping usefully.
+        workflow.add_edge("DataRefreshRouter", END)
 
         return workflow.compile()
 
 
-print("Building Combined Agent Graph...")
-llm = GroqLLM().get_llm()
-builder = CombinedAgentGraphBuilder(llm)
-graph = builder.build_graph()
-print("Combined Graph ready")
+_graph = None
+
+
+def __getattr__(name):
+    """
+    Build the graph on first access instead of at import (PEP 562).
+
+    Importing this module used to build the entire system as a side effect, and
+    it imports the five domain builders -- each of which did the same. So a
+    single `import main` constructed ten domain graphs: five when the builder
+    modules were imported, five more inside build_graph(). Every one of those
+    brings up its own agents, ToolSets and Neo4j/ChromaDB managers, which is a
+    large part of why the 512 MB instance ran out of memory.
+
+    Deferring keeps `langgraph.json` (which references `...py:graph`) and
+    `from ... import graph` working unchanged, while importers that only want
+    the builder class now pay nothing.
+    """
+    if name == "graph":
+        global _graph
+        if _graph is None:
+            logger.info("Building Combined Agent Graph...")
+            _graph = CombinedAgentGraph(GroqLLM().get_llm()).build_graph()
+            logger.info("Combined Agent Graph ready")
+        return _graph
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -31,7 +31,11 @@ def utc_now() -> datetime:
 
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
-from src.graphs.combinedAgentGraph import graph
+# NB: the graph is deliberately NOT imported here. Building it constructs every
+# agent, ToolSet and Neo4j/ChromaDB manager -- tens of seconds and hundreds of
+# MB -- which delayed uvicorn's bind long enough to fail Render's 5s health
+# check. run_graph_loop imports it inside the worker thread instead, so the API
+# is serving before any of that starts.
 from src.states.combinedAgentState import CombinedAgentState
 from src.storage.storage_manager import StorageManager
 from src import model_gateway
@@ -496,6 +500,14 @@ def run_graph_loop():
 
     if start_delay > 0 and shutdown_event.wait(timeout=start_delay):
         return
+
+    # Imported here, not at module scope: this is what actually builds the graph
+    # (combinedAgentGraph exposes it through a lazy module __getattr__), and it
+    # must not happen on the import path that uvicorn's startup blocks on.
+    logger.info("[GRAPH THREAD] Building agent graph...")
+    from src.graphs.combinedAgentGraph import graph
+
+    logger.info("[GRAPH THREAD] Agent graph ready")
 
     cycle_count = 0
     

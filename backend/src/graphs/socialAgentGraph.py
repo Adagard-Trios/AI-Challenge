@@ -2,7 +2,6 @@
 socialAgentGraph.py - Social Agent Graph with Subgraph Architecture
 """
 
-import uuid
 from langgraph.graph import StateGraph, END
 from src.states.socialAgentState import SocialAgentState
 from src.nodes.socialAgentNode import SocialAgentNode
@@ -98,6 +97,22 @@ class SocialGraphBuilder:
 
         return main_graph.compile()
 
+_graph = None
 
-llm = GroqLLM().get_llm()
-graph = SocialGraphBuilder(llm).build_graph()
+
+def __getattr__(name):
+    """
+    Build the graph on first access instead of at import (PEP 562).
+
+    This module is imported for its builder class by both orchestrators, and
+    building at import meant every such import constructed a full graph -- with
+    its agents, ToolSet and Neo4j/ChromaDB managers -- that the importer then
+    threw away and rebuilt. Deferring keeps `langgraph.json` (which references
+    `...py:graph`) working unchanged.
+    """
+    if name == "graph":
+        global _graph
+        if _graph is None:
+            _graph = SocialGraphBuilder(GroqLLM().get_llm()).build_graph()
+        return _graph
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -1,5 +1,17 @@
 """
 RogerGraph.py - Main Roger Graph with Fan-Out/Fan-In Architecture
+
+Used by app.py. The production entry point (main.py) runs the other
+orchestrator, CombinedAgentGraph in combinedAgentGraph.py. Both classes were
+once called CombinedAgentGraphBuilder, so which one you got depended entirely on
+which module you imported. They are NOT interchangeable:
+
+  - Here, the compiled domain subgraphs are added directly as LangGraph nodes,
+    so they share the parent state and a raising agent aborts the whole run.
+    Six agents, including DataRetrievalAgent.
+  - CombinedAgentGraph wraps each agent in a function that invokes it on a fresh
+    state and swallows its exceptions, so one failing agent degrades to zero
+    insights. Five agents; no DataRetrievalAgent.
 """
 
 from __future__ import annotations
@@ -24,7 +36,7 @@ if not logger.handlers:
     logger.addHandler(ch)
 
 
-class CombinedAgentGraphBuilder:
+class RogerFullGraph:
     def __init__(self, llm):
         self.llm = llm
 
@@ -76,25 +88,34 @@ class CombinedAgentGraphBuilder:
         workflow.add_edge("FeedAggregatorAgent", "DataRefresherAgent")
         workflow.add_edge("DataRefresherAgent", "DataRefreshRouter")
 
-        def route_decision(state):
-            route = getattr(state, "route", [])
-            if route is None or route == "":
-                return END
-            if route == "GraphInitiator":
-                return "GraphInitiator"
-            return END
-
-        workflow.add_conditional_edges(
-            "DataRefreshRouter",
-            route_decision,
-            {"GraphInitiator": "GraphInitiator", END: END},
-        )
+        # data_refresh_router returns {"route": "END"} unconditionally -- the
+        # refresh cadence is driven by the caller, not by looping inside the
+        # graph. The old conditional edge kept a "GraphInitiator" branch that
+        # nothing could select; had anything ever selected it, the graph would
+        # have re-entered itself and died on LangGraph's recursion limit rather
+        # than looping usefully.
+        workflow.add_edge("DataRefreshRouter", END)
 
         graph = workflow.compile()
         logger.info("Roger Graph compiled successfully")
         return graph
 
 
-llm = GroqLLM().get_llm()
-builder = CombinedAgentGraphBuilder(llm)
-graph = builder.build_graph()
+_graph = None
+
+
+def __getattr__(name):
+    """
+    Build the graph on first access instead of at import (PEP 562).
+
+    See the identical note in combinedAgentGraph.py: importing this module used
+    to construct six domain graphs -- and every node's ToolSet, Neo4j and
+    ChromaDB manager -- purely as an import side effect. Deferring keeps
+    `langgraph.json` and `from ... import graph` working unchanged.
+    """
+    if name == "graph":
+        global _graph
+        if _graph is None:
+            _graph = RogerFullGraph(GroqLLM().get_llm()).build_graph()
+        return _graph
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

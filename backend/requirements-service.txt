@@ -63,11 +63,11 @@ lxml
 # utils.py guards the import (PLAYWRIGHT_AVAILABLE), so the server boots fine
 # and browser-backed tools report themselves unavailable rather than crashing.
 #
-# KNOWN COST: two session-FREE scrapers -- rivernet (utils.py:513) and the
-# weather nowcast (utils.py:2093) -- are browser-driven and therefore stop
-# working server-side. They need no user account, so they belong in a small
-# browser-capable service or an HTTP rewrite rather than back in this image.
-# Tracked as follow-up; flagged here so it is not discovered by surprise.
+# Both session-free scrapers that needed a browser (rivernet, weather nowcast)
+# have been rewritten as plain HTTP calls. Nothing here needs a browser.
+
+
+
 
 # Required, not optional: src/utils/utils.py:21 imports yfinance at module level
 # for the CSE stock scraper tool. Omitting it breaks `import main` outright.

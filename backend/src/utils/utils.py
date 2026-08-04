@@ -266,6 +266,34 @@ _rivernet_cache: Dict[str, Any] = {}
 _rivernet_cache_time: Optional[datetime] = None
 RIVERNET_CACHE_DURATION_MINUTES = 30  # Increased from 15 to reduce load
 
+# rivernet.lk's own JSON API, the one its Flutter front-end calls. Found in the
+# app's bundle (CACHE_URL/API_URL constants). Public -- no key, no session.
+RIVERNET_API_URL = "https://api.rivernet.lk/api/overview/latest-status-paginated"
+
+# Severity comes from latest.alertType, which the API states outright. Do NOT
+# derive it from alertColor: the colours are not a severity ramp. Observed live,
+# 29 of 30 stations are Blue (#44518C) with alertType "normal", and the single
+# Green (#A9FF6E) station is the one at alertType "alert" -- so reading green as
+# "safe" and blue as "alert", which is the intuitive guess, inverts the meaning
+# and would have reported 29 false flood alerts out of 30 stations.
+RIVERNET_SEVERITY = {
+    "normal": "normal",
+    "alert": "alert",
+    "warning": "warning",
+    "danger": "critical",
+    "critical": "critical",
+}
+
+# Kept only so a colour can be shown in the UI; not used for severity.
+RIVERNET_ALERT_COLOURS = {
+    "#A9FF6E": "green",
+    "#F9E973": "yellow",
+    "#FF9B2B": "orange",
+    "#EC3E40": "red",
+    "#44518C": "blue",
+    "#FFFFFF": "white",
+}
+
 # All rivers monitored by rivernet.lk (expanded list)
 RIVERNET_LOCATIONS = {
     # Main rivers
@@ -328,274 +356,146 @@ def scrape_rivernet_impl(
     use_cache: bool = True,
 ) -> Dict[str, Any]:
     """
-    Scrape river level data from rivernet.lk (Flood Early Warning System)
+    River levels and flood alerts from rivernet.lk.
 
-    IMPORTANT: rivernet.lk is a Flutter SPA, so we need Playwright for scraping.
-    Data is cached for 15 minutes to reduce load on the service.
+    Uses rivernet.lk's own JSON API rather than driving a browser.
 
-    Args:
-        locations: List of location keys to scrape (e.g., ["kelaniya", "ratnapura"])
-                   If None, scrapes all major locations
-        use_cache: Whether to use cached data if available
+    The previous implementation launched Chromium against the Flutter SPA and
+    waited up to five minutes for it to render -- because a plain GET of
+    https://rivernet.lk returns a shell whose entire visible text is
+    "RIVERNET.LK". That made this the only reason the server image still needed
+    a browser, which is 100-300 MB resident on a 512 MB instance.
 
-    Returns:
-        Dict with river levels, warnings, and status for each location
+    The SPA gets its data from a public endpoint, found in its own bundle:
+
+        GET https://api.rivernet.lk/api/overview/latest-status-paginated
+            ?deviceType=river_level
+
+    Note deviceType, camelCase -- device_type and type both return
+    HTTP 400 "No time series data found for the specified device type."
+
+    That returns ~30 stations with level, unit, alert colour, trend, comms
+    status and coordinates. Same data the site shows, in ~1 second instead of
+    five minutes, with no browser.
     """
     global _rivernet_cache, _rivernet_cache_time
 
-    # Check cache
     if use_cache and _rivernet_cache_time:
         cache_age = (utc_now() - _rivernet_cache_time).total_seconds() / 60
         if cache_age < RIVERNET_CACHE_DURATION_MINUTES:
             logger.info(f"[RIVERNET] Using cached data ({cache_age:.1f} min old)")
             return _rivernet_cache
 
-    if not PLAYWRIGHT_AVAILABLE:
-        logger.warning(
-            "[RIVERNET] Playwright not available. Cannot scrape rivernet.lk (Flutter SPA)"
-        )
-        return {
-            "error": "Playwright required for rivernet.lk (Flutter SPA)",
-            "suggestion": "Install playwright: pip install playwright && playwright install chromium",
-            "fetched_at": utc_now().isoformat(),
-        }
+    logger.info("[RIVERNET] Fetching river levels from the rivernet.lk API...")
 
-    logger.info("[RIVERNET] Starting river level data collection...")
-
-    results = {
+    results: Dict[str, Any] = {
         "rivers": [],
         "alerts": [],
         "summary": {},
         "fetched_at": utc_now().isoformat(),
-        "source": "rivernet.lk",
+        "source": "api.rivernet.lk",
     }
-
-    # Determine which locations to scrape
-    target_locations = locations or list(RIVERNET_LOCATIONS.keys())
 
     try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            context = browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                viewport={"width": 1280, "height": 720},
-            )
-            page = context.new_page()
-            page.set_default_timeout(300000)  # 300s (5 min) for slow Flutter SPA
-
-            # First, visit main page to get overall status
-            try:
-                page.goto(
-                    "https://rivernet.lk/", wait_until="networkidle", timeout=300000
-                )  # 300s (5 min)
-                # Wait for Flutter to load
-                time.sleep(5)  # Increased to 5s for Flutter rendering
-
-                # Try to extract any visible data from main page
-                main_html = page.content()
-                main_soup = BeautifulSoup(main_html, "html.parser")
-
-                # NOTE: Disabled loose keyword extraction - was causing false positives
-                # Real flood alerts will be determined from individual river page status
-                # The previous alert_keywords approach matched generic site text like
-                # "warning: javascript required" causing fake alerts
-
-                # If we need main page alerts, look for specific alert banner elements
-                # alert_banners = main_soup.select(".alert-banner, .flood-warning, .critical-notice")
-                # for banner in alert_banners:
-                #     results["alerts"].append({...})
-
-                logger.info("[RIVERNET] Main page loaded successfully")
-
-            except Exception as e:
-                logger.warning(f"[RIVERNET] Error loading main page: {e}")
-
-            # Visit each river location page (all 10 rivers)
-            for loc_key in target_locations[:10]:  # All 10 rivers
-                if loc_key not in RIVERNET_LOCATIONS:
-                    continue
-
-                loc_info = RIVERNET_LOCATIONS[loc_key]
-
-                try:
-                    logger.info(f"[RIVERNET] Checking {loc_info['name']}...")
-                    page.goto(
-                        loc_info["url"], wait_until="networkidle", timeout=300000
-                    )  # 300s (5 min) timeout
-                    time.sleep(5)  # Wait for Flutter content to render
-
-                    html = page.content()
-                    soup = BeautifulSoup(html, "html.parser")
-                    page_text = soup.get_text(separator="\n", strip=True)
-
-                    # Extract river data from page text
-                    river_data = {
-                        "location_key": loc_key,
-                        "name": loc_info["name"],
-                        "region": loc_info["region"],
-                        "url": loc_info["url"],
-                        "status": "unknown",
-                        "water_level": None,
-                        "warning_level": None,
-                        "last_updated": None,
-                        "raw_text": page_text[:500] if page_text else None,
-                    }
-
-                    # Try to extract water level (expanded patterns for rivernet.lk)
-                    level_patterns = [
-                        # Standard formats
-                        r"(?:water\s*level|level)[:\s]*([0-9]+\.?[0-9]*)\s*(m|meter|ft)?",
-                        r"([0-9]+\.?[0-9]*)\s*(m|meter)\s*(?:above|below)?",
-                        r"current[:\s]*([0-9]+\.?[0-9]*)\s*(m)?",
-                        # Chart/graph values
-                        r"([0-9]+\.?[0-9]+)\s*(?:m|MSL)",
-                        # Time series pattern (latest value)
-                        r"(?:latest|current|now)[:\s]*([0-9]+\.?[0-9]*)",
-                        # Warning threshold pattern
-                        r"threshold[:\s]*([0-9]+\.?[0-9]*)",
-                    ]
-
-                    for pattern in level_patterns:
-                        match = re.search(pattern, page_text, re.I)
-                        if match:
-                            try:
-                                value = float(match.group(1))
-                                if (
-                                    0 < value < 50
-                                ):  # Sanity check (rivers typically 0-50m)
-                                    river_data["water_level"] = {
-                                        "value": round(value, 2),
-                                        "unit": (
-                                            match.group(2)
-                                            if len(match.groups()) > 1
-                                            and match.group(2)
-                                            else "m"
-                                        ),
-                                    }
-                                    logger.info(f"    Water level: {value}m")
-                                    break
-                            except (ValueError, IndexError):
-                                continue
-
-                    # Determine status based on keywords (STRICTER to avoid false positives)
-                    text_lower = page_text.lower()
-
-                    # Default to normal - only escalate if clear flood indicators
-                    river_data["status"] = "normal"
-
-                    # CRITICAL: Only consider keywords in FLOOD CONTEXT
-                    # Look for phrases, not just words, to avoid false positives
-
-                    # DANGER / CRITICAL - Very specific phrases only
-                    danger_phrases = [
-                        "major flood",
-                        "danger level exceeded",
-                        "critical flood",
-                        "red alert",
-                        "evacuate immediately",
-                        "extreme flood",
-                        "water level exceeds danger",
-                        "above danger level",
-                    ]
-                    if any(phrase in text_lower for phrase in danger_phrases):
-                        river_data["status"] = "danger"
-
-                    # WARNING - Specific flood warning phrases
-                    elif any(
-                        phrase in text_lower
-                        for phrase in [
-                            "minor flood",
-                            "warning level exceeded",
-                            "flood alert issued",
-                            "amber alert",
-                            "approaching warning level",
-                            "water level exceeds warning",
-                            "above warning level",
-                        ]
-                    ):
-                        river_data["status"] = "warning"
-
-                    # RISING - Only if explicitly rising
-                    elif any(
-                        phrase in text_lower
-                        for phrase in [
-                            "water level rising",
-                            "rising trend detected",
-                            "level is rising rapidly",
-                            "increasing water level",
-                        ]
-                    ):
-                        river_data["status"] = "rising"
-
-                    # NORMAL indicators (optional, just for logging)
-                    elif any(
-                        phrase in text_lower
-                        for phrase in [
-                            "normal level",
-                            "stable",
-                            "safe level",
-                            "decreasing",
-                            "below warning",
-                        ]
-                    ):
-                        river_data["status"] = "normal"
-
-                    results["rivers"].append(river_data)
-                    logger.info(f"  ✓ {loc_info['name']}: {river_data['status']}")
-
-                except Exception as e:
-                    logger.warning(f"[RIVERNET] Error scraping {loc_info['name']}: {e}")
-                    results["rivers"].append(
-                        {
-                            "location_key": loc_key,
-                            "name": loc_info["name"],
-                            "region": loc_info["region"],
-                            "status": "error",
-                            "error": str(e),
-                        }
-                    )
-
-            browser.close()
-
+        response = requests.get(
+            RIVERNET_API_URL,
+            params={"deviceType": "river_level"},
+            headers={**DEFAULT_HEADERS, "Accept": "application/json"},
+            timeout=30,
+        )
+        response.raise_for_status()
+        payload = response.json()
     except Exception as e:
-        logger.error(f"[RIVERNET] Critical error: {e}")
-        results["error"] = str(e)
+        logger.error(f"[RIVERNET] API request failed: {e}")
+        return {
+            "error": f"Could not reach the rivernet.lk API: {e}",
+            "rivers": [],
+            "alerts": [],
+            "fetched_at": utc_now().isoformat(),
+        }
 
-    # Generate summary
-    status_counts = {
-        "danger": 0,
-        "warning": 0,
-        "rising": 0,
-        "normal": 0,
-        "unknown": 0,
-        "error": 0,
-    }
-    for river in results["rivers"]:
-        status = river.get("status", "unknown")
-        status_counts[status] = status_counts.get(status, 0) + 1
+    stations = (payload.get("results") or {}).get("data") or []
+    wanted = {loc.lower() for loc in locations} if locations else None
 
-    results["summary"] = {
-        "total_monitored": len(results["rivers"]),
-        "status_breakdown": status_counts,
-        "has_alerts": status_counts["danger"] > 0 or status_counts["warning"] > 0,
-        "overall_status": (
-            "danger"
-            if status_counts["danger"] > 0
-            else (
-                "warning"
-                if status_counts["warning"] > 0
-                else ("rising" if status_counts["rising"] > 0 else "normal")
+    for station in stations:
+        try:
+            latest = station.get("latest") or {}
+            extra = station.get("additional") or {}
+            region = (station.get("region") or "").lower()
+
+            if wanted and region not in wanted:
+                continue
+
+            level = latest.get("latestLevel")
+            level = float(level) if level not in (None, "") else None
+            previous = latest.get("before30mLevel")
+            previous = float(previous) if previous not in (None, "") else None
+
+            # change is the API's own trend flag: 1 rising, -1 falling, 0 steady.
+            change = latest.get("change")
+            trend = {1: "rising", -1: "falling", 0: "steady"}.get(change, "unknown")
+
+            # alertType is the API's own severity label. Colour is decorative
+            # here -- see the note on RIVERNET_SEVERITY for why inferring
+            # severity from it produces 29 false alerts out of 30 stations.
+            colour = (latest.get("alertColor") or "").upper()
+            severity = RIVERNET_SEVERITY.get(
+                (latest.get("alertType") or "").lower(), "unknown"
             )
-        ),
-    }
 
-    # Update cache
-    _rivernet_cache = results
-    _rivernet_cache_time = utc_now()
+            river = {
+                "name": latest.get("name") or extra.get("location") or station.get("unitId"),
+                "region": region,
+                "level_m": level,
+                "previous_level_m": previous,
+                "max_level_m": extra.get("maxLevel"),
+                "trend": trend,
+                "severity": severity,
+                "alert_colour": RIVERNET_ALERT_COLOURS.get(colour, colour or None),
+                "reading_time": latest.get("datetime") or latest.get("time"),
+                # A station that has stopped reporting is itself signal during a
+                # flood -- surfaced rather than silently treated as "no alert".
+                "reporting": bool(latest.get("communication")),
+                "coordinates": extra.get("coordinates"),
+                "unit_id": station.get("unitId"),
+            }
+            results["rivers"].append(river)
+
+            if severity in ("warning", "alert", "critical") or not river["reporting"]:
+                results["alerts"].append({
+                    "river": river["name"],
+                    "region": region,
+                    "severity": severity if river["reporting"] else "no_data",
+                    "level_m": level,
+                    "max_level_m": extra.get("maxLevel"),
+                    "trend": trend,
+                    "message": (
+                        f"{river['name']}: {level}m ({trend})"
+                        if river["reporting"]
+                        else f"{river['name']}: station not reporting"
+                    ),
+                })
+        except Exception as e:
+            logger.warning(f"[RIVERNET] Skipped a malformed station record: {e}")
+            continue
+
+    reporting = [r for r in results["rivers"] if r["reporting"]]
+    results["summary"] = {
+        "total_stations": len(results["rivers"]),
+        "reporting": len(reporting),
+        "offline": len(results["rivers"]) - len(reporting),
+        "rising": sum(1 for r in reporting if r["trend"] == "rising"),
+        "alerts": len(results["alerts"]),
+        "regions": sorted({r["region"] for r in results["rivers"] if r["region"]}),
+    }
 
     logger.info(
-        f"[RIVERNET] Completed: {len(results['rivers'])} rivers, {len(results['alerts'])} alerts"
+        f"[RIVERNET] {results['summary']['total_stations']} stations, "
+        f"{results['summary']['alerts']} alert(s)"
     )
+
+    _rivernet_cache = results
+    _rivernet_cache_time = utc_now()
     return results
 
 
@@ -1939,167 +1839,105 @@ def tool_dmc_alerts() -> Dict[str, Any]:
 
 def tool_weather_nowcast(location: str = "Colombo") -> Dict[str, Any]:
     """
-    Comprehensive Weather Scraper (Robust Mode):
-    1. Homepage (General Text).
-    2. City/District Forecast (Direct URL).
-    3. Critical Advisory PDFs.
-    Handles slow loading by capturing content even if timeouts occur.
+    Current conditions per district from meteo.gov.lk.
+
+    Rewritten twice over: it no longer needs a browser, and it no longer looks
+    for a page layout that stopped existing.
+
+    meteo.gov.lk was a Joomla site; the old parser looked for div.itemFullText,
+    div[itemprop=articleBody] and the literal text "WEATHER FORECAST FOR". The
+    site has since been redesigned and **none of those match any more** -- all
+    three return zero elements -- so the function had been returning
+    "General forecast text not found." regardless of what the page said. That
+    was independent of the browser removal; it was stale selectors.
+
+    The current page embeds per-district readings as JSON on the map markers:
+
+        <div class="district-point" data-name="JAFFNA"
+             data-weather='{"lastUpdated":"...","rainfall":"0.0",
+                            "totalRainfall":"0.0","temp":"29.4",
+                            "rh":"78","forecast":"fairnight"}'>
+
+    That is structured data rather than prose, so it is both easier to parse and
+    more useful downstream -- temperature, rainfall and humidity per district
+    instead of a paragraph to regex. Served in the plain HTML, so a normal HTTP
+    GET is enough.
     """
     base_url = "https://meteo.gov.lk/"
-    city_forecast_url = "https://meteo.gov.lk/index.php?option=com_content&view=article&id=102&Itemid=360&lang=en"
 
-    combined_report = []
-    html_home = ""
-    html_city = ""
+    response = _safe_get(base_url)
+    if response is None:
+        return {
+            "error": "Could not reach meteo.gov.lk",
+            "location": location,
+            "fetched_at": utc_now().isoformat(),
+        }
 
-    if PLAYWRIGHT_AVAILABLE:
+    soup = BeautifulSoup(response.text, "html.parser")
+    points = soup.find_all("div", class_="district-point")
+
+    districts: Dict[str, Any] = {}
+    for point in points:
+        name = (point.get("data-name") or "").strip()
+        raw = point.get("data-weather")
+        if not name or not raw:
+            continue
         try:
-            with sync_playwright() as p:
-                browser = p.chromium.launch(headless=True)
-                # Use a standard browser context (no aggressive blocking)
-                context = browser.new_context(
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                )
-                page = context.new_page()
-                page.set_default_timeout(60000)  # Give it 60 seconds (it's slow)
+            reading = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            continue
 
-                # --- A. Visit Homepage ---
-                try:
-                    page.goto(base_url, wait_until="domcontentloaded")
-                    # Try to wait for text, but don't crash if it takes too long
-                    try:
-                        page.wait_for_selector("div.itemFullText", timeout=15000)
-                    except:
-                        pass
-                    html_home = page.content()
-                except Exception as e:
-                    # Even if it times out, grab what we have!
-                    logger.warning(
-                        f"[WEATHER] Homepage timeout (capturing partial): {e}"
-                    )
-                    html_home = page.content()
+        def _num(value):
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return None
 
-                # --- B. Visit City Forecast ---
-                try:
-                    page.goto(city_forecast_url, wait_until="domcontentloaded")
-                    try:
-                        page.wait_for_selector("table", timeout=15000)
-                    except:
-                        pass
-                    html_city = page.content()
-                except Exception as e:
-                    logger.warning(
-                        f"[WEATHER] City Forecast timeout (capturing partial): {e}"
-                    )
-                    html_city = page.content()
+        districts[name.title()] = {
+            "district": name.title(),
+            "temperature_c": _num(reading.get("temp")),
+            "humidity_pct": _num(reading.get("rh")),
+            "rainfall_mm": _num(reading.get("rainfall")),
+            "total_rainfall_mm": _num(reading.get("totalRainfall")),
+            "condition": reading.get("forecast"),
+            "last_updated": reading.get("lastUpdated"),
+        }
 
-                browser.close()
-        except Exception as e:
-            logger.warning(f"[WEATHER] Playwright critical fail: {e}")
+    if not districts:
+        # Say which selector failed. A silent empty result is what let the old
+        # breakage go unnoticed for so long.
+        return {
+            "error": (
+                "meteo.gov.lk returned no district-point markers. The page "
+                "layout has probably changed again -- check the parser."
+            ),
+            "location": location,
+            "fetched_at": utc_now().isoformat(),
+        }
 
-    # Fallback to requests if Playwright returned nothing
-    if not html_home or len(html_home) < 500:
-        resp = _safe_get(base_url)
-        html_home = resp.text if resp else ""
+    wanted = location.strip().title()
+    selected = districts.get(wanted)
 
-    if not html_city or len(html_city) < 500:
-        resp = _safe_get(city_forecast_url)
-        html_city = resp.text if resp else ""
-
-    if not html_home and not html_city:
-        return {"error": "Failed to load Meteo.gov.lk"}
-
-    # --- PARSE HOMEPAGE ---
-    soup_home = BeautifulSoup(html_home, "html.parser")
-    english_forecast = ""
-
-    header = soup_home.find(string=re.compile(r"WEATHER FORECAST FOR", re.I))
-    if header:
-        container = header.find_parent("div") or header.find_parent("article")
-        if container:
-            text = container.get_text(separator="\n", strip=True)
-            start = text.upper().find("WEATHER FORECAST FOR")
-            if start != -1:
-                english_forecast = text[start:][:2500]
-
-    if not english_forecast:
-        main = soup_home.find("div", class_="itemFullText") or soup_home.find(
-            "div", itemprop="articleBody"
-        )
-        english_forecast = (
-            main.get_text(separator="\n", strip=True)[:2500]
-            if main
-            else "General forecast text not found."
-        )
-
-    combined_report.append("--- ISLAND-WIDE GENERAL FORECAST ---")
-    combined_report.append(english_forecast)
-
-    # --- PARSE CITY FORECAST (Districts) ---
-    if html_city:
-        soup_city = BeautifulSoup(html_city, "html.parser")
-        table = soup_city.find("table")
-        if table:
-            combined_report.append("\n--- DISTRICT/CITY FORECASTS ---")
-            rows = table.find_all("tr")
-
-            # Header logic
-            if rows:
-                header_row = rows[0]
-                headers = [
-                    th.get_text(strip=True) for th in header_row.find_all(["th", "td"])
-                ]
-                if not "".join(headers).strip() and len(rows) > 1:
-                    headers = [
-                        th.get_text(strip=True) for th in rows[1].find_all(["th", "td"])
-                    ]
-
-                clean_header = " | ".join(headers[:4])
-                combined_report.append(clean_header)
-                combined_report.append("-" * len(clean_header))
-
-            # Row logic
-            for row in rows:
-                cols = [td.get_text(strip=True) for td in row.find_all("td")]
-                if not cols or len(cols) < 2:
-                    continue
-                if "City" in cols[0] or "Temperature" in cols[0]:
-                    continue
-
-                row_text = " | ".join(cols[:4])
-                combined_report.append(row_text)
-
-    # --- PARSE PDF ALERTS ---
-    pdf_links = soup_home.find_all("a", href=True)
-    found_pdfs = []
-    for a in pdf_links:
-        link_text = a.get_text(strip=True)
-        href = a["href"]
-        if "pdf" in href.lower() and any(
-            k in link_text.lower() for k in ["advisory", "warning"]
-        ):
-            abs_url = _make_absolute(href, base_url)
-            if abs_url not in [p["url"] for p in found_pdfs]:
-                prio = 1 if "english" in link_text.lower() else 2
-                found_pdfs.append({"title": link_text, "url": abs_url, "prio": prio})
-
-    found_pdfs.sort(key=lambda x: x["prio"])
-
-    for pdf in found_pdfs[:2]:
-        text = _extract_text_from_pdf_url(pdf["url"])
-        if "Sinhala/Tamil" not in text and len(text) > 50:
-            combined_report.append(f"\n--- CRITICAL ALERT: {pdf['title']} ---\n{text}")
-
-    # Final Cleanup
-    final_text = "\n\n".join(combined_report)
-    cleanup = ["DEPARTMENT OF METEOROLOGY", "Loading...", "Listen To The Weather"]
-    for c in cleanup:
-        final_text = final_text.replace(c, "")
+    rainfall = [d for d in districts.values() if (d["rainfall_mm"] or 0) > 0]
+    temps = [d["temperature_c"] for d in districts.values() if d["temperature_c"] is not None]
 
     return {
-        "location": "All Districts",
-        "forecast": final_text,
-        "source": base_url,
+        "location": location,
+        "selected": selected,
+        "districts": list(districts.values()),
+        "summary": {
+            "stations": len(districts),
+            "reporting_rain": len(rainfall),
+            "max_rainfall_mm": max((d["rainfall_mm"] for d in rainfall), default=0.0),
+            "avg_temperature_c": round(sum(temps) / len(temps), 1) if temps else None,
+        },
+        "forecast": (
+            f"{selected['district']}: {selected['temperature_c']}C, "
+            f"{selected['condition']}, rainfall {selected['rainfall_mm']}mm"
+            if selected else
+            f"No reading for {wanted}; {len(districts)} other districts available."
+        ),
+        "source": "meteo.gov.lk",
         "fetched_at": utc_now().isoformat(),
     }
 
@@ -2913,70 +2751,6 @@ def scrape_train_schedule_impl(
 # ============================================
 
 
-def _scrape_twitter_trending_with_playwright(
-    storage_state_path: Optional[str] = None, headless: bool = True
-) -> List[Dict[str, Any]]:
-    ensure_playwright()
-    trending = []
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=headless)
-        context_args = {}
-        if storage_state_path and os.path.exists(storage_state_path):
-            context_args["storage_state"] = storage_state_path
-
-        context = browser.new_context(**context_args)
-        page = context.new_page()
-        try:
-            page.goto(
-                "https://twitter.com/i/trends", wait_until="networkidle", timeout=30000
-            )
-            if "login" in page.url or page.content().strip() == "":
-                page.goto(
-                    "https://twitter.com/explore/tabs/trending",
-                    wait_until="networkidle",
-                    timeout=30000,
-                )
-            html = page.content()
-            soup = BeautifulSoup(html, "html.parser")
-            items = soup.select(
-                "div[role='article'] a, div[data-testid='trend'], div.trend-card, span.trend-name"
-            )
-            seen = set()
-            for it in items:
-                text = it.get_text(separator=" ", strip=True)
-                href = it.get("href") or ""
-                if not text or len(text) < 2:
-                    continue
-                if text in seen:
-                    continue
-                seen.add(text)
-                trending.append(
-                    {
-                        "trend": text,
-                        "url": (
-                            _make_absolute(href, "https://twitter.com")
-                            if href
-                            else None
-                        ),
-                    }
-                )
-
-            if not trending:
-                for tag in soup.find_all(string=re.compile(r"#\w+")):
-                    t = tag.strip()
-                    if t not in seen:
-                        trending.append({"trend": t, "url": None})
-                        seen.add(t)
-            return trending
-        except Exception as e:
-            logger.error(f"[TWITTER] Playwright trending error: {e}")
-            return []
-        finally:
-            try:
-                context.close()
-            except Exception:
-                pass
-            browser.close()
 
 
 def _scrape_twitter_trending_with_nitter(

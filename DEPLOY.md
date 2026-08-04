@@ -130,7 +130,9 @@ Set in the Render dashboard (the `sync: false` entries in `render.yaml` are deli
 | Variable | Value | Required |
 |---|---|---|
 | `GROQ_API_KEY` | your Groq key | **Yes** — the app raises at import without it |
-| `DISABLE_AUTO_TRAIN` | `1` | **Yes** — see below |
+| `DISABLE_AUTO_TRAIN` | `1` | **Yes** — see §1.5 |
+| `AGENT_LOOP_START_DELAY` | `45` | **Yes on free** — see §1.7 |
+| `DISABLE_AGENT_LOOP` | `0` (or `1` to disable scraping) | No |
 | `CORS_ALLOW_ORIGINS` | frontend origin, e.g. `https://slac2026-frontend.onrender.com` | Strongly recommended |
 | `SQLITE_DB_PATH` | `/app/backend/data/cache/feeds.db` | Pre-set in `render.yaml` |
 | `CHROMADB_PATH` | `/app/backend/data/chromadb` | Pre-set |
@@ -169,18 +171,37 @@ Trade-off once you do: a disk pins the service to **one instance** and **disable
 deploys**. Acceptable here — the app runs a singleton 60s agent loop and isn't horizontally
 scalable anyway.
 
-### 1.7 First boot expectations
+### 1.7 First boot, and why the agent loop is delayed
 
-Cold start is slow — TensorFlow/PyTorch import plus graph compilation. Expect **2–5 minutes** before
-`/api/status` answers. Give the health check a generous grace period.
+Cold start is slow: `import main` compiles six LangGraph graphs and opens ChromaDB. **Measured at
+~28 s on a fast local machine**, so expect appreciably longer on a shared-CPU free instance. Uvicorn
+imports the app *before* binding `$PORT`, so nothing answers until that finishes.
+
+Then the real hazard. Historically the graph thread began a full agent cycle the instant the port
+bound — fanning out to five scraping agents and launching Playwright Chromium. On a small instance
+that starves `/api/status` past Render's **5 second** health-check timeout. Render kills the
+instance, the restart begins another cycle, and it never converges:
+
+```
+HTTP health check failed (timed out after 5 seconds) while running your code.
+Instance failed
+```
+
+`AGENT_LOOP_START_DELAY` (default **45** s) holds the first cycle back so health checks pass first.
+Set `0` for the old behaviour. If it still flaps, `DISABLE_AGENT_LOOP=1` serves the API with no live
+collection at all — useful to confirm the rest of the service is healthy.
+
+The 2 s database poll also runs its SQLite read in a thread executor rather than inline, so it
+cannot stall the event loop between cycles.
 
 Startup log should show:
 
 ```
 [STARTUP] Auto-training disabled (DISABLE_AUTO_TRAIN set)
-[STARTUP] CORS origins: ['https://<your-app>.vercel.app'] (credentials=on)
 [SQLiteCache] Initialized at /app/backend/data/cache/feeds.db
 [ChromaDB] Initialized collection: Roger_feeds
+[API] Graph thread started
+[GRAPH THREAD] Waiting 45s before first cycle (AGENT_LOOP_START_DELAY) so health checks can pass
 ```
 
 Smoke test:
@@ -328,6 +349,8 @@ model in-process and costs exactly one service.
 | `/api/models/health` shows `in-process` when you expected `remote` | `*_SERVICE_URL` unset or empty on the backend | Set it, then redeploy the backend |
 | Model endpoints answer but ignore the model service | Service unreachable — gateway fell back silently | Check backend logs for `[gateway] … call failed`; hit the service's `/health` directly |
 | Model endpoints return "unavailable" | `<MODEL>_SERVICE_URL` unset, and the slim image has no ML framework for the in-process path | Set the URL and deploy that model's blueprint |
-| Frontend deploy: `Publish directory ./out does not exist!` | Service was created as a static site; it is now a web service | Delete the Render service and re-apply `frontend/render.yaml` — Render cannot change service type in place |
+| Frontend deploy: `Publish directory ./out does not exist!` | Service was created as a static site; it is now a web service | Delete the Render service and re-apply `frontend/render.yaml` — Render cannot change service type in place. Re-applying the blueprint alone does **not** work: Render matches by name and will not change an existing service's type |
+| `HTTP health check failed (timed out after 5 seconds)` | The agent loop began scraping the instant the port bound and starved `/api/status` | Set `AGENT_LOOP_START_DELAY=45`; if it persists, `DISABLE_AGENT_LOOP=1` |
+| Instance restarts in a loop shortly after going live | Same cause — each restart begins another cycle | As above |
 | First `/detect` on anomaly hangs for minutes | `ANOMALY_ML_ENABLED=1` with a cold `models_cache/` | Set it back to `0`, or warm the cache (`download_models.py`) before enabling |
 | Model service build fails on `requirements.txt` | Wrong file — that is the training set | Dockerfiles must install `requirements-service.txt` |

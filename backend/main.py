@@ -437,10 +437,29 @@ def run_graph_loop():
     """
     REFRESH_INTERVAL_SECONDS = 60
     shutdown_event = threading.Event()
-    
+
+    # Hold off the first cycle so the platform health check can pass first.
+    #
+    # A cycle fans out to five scraping agents and launches Playwright Chromium.
+    # On a small shared-CPU instance that saturates the box, and /api/status stops
+    # answering inside the health-check timeout -- the instance is then killed and
+    # restarted, which starts another cycle, forever.
+    #
+    # 0 disables the delay (the historical behaviour).
+    try:
+        start_delay = float(os.getenv("AGENT_LOOP_START_DELAY", "45"))
+    except ValueError:
+        start_delay = 45.0
+
     logger.info("="*80)
     logger.info("[GRAPH THREAD] Starting Roger combinedAgentGraph loop (60s interval)")
+    if start_delay > 0:
+        logger.info(f"[GRAPH THREAD] Waiting {start_delay:.0f}s before first cycle "
+                    f"(AGENT_LOOP_START_DELAY) so health checks can pass")
     logger.info("="*80)
+
+    if start_delay > 0 and shutdown_event.wait(timeout=start_delay):
+        return
 
     cycle_count = 0
     
@@ -560,8 +579,14 @@ async def database_polling_loop():
         try:
             await asyncio.sleep(2.0)  # Poll every 2 seconds
 
-            # Get new feeds since last check
-            new_feeds = storage_manager.get_feeds_since(last_check)
+            # Get new feeds since last check.
+            # Off the event loop: get_feeds_since() is a synchronous SQLite read,
+            # and awaiting it inline stalls every other request -- including the
+            # platform health check -- for its duration, every 2 seconds.
+            _check_from = last_check
+            new_feeds = await asyncio.get_running_loop().run_in_executor(
+                None, storage_manager.get_feeds_since, _check_from
+            )
             last_check = utc_now()
 
             if new_feeds:
@@ -606,10 +631,18 @@ async def startup_event():
 
     logger.info("[API] Starting Roger API...")
 
-    # Start graph execution in separate thread
-    graph_thread = threading.Thread(target=run_graph_loop, daemon=True)
-    graph_thread.start()
-    logger.info("[API] Graph thread started")
+    # Start graph execution in separate thread.
+    #
+    # DISABLE_AGENT_LOOP=1 serves the API without the scraping agents. Useful on
+    # memory-capped hosts: a cycle launches Playwright Chromium (100-300 MB) on
+    # top of the ~210 MB base, which is what tips a 512 MB instance over.
+    if os.getenv("DISABLE_AGENT_LOOP", "").lower() in ("1", "true", "yes"):
+        logger.warning("[API] Agent loop disabled (DISABLE_AGENT_LOOP set) — "
+                       "serving cached/stored feeds only, no live collection")
+    else:
+        graph_thread = threading.Thread(target=run_graph_loop, daemon=True)
+        graph_thread.start()
+        logger.info("[API] Graph thread started")
 
     # Start database polling loop
     asyncio.create_task(database_polling_loop())

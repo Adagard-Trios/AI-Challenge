@@ -53,6 +53,20 @@ services:
       - key: DISABLE_AUTO_TRAIN
         value: "1"
 
+      # Hold off the first agent cycle so the health check can pass first.
+      # A cycle fans out to five scraping agents and launches Playwright
+      # Chromium; starting that the instant the port binds starves /api/status
+      # past Render's 5 s health-check timeout, the instance is killed, and the
+      # restart begins another cycle — a crash loop. 0 restores the old behaviour.
+      - key: AGENT_LOOP_START_DELAY
+        value: "45"
+
+      # Set to "1" to serve the API without the scraping agents at all.
+      # Chromium is 100-300 MB on top of the ~210 MB base, which is what tips a
+      # 512 MB free instance over. Feeds then come only from stored/cached data.
+      - key: DISABLE_AGENT_LOOP
+        value: "0"
+
       # Lock CORS to the frontend origin. Leaving this unset falls back to "*"
       # (with credentials disabled, per the CORS spec).
       # e.g. https://slac2026-frontend.onrender.com

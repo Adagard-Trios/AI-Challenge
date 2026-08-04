@@ -49,6 +49,22 @@ class AuthSettings:
     def is_sqlite(self) -> bool:
         return self.database_url.startswith("sqlite")
 
+    @property
+    def behind_transaction_pooler(self) -> bool:
+        """
+        True for Supabase's transaction pooler (PgBouncer).
+
+        Detected by port 6543, which Supabase uses for transaction mode. Session
+        mode (5432, host contains 'pooler') keeps prepared statements working,
+        so it is deliberately NOT matched here.
+
+        Worth using the pooler at all because Supabase's *direct* connection is
+        IPv6-only on new projects unless you buy the IPv4 add-on, and outbound
+        IPv6 is not something to assume on a host you do not control. The pooler
+        answers on IPv4.
+        """
+        return ":6543" in self.database_url
+
 
 def _default_sqlite_url() -> str:
     """

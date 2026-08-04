@@ -39,9 +39,31 @@ def engine() -> Engine:
         # check_same_thread=False: the agent loop runs in a background thread and
         # opens its own session.
         kwargs["connect_args"] = {"check_same_thread": False}
+
+    elif cfg.behind_transaction_pooler:
+        # Supabase's transaction pooler (PgBouncer, port 6543) multiplexes many
+        # clients onto few server connections. Two consequences, both of which
+        # produce confusing intermittent errors rather than clean failures:
+        #
+        # 1. Prepared statements do not survive, because a statement prepared on
+        #    one server connection is not there on the next. psycopg3 prepares
+        #    automatically after a few executions, so this surfaces as
+        #    "prepared statement _pg3_0 already exists" once traffic warms up --
+        #    not at startup, which makes it look random.
+        #    prepare_threshold=None disables that.
+        #
+        # 2. Pooling on top of a pooler is worse than not pooling: SQLAlchemy
+        #    holds connections PgBouncer wants to reuse. NullPool hands each
+        #    checkout straight through.
+        from sqlalchemy.pool import NullPool
+        kwargs["poolclass"] = NullPool
+        kwargs["connect_args"] = {"prepare_threshold": None}
+        kwargs.pop("pool_pre_ping", None)   # meaningless without a pool
+        logger.info("[auth.db] transaction pooler detected: NullPool, no prepared statements")
+
     else:
-        # Small pool -- a 512 MB instance cannot afford many, and Neon's free
-        # tier caps connections.
+        # Direct Postgres. Small pool -- a 512 MB instance cannot afford many,
+        # and managed free tiers cap connections tightly.
         kwargs.update(pool_size=3, max_overflow=2, pool_recycle=280)
 
     _engine = create_engine(cfg.database_url, **kwargs)

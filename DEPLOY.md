@@ -116,10 +116,36 @@ work anonymously otherwise, so the frontend can migrate before cutover.
 
 | Variable | Required when enforced | Notes |
 |---|---|---|
-| `DATABASE_URL` | **yes** | Postgres. **Neon free** — Render's own free Postgres is *deleted* after 30 days. Refuses to start without it, rather than falling back to a SQLite file that Render wipes on every restart. |
+| `DATABASE_URL` | **yes** | Postgres — **Supabase**. See below. Refuses to start without it, rather than falling back to a SQLite file that Render wipes on every restart. |
 | `AUTH_SECRET` | **yes** | `python -c "import secrets; print(secrets.token_urlsafe(48))"` |
 | `AUTH_ENFORCED` | — | `1` to require auth |
 | `BOOTSTRAP_ADMIN_EMAIL` / `_PASSWORD` | — | Seeds the first admin, once, only when no users exist |
+
+**Use the Supabase connection pooler, not the direct connection.** Two reasons:
+
+- Supabase's *direct* connection (`db.<ref>.supabase.co:5432`) is **IPv6-only** on new
+  projects unless you buy the IPv4 add-on. Outbound IPv6 is not something to assume on a
+  host you do not control. The pooler answers on IPv4.
+- Render free spins down and Supabase free pauses after ~7 days idle, so connections are
+  torn down constantly. A pooler absorbs that.
+
+Copy the **Transaction pooler** string from Supabase → Project Settings → Database:
+
+```
+postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:6543/postgres
+```
+
+`auth/db.py` detects port 6543 and adapts: `NullPool` (pooling on top of PgBouncer is worse
+than not pooling) and `prepare_threshold=None`. That second one matters — psycopg3 prepares
+statements automatically after a few executions, and a prepared statement does not survive
+PgBouncer's transaction multiplexing. It surfaces as `prepared statement "_pg3_0" already
+exists` *once traffic warms up*, not at startup, which makes it look random.
+
+Session-mode (port 5432 on the pooler host) also works and keeps prepared statements; it
+uses more connections. Either is fine — the code handles both.
+
+⚠️ **Supabase free pauses a project after ~7 days of inactivity** and needs a manual restore
+from the dashboard. For a dashboard nobody opens over a holiday, that is a real failure mode.
 
 Cutover: deploy → create the admin → log in → confirm → set `AUTH_ENFORCED=1`.
 One env var, instantly revertible. `/api/status` stays public (`render.yaml` uses

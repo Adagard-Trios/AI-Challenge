@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
 from src.scrapers import registry  # noqa: E402
 from src.scrapers.credentials import SocialCredential, derive_expiry  # noqa: E402
 
+from .backoff import BackoffStore  # noqa: E402
 from .storage import DeviceConfig, SessionStore  # noqa: E402
 
 logger = logging.getLogger("connector.collect")
@@ -41,9 +42,11 @@ DEFAULT_SCRAPERS = {
 
 class Collector:
     def __init__(self, store: Optional[SessionStore] = None,
-                 config: Optional[DeviceConfig] = None):
+                 config: Optional[DeviceConfig] = None,
+                 backoff: Optional["BackoffStore"] = None):
         self.store = store or SessionStore()
         self.config = config or DeviceConfig()
+        self.backoff = backoff or BackoffStore()
 
     # -- credentials ------------------------------------------------------
 
@@ -104,6 +107,17 @@ class Collector:
         if scraper is None:
             return {"platform": platform, "status": "unsupported"}
 
+        # A challenge stops this account until a human resumes it, and a run of
+        # failures backs off exponentially. Both survive a restart, which is the
+        # whole point -- restarting is exactly what people do after failures,
+        # and an in-memory counter would reset right when it matters.
+        if self.backoff.is_challenged(platform):
+            return {"platform": platform, "status": "challenged",
+                    "detail": self.backoff.describe(platform)}
+        if not self.backoff.ready(platform):
+            return {"platform": platform, "status": "backing_off",
+                    "detail": self.backoff.describe(platform)}
+
         credential = self.credential_for(platform)
         if credential is None:
             return {"platform": platform, "status": "not_connected"}
@@ -160,6 +174,16 @@ class Collector:
         }
 
         pushed = self._push(posts, status)
+
+        if result.status == "challenged":
+            self.backoff.record_challenge(platform, result.reason)
+        elif result.status in ("ok", "budget_exhausted"):
+            self.backoff.record_success(platform)
+        else:
+            # expired counts as a failure for pacing: retrying a dead session
+            # every 15 minutes is pointless traffic against an account the
+            # platform is already watching.
+            self.backoff.record_failure(platform, result.reason)
 
         if result.status == "challenged":
             logger.error(

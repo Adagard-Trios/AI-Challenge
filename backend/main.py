@@ -199,6 +199,34 @@ logger.info(
     f"(credentials={'off' if _cors_wildcard else 'on'})"
 )
 
+# ============================================
+# AUTH
+# ============================================
+# Registered as an APIRouter. The 39 pre-existing routes below are deliberately
+# left as plain @app decorators -- converting them would be a large, risky diff
+# with no user-visible benefit, on a file that has already hidden three
+# duplicate-registration bugs.
+#
+# AUTH_ENFORCED=0 (the default) means require_user resolves a user when a token
+# is present and returns None otherwise, so every existing route keeps working
+# while the frontend migrates. Enforcement is a one-env-var cutover.
+try:
+    from auth import bootstrap as _auth_bootstrap
+    from auth import routes as _auth_routes
+    from auth import ws_tickets as _ws_tickets
+    from auth.config import settings as _auth_settings
+
+    _AUTH_READY = _auth_bootstrap.init()
+    app.include_router(_auth_routes.router)
+except Exception:  # noqa: BLE001
+    # Never let an auth problem take down a service that ran fine without it.
+    # bootstrap.init() itself re-raises when AUTH_ENFORCED=1, which is the case
+    # where failing loudly is correct.
+    logger.exception("[STARTUP] auth layer unavailable; continuing without it")
+    _AUTH_READY = False
+    _ws_tickets = None
+    _auth_settings = None
+
 # Global state
 current_state: Dict[str, Any] = {
     "final_ranked_feed": [],
@@ -2369,7 +2397,23 @@ async def get_models_health():
 
 
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
+async def websocket_endpoint(websocket: WebSocket, ticket: str = None):
+    # Browsers cannot set headers on `new WebSocket()`, so the bearer token
+    # cannot travel the usual way. A JWT in the query string would work but ends
+    # up in Render's access logs, so the client trades its token for a
+    # single-use 30s ticket via POST /api/auth/ws-ticket and presents that.
+    #
+    # Only enforced when AUTH_ENFORCED=1; otherwise the socket stays open so the
+    # existing frontend keeps working during the migration.
+    if _AUTH_READY and _auth_settings is not None and _auth_settings().enforced:
+        if _ws_tickets is None or _ws_tickets.redeem(ticket) is None:
+            # 1008 = policy violation. Distinguishable client-side from a
+            # network drop, so the UI can prompt a re-login rather than retry
+            # forever against a socket that will never accept it.
+            await websocket.close(code=1008)
+            logger.warning("[WS] rejected connection: missing or invalid ticket")
+            return
+
     await manager.connect(websocket)
 
     try:

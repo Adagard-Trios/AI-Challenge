@@ -70,6 +70,17 @@ websockets
 python-multipart
 httpx
 
+# --- Auth ---
+# Verified absent from this set before adding: cryptography and pyjwt reach
+# uv.lock only via langgraph-api/mlflow, neither of which is installed here.
+pyjwt>=2.10
+cryptography>=44,<46
+sqlalchemy>=2.0          # present transitively via langchain-community; pinned
+bcrypt>=4.1              # present transitively via chromadb; pinned
+psycopg[binary]>=3.2     # Postgres driver (Neon). SQLite needs nothing.
+# Deliberately NOT pydantic[email]: auth/routes.py validates addresses inline
+# rather than pull email-validator in for an invite-only tool.
+
 # --- Storage / vector stores ---
 neo4j
 langchain-neo4j

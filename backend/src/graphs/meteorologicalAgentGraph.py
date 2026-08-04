@@ -7,6 +7,7 @@ from langgraph.graph import StateGraph, END
 from src.states.meteorologicalAgentState import MeteorologicalAgentState
 from src.nodes.meteorologicalAgentNode import MeteorologicalAgentNode
 from src.llms.groqllm import GroqLLM
+from .subgraph_runner import subgraph_node
 
 
 class MeteorologicalGraphBuilder:
@@ -65,13 +66,13 @@ class MeteorologicalGraphBuilder:
         main_graph = StateGraph(MeteorologicalAgentState)
 
         main_graph.add_node(
-            "official_sources_module", lambda state: official_subgraph.invoke(state)
+            "official_sources_module", subgraph_node(official_subgraph, "official")
         )
         main_graph.add_node(
-            "social_media_module", lambda state: social_subgraph.invoke(state)
+            "social_media_module", subgraph_node(social_subgraph, "social")
         )
         main_graph.add_node(
-            "feed_generation_module", lambda state: feed_subgraph.invoke(state)
+            "feed_generation_module", subgraph_node(feed_subgraph, "feed")
         )
         main_graph.add_node("feed_aggregator", node.aggregate_and_store_feeds)
 

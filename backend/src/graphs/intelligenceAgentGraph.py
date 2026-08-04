@@ -7,6 +7,7 @@ from langgraph.graph import StateGraph, END
 from src.states.intelligenceAgentState import IntelligenceAgentState
 from src.nodes.intelligenceAgentNode import IntelligenceAgentNode
 from src.llms.groqllm import GroqLLM
+from .subgraph_runner import subgraph_node
 
 
 class IntelligenceGraphBuilder:
@@ -65,14 +66,14 @@ class IntelligenceGraphBuilder:
         main_graph = StateGraph(IntelligenceAgentState)
 
         main_graph.add_node(
-            "profile_monitoring_module", lambda state: profile_subgraph.invoke(state)
+            "profile_monitoring_module", subgraph_node(profile_subgraph, "profile")
         )
         main_graph.add_node(
             "competitive_intelligence_module",
-            lambda state: intelligence_subgraph.invoke(state),
+            subgraph_node(intelligence_subgraph, "intelligence"),
         )
         main_graph.add_node(
-            "feed_generation_module", lambda state: feed_subgraph.invoke(state)
+            "feed_generation_module", subgraph_node(feed_subgraph, "feed")
         )
         main_graph.add_node("feed_aggregator", node.aggregate_and_store_feeds)
 

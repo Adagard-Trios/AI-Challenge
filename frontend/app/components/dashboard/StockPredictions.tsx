@@ -6,8 +6,8 @@ import { TrendingUp, TrendingDown, Activity, AlertCircle, RefreshCw } from "luci
 import { motion } from "framer-motion";
 import { useRogerData } from "../../hooks/use-roger-data";
 import { useState, useEffect } from "react";
+import { API_BASE, apiFetch } from "@/app/lib/api";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
 
 interface StockPrediction {
   symbol: string;
@@ -44,7 +44,7 @@ const StockPredictions = () => {
   const fetchPredictions = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/stocks/predictions`);
+      const res = await apiFetch(`${API_BASE}/api/stocks/predictions`);
       const data = await res.json();
 
       if (data.status === "success") {

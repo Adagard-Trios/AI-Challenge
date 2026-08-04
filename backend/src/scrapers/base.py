@@ -82,11 +82,17 @@ class ScrapeResult:
     ``posts`` keeps exactly the keys the existing scrapers emit, so
     ``db_manager.extract_post_data`` needs no changes: source, poster, text,
     and optionally timestamp, url, likes, retweets, replies.
+
+    ``rotated_state`` carries the session as it stood at the end of the run, so
+    the caller can write refreshed cookies back. It is excluded from as_dict()
+    -- it is credential material and must never reach a JSON payload, a log
+    line, or an LLM's context.
     """
     posts: List[dict] = field(default_factory=list)
     status: str = "ok"          # ok|expired|challenged|rate_limited|budget_exhausted|error
     reason: Optional[str] = None
     platform: Optional[str] = None
+    rotated_state: Optional[dict] = field(default=None, repr=False)
 
     def as_dict(self) -> dict:
         return {
@@ -273,6 +279,15 @@ def run_scrape(credential: SocialCredential, fn, *args, **kwargs) -> ScrapeResul
             if not isinstance(result, ScrapeResult):
                 result = ScrapeResult(posts=list(result or []))
             result.platform = platform
+
+            # Capture the session as it now stands, so rotated cookies can be
+            # written back. Platforms refresh values like ct0, lidc and
+            # sessionid during normal use; the original code never read them
+            # back, so every refresh was discarded and the stored session drifted
+            # stale until it died. Persisting it is what an ordinary browser
+            # does, and it is the single biggest factor in how long a connected
+            # account keeps working.
+            result.rotated_state = ctx.persist_state()
             return result
 
     except challenge_mod.ChallengeDetected as exc:

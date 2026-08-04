@@ -5,6 +5,7 @@ import { Card } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { History, TrendingUp, CloudRain, AlertTriangle, Calendar, Droplets } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { API_BASE, apiFetch } from "@/app/lib/api";
 
 interface HistoricalData {
     source: string;
@@ -32,7 +33,6 @@ interface HistoricalData {
     }[];
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 export default function HistoricalIntel() {
     const [data, setData] = useState<HistoricalData | null>(null);
@@ -42,7 +42,7 @@ export default function HistoricalIntel() {
     useEffect(() => {
         const fetchData = async () => {
             try {
-                const res = await fetch(`${API_BASE}/api/weather/historical`);
+                const res = await apiFetch(`${API_BASE}/api/weather/historical`);
                 const result = await res.json();
                 if (result.status === 'success') {
                     setData(result.data);

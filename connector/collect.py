@@ -120,6 +120,24 @@ class Collector:
         spec = registry.REGISTRY[scraper]
         result = run_scrape(credential, spec.fn, query, max_items=max_items)
 
+        # Write refreshed cookies back to local storage.
+        #
+        # Platforms rotate values like ct0, lidc and sessionid during ordinary
+        # use. Discarding them -- which is what the original code did, since it
+        # never read the session back after a run -- makes a stored session
+        # drift stale until it stops working, and the user experiences that as
+        # "it randomly logs me out every few weeks".
+        #
+        # Skipped on a challenge: whatever the platform handed back mid-challenge
+        # is not a session we want to keep.
+        if result.rotated_state and result.status != "challenged":
+            try:
+                self.store.save(platform, result.rotated_state, handle=credential.handle)
+            except Exception as exc:
+                # Never let a persistence failure lose the posts we just collected.
+                logger.warning("[collect] could not persist rotated %s session: %s",
+                               platform, exc)
+
         posts = [{
             "platform": platform,
             "poster": p.get("poster"),

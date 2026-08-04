@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { API_BASE, apiFetch } from "@/app/lib/api";
 
 interface CurrencyPrediction {
     prediction_date: string;
@@ -18,7 +19,6 @@ interface CurrencyPrediction {
     is_fallback?: boolean;
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 const VOLATILITY_COLORS = {
     low: "bg-green-500/20 text-green-400 border-green-500/50",
@@ -45,7 +45,7 @@ export default function CurrencyPrediction() {
 
     const fetchPrediction = async () => {
         try {
-            const res = await fetch(`${API_BASE}/api/currency/prediction`);
+            const res = await apiFetch(`${API_BASE}/api/currency/prediction`);
             const data = await res.json();
 
             if (data.status === "success") {
@@ -63,7 +63,7 @@ export default function CurrencyPrediction() {
 
     const fetchHistory = async () => {
         try {
-            const res = await fetch(`${API_BASE}/api/currency/history?days=7`);
+            const res = await apiFetch(`${API_BASE}/api/currency/history?days=7`);
             const data = await res.json();
             if (data.status === "success") {
                 setHistory(data.history.slice(-7)); // Last 7 days

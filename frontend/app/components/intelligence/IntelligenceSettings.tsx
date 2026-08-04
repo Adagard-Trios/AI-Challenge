@@ -19,9 +19,9 @@ import {
     User
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { API_BASE, apiFetch } from "@/app/lib/api";
 
 // API base URL - adjust based on your backend
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 interface IntelConfig {
     user_profiles: {
@@ -61,7 +61,7 @@ const IntelligenceSettings = () => {
         setLoading(true);
         setError(null);
         try {
-            const res = await fetch(`${API_BASE}/api/intel/config`);
+            const res = await apiFetch(`${API_BASE}/api/intel/config`);
             const data = await res.json();
             if (data.status === "success" && data.config) {
                 setConfig(data.config);
@@ -81,7 +81,7 @@ const IntelligenceSettings = () => {
         setError(null);
         setSuccess(null);
         try {
-            const res = await fetch(`${API_BASE}/api/intel/config`, {
+            const res = await apiFetch(`${API_BASE}/api/intel/config`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(config),

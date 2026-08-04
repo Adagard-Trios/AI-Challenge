@@ -13,7 +13,8 @@ import HistoricalIntel from "../components/dashboard/HistoricalIntel";
 import TrendingTopics from "../components/dashboard/TrendingTopics";
 import SatelliteView from "../components/map/SatelliteView";
 import LoadingScreen from "../components/LoadingScreen";
-import { Activity, Map, Radio, BarChart3, Zap, Brain, Cloud, DollarSign, Satellite } from "lucide-react";
+import ConnectedAccounts from "../components/settings/ConnectedAccounts";
+import { Activity, Map, Radio, BarChart3, Zap, Brain, Cloud, DollarSign, Satellite, Link2 } from "lucide-react";
 import { useRogerData } from "../hooks/use-roger-data";
 import { Badge } from "../components/ui/badge";
 
@@ -86,7 +87,7 @@ const Index = () => {
       <main className="container mx-auto px-3 sm:px-6 py-4 sm:py-6">
         <Tabs defaultValue="overview" className="w-full">
           <div className="overflow-x-auto hide-scrollbar -mx-3 px-3 sm:mx-0 sm:px-0">
-            <TabsList className="inline-flex w-max sm:grid sm:w-full sm:grid-cols-7 mb-4 sm:mb-6 bg-card border border-border min-w-full sm:min-w-0">
+            <TabsList className="inline-flex w-max sm:grid sm:w-full sm:grid-cols-8 mb-4 sm:mb-6 bg-card border border-border min-w-full sm:min-w-0">
               <TabsTrigger value="overview" className="data-ready gap-2 px-3 sm:px-4 py-2.5 sm:py-2">
                 <BarChart3 className="w-4 h-4" />
                 <span className="hidden sm:inline">OVERVIEW</span>
@@ -114,6 +115,10 @@ const Index = () => {
               <TabsTrigger value="analytics" className="data-ready gap-2 px-3 sm:px-4 py-2.5 sm:py-2">
                 <Activity className="w-4 h-4" />
                 <span className="hidden sm:inline">ANALYTICS</span>
+              </TabsTrigger>
+              <TabsTrigger value="accounts" className="data-ready gap-2 px-3 sm:px-4 py-2.5 sm:py-2">
+                <Link2 className="w-4 h-4" />
+                <span className="hidden sm:inline">ACCOUNTS</span>
               </TabsTrigger>
             </TabsList>
           </div>
@@ -162,6 +167,10 @@ const Index = () => {
               </div>
               <AnomalyDetection />
             </div>
+          </TabsContent>
+
+          <TabsContent value="accounts" className="animate-fade-in">
+            <ConnectedAccounts />
           </TabsContent>
         </Tabs>
       </main>

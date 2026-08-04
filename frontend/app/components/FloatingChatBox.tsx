@@ -6,6 +6,7 @@ import { Badge } from './ui/badge';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import './Roger.css';
+import { API_BASE, apiFetch } from "@/app/lib/api";
 
 interface Message {
     id: string;
@@ -27,7 +28,6 @@ const FloatingChatBox = () => {
     const [domainFilter, setDomainFilter] = useState<string | null>(null);
     const scrollContainerRef = useRef<HTMLDivElement | null>(null);
 
-    const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
     // Auto-scroll to bottom
     useEffect(() => {
@@ -64,7 +64,7 @@ const FloatingChatBox = () => {
         setIsLoading(true);
 
         try {
-            const response = await fetch(`${API_BASE}/api/rag/chat`, {
+            const response = await apiFetch(`${API_BASE}/api/rag/chat`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -100,7 +100,7 @@ const FloatingChatBox = () => {
 
     const clearHistory = async () => {
         try {
-            await fetch(`${API_BASE}/api/rag/clear`, { method: 'POST' });
+            await apiFetch(`${API_BASE}/api/rag/clear`, { method: 'POST' });
             setMessages([]);
         } catch (error) {
             console.error('Failed to clear history:', error);

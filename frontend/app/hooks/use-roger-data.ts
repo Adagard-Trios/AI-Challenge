@@ -6,8 +6,8 @@
  * This prevents data from disappearing when partial updates arrive.
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { API_BASE, apiFetch, websocketUrl } from "@/app/lib/api";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const WS_URL = API_BASE.replace('http', 'ws') + '/ws';
 
 // Timeouts for resilient connection
@@ -102,7 +102,7 @@ export function useRogerData() {
   // Fetch rivernet data
   const fetchRiverData = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/rivernet`);
+      const res = await apiFetch(`${API_BASE}/api/rivernet`);
       const data = await res.json();
       if (data && data.rivers) {
         setRiverData(data);
@@ -118,7 +118,7 @@ export function useRogerData() {
 
     try {
       console.log('[Roger] Fetching initial data from REST API...');
-      const feedRes = await fetch(`${API_BASE}/api/feeds`);
+      const feedRes = await apiFetch(`${API_BASE}/api/feeds`);
       const feedData = await feedRes.json();
 
       if (feedData.events && feedData.events.length > 0) {
@@ -142,10 +142,16 @@ export function useRogerData() {
     let websocket: WebSocket;
     let reconnectTimeout: NodeJS.Timeout;
 
-    const connect = () => {
+    // websocketUrl() attaches a single-use ticket when auth is enforced.
+    // Browsers cannot set headers on `new WebSocket()`, and a JWT in the query
+    // string would be written into the server's access logs -- so the client
+    // trades its token for a 30s ticket instead. With auth off it returns the
+    // bare URL and nothing changes.
+    const connect = async () => {
       try {
-        console.log('[Roger] Connecting to WebSocket:', WS_URL);
-        websocket = new WebSocket(WS_URL);
+        const url = await websocketUrl();
+        console.log('[Roger] Connecting to WebSocket:', url);
+        websocket = new WebSocket(url);
 
         websocket.onopen = () => {
           console.log('[Roger] WebSocket connected');
@@ -223,7 +229,7 @@ export function useRogerData() {
 
           // Reconnect after delay
           reconnectTimeout = setTimeout(() => {
-            connect();
+            void connect();
           }, RECONNECT_DELAY);
         };
 
@@ -231,12 +237,12 @@ export function useRogerData() {
       } catch (err) {
         console.error('[Roger] Connection failed:', err);
         reconnectTimeout = setTimeout(() => {
-          connect();
+          void connect();
         }, RECONNECT_DELAY);
       }
     };
 
-    connect();
+    void connect();
 
     // Fetch initial data from REST API after a short delay
     const initialFetchTimeout = setTimeout(() => {
@@ -274,8 +280,8 @@ export function useRogerData() {
 
     try {
       const [dashboardRes, feedRes] = await Promise.all([
-        fetch(`${API_BASE}/api/dashboard`),
-        fetch(`${API_BASE}/api/feeds`)
+        apiFetch(`${API_BASE}/api/dashboard`),
+        apiFetch(`${API_BASE}/api/feeds`)
       ]);
 
       const dashboard = await dashboardRes.json();
@@ -325,12 +331,12 @@ export function useRogerData() {
   const fetchSituationalData = useCallback(async () => {
     try {
       const [powerRes, fuelRes, economyRes, healthRes, commodityRes, waterRes] = await Promise.all([
-        fetch(`${API_BASE}/api/power`).catch(() => null),
-        fetch(`${API_BASE}/api/fuel`).catch(() => null),
-        fetch(`${API_BASE}/api/economy`).catch(() => null),
-        fetch(`${API_BASE}/api/health`).catch(() => null),
-        fetch(`${API_BASE}/api/commodities`).catch(() => null),
-        fetch(`${API_BASE}/api/water`).catch(() => null),
+        apiFetch(`${API_BASE}/api/power`).catch(() => null),
+        apiFetch(`${API_BASE}/api/fuel`).catch(() => null),
+        apiFetch(`${API_BASE}/api/economy`).catch(() => null),
+        apiFetch(`${API_BASE}/api/health`).catch(() => null),
+        apiFetch(`${API_BASE}/api/commodities`).catch(() => null),
+        apiFetch(`${API_BASE}/api/water`).catch(() => null),
       ]);
 
       if (powerRes?.ok) setPowerData(await powerRes.json());

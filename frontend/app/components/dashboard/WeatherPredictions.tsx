@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { API_BASE, apiFetch } from "@/app/lib/api";
 
 interface DistrictPrediction {
     temperature: {
@@ -26,7 +27,6 @@ interface WeatherPredictions {
     total_districts: number;
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 const SEVERITY_COLORS = {
     normal: "bg-green-500/20 text-green-400 border-green-500/50",
@@ -58,7 +58,7 @@ export default function WeatherPredictions() {
 
     const fetchPredictions = async () => {
         try {
-            const res = await fetch(`${API_BASE}/api/weather/predictions`);
+            const res = await apiFetch(`${API_BASE}/api/weather/predictions`);
             const data = await res.json();
 
             if (data.status === "success") {

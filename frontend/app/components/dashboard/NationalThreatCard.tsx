@@ -5,6 +5,7 @@ import { Card } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Shield, AlertTriangle, TrendingUp, CloudRain, Waves, Activity } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { API_BASE, apiFetch } from "@/app/lib/api";
 
 interface ThreatData {
     status: string;
@@ -27,7 +28,6 @@ interface ThreatData {
     calculated_at: string;
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 export default function NationalThreatCard() {
     const [data, setData] = useState<ThreatData | null>(null);
@@ -36,7 +36,7 @@ export default function NationalThreatCard() {
 
     const fetchData = async () => {
         try {
-            const res = await fetch(`${API_BASE}/api/weather/threat`);
+            const res = await apiFetch(`${API_BASE}/api/weather/threat`);
             const result = await res.json();
             if (result.status === 'success') {
                 setData(result);

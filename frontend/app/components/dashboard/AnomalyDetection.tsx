@@ -6,6 +6,7 @@ import { Separator } from "../ui/separator";
 import { Brain, AlertTriangle, TrendingUp, RefreshCw, Zap, Database } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useState, useEffect } from "react";
+import { API_BASE, apiFetch } from "@/app/lib/api";
 
 interface AnomalyEvent {
     event_id: string;
@@ -27,7 +28,6 @@ interface ModelStatus {
 }
 
 // Use environment variable for API base URL
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
 
 const AnomalyDetection = () => {
     const [anomalies, setAnomalies] = useState<AnomalyEvent[]>([]);
@@ -39,8 +39,8 @@ const AnomalyDetection = () => {
         try {
             setLoading(true);
             const [anomalyRes, statusRes] = await Promise.all([
-                fetch(`${API_BASE}/api/anomalies?limit=20`),
-                fetch(`${API_BASE}/api/model/status`)
+                apiFetch(`${API_BASE}/api/anomalies?limit=20`),
+                apiFetch(`${API_BASE}/api/model/status`)
             ]);
 
             const anomalyData = await anomalyRes.json();

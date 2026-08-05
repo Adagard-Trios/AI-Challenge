@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { API_BASE, apiFetch } from "@/app/lib/api";
+import ModelStaleness, { type TrainingInfo } from "./ModelStaleness";
 
 interface CurrencyPrediction {
     prediction_date: string;
@@ -28,6 +29,7 @@ const VOLATILITY_COLORS = {
 
 export default function CurrencyPrediction() {
     const [prediction, setPrediction] = useState<CurrencyPrediction | null>(null);
+    const [training, setTraining] = useState<TrainingInfo | null>(null);
     const [history, setHistory] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -47,6 +49,7 @@ export default function CurrencyPrediction() {
         try {
             const res = await apiFetch(`${API_BASE}/api/currency/prediction`);
             const data = await res.json();
+            setTraining(data.training ?? null);
 
             if (data.status === "success") {
                 setPrediction(data.prediction);
@@ -106,6 +109,8 @@ export default function CurrencyPrediction() {
                     🔄
                 </button>
             </div>
+
+            <ModelStaleness training={training} className="mb-4" />
 
             {error ? (
                 <div className="text-center py-8">

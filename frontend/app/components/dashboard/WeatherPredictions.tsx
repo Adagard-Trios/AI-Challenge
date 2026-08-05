@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { API_BASE, apiFetch } from "@/app/lib/api";
+import ModelStaleness, { type TrainingInfo } from "./ModelStaleness";
 
 interface DistrictPrediction {
     temperature: {
@@ -44,6 +45,7 @@ const SEVERITY_ICONS = {
 
 export default function WeatherPredictions() {
     const [predictions, setPredictions] = useState<WeatherPredictions | null>(null);
+    const [training, setTraining] = useState<TrainingInfo | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [selectedDistrict, setSelectedDistrict] = useState<string | null>(null);
@@ -60,6 +62,7 @@ export default function WeatherPredictions() {
         try {
             const res = await apiFetch(`${API_BASE}/api/weather/predictions`);
             const data = await res.json();
+            setTraining(data.training ?? null);
 
             if (data.status === "success") {
                 setPredictions(data);
@@ -133,6 +136,8 @@ export default function WeatherPredictions() {
                     🔄
                 </button>
             </div>
+
+            <ModelStaleness training={training} className="mb-4" />
 
             {error ? (
                 <div className="text-center py-8">

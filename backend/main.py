@@ -39,7 +39,7 @@ sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 # is serving before any of that starts.
 from src.states.combinedAgentState import CombinedAgentState
 from src.storage.storage_manager import StorageManager
-from src import model_gateway
+from src import model_gateway, model_metadata
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("Roger_api")
@@ -1602,7 +1602,8 @@ def get_model_status(_user=Depends(require_user)):
             "models_available": models_found,
             "vectorizer_loaded": _vectorizer is not None,
             "batch_threshold": int(os.getenv("BATCH_THRESHOLD", "1000")),
-            "output_directory": str(output_dir)
+            "output_directory": str(output_dir),
+            "training": model_metadata.staleness("anomaly"),
         }
 
     except Exception as e:
@@ -2045,7 +2046,9 @@ async def get_weather_predictions(_user=Depends(require_user)):
     # fall through to the in-process predictor otherwise (or if it is down).
     remote = await model_gateway.call("weather", "/predict")
     if remote is not None:
-        return remote
+        # Predictions carry their model's training cutoff, so the card
+        # can warn without a second request.
+        return model_metadata.annotate(remote, "weather")
 
     predictor = get_weather_predictor()
 
@@ -2053,7 +2056,8 @@ async def get_weather_predictions(_user=Depends(require_user)):
         return {
             "status": "unavailable",
             "message": "Weather prediction model not loaded",
-            "predictions": None
+            "predictions": None,
+            "training": model_metadata.staleness("weather"),
         }
 
     try:
@@ -2127,7 +2131,7 @@ async def get_weather_model_status(_user=Depends(require_user)):
     """Get weather prediction model status and training info."""
     remote = await model_gateway.call("weather", "/model/status")
     if remote is not None:
-        return remote
+        return model_metadata.annotate(remote, "weather")
 
     from pathlib import Path
 
@@ -2150,7 +2154,8 @@ async def get_weather_model_status(_user=Depends(require_user)):
         "models_trained": len(model_files),
         "trained_stations": [f.stem.replace("lstm_", "").upper() for f in model_files],
         "latest_prediction": latest_prediction,
-        "predictions_available": len(prediction_files)
+        "predictions_available": len(prediction_files),
+        "training": model_metadata.staleness("weather"),
     }
 
 
@@ -2193,34 +2198,47 @@ async def get_currency_prediction(_user=Depends(require_user)):
     """
     remote = await model_gateway.call("currency", "/predict")
     if remote is not None:
-        return remote
+        # Predictions carry their model's training cutoff, so the card
+        # can warn without a second request.
+        return model_metadata.annotate(remote, "currency")
 
     predictor = get_currency_predictor()
 
     if predictor is None:
-        # Generate fallback prediction inline
-        import numpy as np
-        current_rate = 298.0
-        np.random.seed(int(datetime.now().timestamp()) % 2**31)
-        change_pct = np.random.normal(0.05, 0.3)
-        predicted_rate = current_rate * (1 + change_pct / 100)
-        
+        # No model. What follows is NOT a prediction -- there is nothing
+        # predicting. It used to draw a number from np.random.normal() around a
+        # hardcoded 298.0 and return it as {"status": "success"} with a
+        # direction and a volatility class, indistinguishable from real model
+        # output. The rate has since moved to ~335, so even the anchor was
+        # wrong by 12%.
+        #
+        # Now: report the real spot rate, and state plainly that no forecast is
+        # available rather than inventing one.
+        from src.utils.utils import fetch_usd_lkr
+
+        fx = fetch_usd_lkr()
+        current_rate = fx["usd_lkr"] if fx else None
+
         return {
-            "status": "success",
+            "status": "unavailable",
+            "message": (
+                "The currency model is not loaded, so no forecast is available. "
+                "The rate shown is the current spot rate, not a prediction."
+            ),
             "prediction": {
-                "prediction_date": (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d"),
                 "generated_at": datetime.now().isoformat(),
-                "model_version": "fallback",
+                "model_version": "none",
                 "is_fallback": True,
-                "current_rate": round(current_rate, 2),
-                "predicted_rate": round(predicted_rate, 2),
-                "expected_change": round(predicted_rate - current_rate, 2),
-                "expected_change_pct": round(change_pct, 3),
-                "direction": "strengthening" if change_pct < 0 else "weakening",
-                "direction_emoji": "📈" if change_pct < 0 else "📉",
-                "volatility_class": "low",
-                "note": "Using fallback - model initializing"
-            }
+                "current_rate": current_rate,
+                "rate_as_of": fx["as_of"] if fx else None,
+                "predicted_rate": None,
+                "expected_change": None,
+                "expected_change_pct": None,
+                "direction": fx["trend"] if fx else None,
+                "volatility_class": None,
+                "note": "No model loaded - spot rate only, no forecast",
+            },
+            "training": model_metadata.staleness("currency"),
         }
 
     try:
@@ -2235,7 +2253,8 @@ async def get_currency_prediction(_user=Depends(require_user)):
 
         return {
             "status": "success",
-            "prediction": prediction
+            "prediction": prediction,
+            "training": model_metadata.staleness("currency"),
         }
     except Exception as e:
         logger.error(f"[CurrencyAPI] Error: {e}")
@@ -2285,7 +2304,7 @@ async def get_currency_model_status(_user=Depends(require_user)):
     """Get currency prediction model status."""
     remote = await model_gateway.call("currency", "/model/status")
     if remote is not None:
-        return remote
+        return model_metadata.annotate(remote, "currency")
 
     from pathlib import Path
 
@@ -2308,7 +2327,8 @@ async def get_currency_model_status(_user=Depends(require_user)):
         "model_type": "GRU",
         "target": "USD/LKR",
         "latest_prediction": latest_prediction,
-        "predictions_available": len(prediction_files)
+        "predictions_available": len(prediction_files),
+        "training": model_metadata.staleness("currency"),
     }
 
 
@@ -2351,7 +2371,9 @@ async def get_stock_predictions(_user=Depends(require_user)):
     """
     remote = await model_gateway.call("stock", "/predict")
     if remote is not None:
-        return remote
+        # Predictions carry their model's training cutoff, so the card
+        # can warn without a second request.
+        return model_metadata.annotate(remote, "stock")
 
     predictor = get_stock_predictor()
 
@@ -2372,26 +2394,43 @@ async def get_stock_predictions(_user=Depends(require_user)):
                 "summary": {"total_stocks": len(STOCKS_TO_TRAIN), "bullish": 0, "bearish": 0, "neutral": 0}
             }
 
-            import numpy as np
+            # No model is loaded, so there are no predictions.
+            #
+            # This block used to manufacture them: current_price hardcoded to
+            # 100.0 for every stock, predicted_price from np.random.normal(),
+            # a bullish/bearish/neutral trend derived from that random number,
+            # and -- worst of all -- a "confidence" drawn from
+            # np.random.uniform(0.65, 0.85). It returned {"status": "success"}.
+            #
+            # A reader saw ten CSE stocks with prices, directions and 65-85%
+            # confidence. None of it referred to anything. Someone could have
+            # traded on it.
+            #
+            # The stock list is still returned so the card can show which
+            # symbols are covered, but with no numbers attached and a status
+            # that says plainly there is nothing to show.
             for code, info in STOCKS_TO_TRAIN.items():
-                np.random.seed(hash(code) % 2**31)
-                change_pct = np.random.normal(0.1, 1.0)
-                trend = "bullish" if change_pct > 0.5 else "bearish" if change_pct < -0.5 else "neutral"
-                predictions["summary"][trend] = predictions["summary"].get(trend, 0) + 1
                 predictions["stocks"][code] = {
                     "symbol": code,
                     "name": info.get("name", code),
                     "sector": info.get("sector", "Unknown"),
-                    "current_price": 100.0,
-                    "predicted_price": 100.0 * (1 + change_pct / 100),
-                    "expected_change_pct": round(change_pct, 3),
-                    "trend": trend,
-                    "trend_emoji": "📈" if trend == "bullish" else "📉" if trend == "bearish" else "➡️",
-                    "confidence": round(np.random.uniform(0.65, 0.85), 2),
-                    "is_fallback": True
+                    "current_price": None,
+                    "predicted_price": None,
+                    "expected_change_pct": None,
+                    "trend": "unknown",
+                    "confidence": None,
+                    "is_fallback": True,
                 }
 
-            return {"status": "success", "predictions": predictions}
+            return {
+                "status": "unavailable",
+                "message": (
+                    "The stock prediction model is not loaded, so no forecasts "
+                    "are available."
+                ),
+                "predictions": predictions,
+                "training": model_metadata.staleness("stock"),
+            }
         except Exception as e:
             return {"status": "unavailable", "message": f"Stock prediction model not loaded: {e}"}
 
@@ -2412,7 +2451,8 @@ async def get_stock_predictions(_user=Depends(require_user)):
 
         return {
             "status": "success",
-            "predictions": predictions
+            "predictions": predictions,
+            "training": model_metadata.staleness("stock"),
         }
     except Exception as e:
         logger.error(f"[StockAPI] Error: {e}")
@@ -2450,7 +2490,7 @@ async def get_stock_model_status(_user=Depends(require_user)):
     """Get stock prediction model status for all stocks."""
     remote = await model_gateway.call("stock", "/model/status")
     if remote is not None:
-        return remote
+        return model_metadata.annotate(remote, "stock")
 
     from pathlib import Path
     import json
@@ -2482,7 +2522,8 @@ async def get_stock_model_status(_user=Depends(require_user)):
         "trained_stocks": [f.stem.replace("_model", "").upper() for f in model_files],
         "training_summary": training_summary,
         "latest_prediction": latest_prediction,
-        "predictions_available": len(prediction_files)
+        "predictions_available": len(prediction_files),
+        "training": model_metadata.staleness("stock"),
     }
 
 

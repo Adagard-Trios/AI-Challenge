@@ -6,6 +6,7 @@ import { TrendingUp, TrendingDown, Activity, AlertCircle, RefreshCw } from "luci
 import { motion } from "framer-motion";
 import { useRogerData } from "../../hooks/use-roger-data";
 import { useState, useEffect } from "react";
+import ModelStaleness, { type TrainingInfo } from "./ModelStaleness";
 import { API_BASE, apiFetch } from "@/app/lib/api";
 
 
@@ -37,6 +38,7 @@ interface PredictionsData {
 const StockPredictions = () => {
   const { events, isConnected } = useRogerData();
   const [predictions, setPredictions] = useState<PredictionsData | null>(null);
+  const [training, setTraining] = useState<TrainingInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -46,6 +48,10 @@ const StockPredictions = () => {
     try {
       const res = await apiFetch(`${API_BASE}/api/stocks/predictions`);
       const data = await res.json();
+
+      // The predictions endpoint carries its model's training cutoff, so
+      // the staleness warning costs no extra request.
+      setTraining(data.training ?? null);
 
       if (data.status === "success") {
         setPredictions(data.predictions);
@@ -105,6 +111,10 @@ const StockPredictions = () => {
             </Badge>
           </div>
         </div>
+
+        {/* Above the numbers, not below them: the reader needs the caveat
+            before the figure, not after they have already acted on it. */}
+        <ModelStaleness training={training} className="mb-4" />
 
         {/* Summary Stats */}
         {predictions?.summary && (

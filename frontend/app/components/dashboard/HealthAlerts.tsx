@@ -3,6 +3,7 @@
 import { Card } from "../ui/card";
 import { Badge } from "../ui/badge";
 import { Heart, AlertTriangle, Bug, Activity } from "lucide-react";
+import DataProvenance from "./DataProvenance";
 
 interface HealthAlert {
     type: string;
@@ -34,9 +35,15 @@ const HealthAlerts = ({ healthData }: HealthAlertsProps) => {
                         <p className="text-xs text-muted-foreground">Ministry of Health</p>
                     </div>
                 </div>
-                <Badge className={hasActiveAlerts ? "bg-warning/20 text-warning" : "bg-success/20 text-success"}>
-                    {hasActiveAlerts ? "⚠ ADVISORIES" : "✓ NORMAL"}
-                </Badge>
+                <div className="flex items-center gap-1">
+                    <Badge className={hasActiveAlerts ? "bg-warning/20 text-warning" : "bg-success/20 text-success"}>
+                        {hasActiveAlerts ? "⚠ ADVISORIES" : "✓ NORMAL"}
+                    </Badge>
+                    <DataProvenance
+                        status={healthData?.scrape_status as string}
+                        showAsOf={false}
+                    />
+                </div>
             </div>
 
             {/* Dengue Section */}

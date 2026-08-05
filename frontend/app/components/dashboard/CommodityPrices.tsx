@@ -2,7 +2,8 @@
 
 import { Card } from "../ui/card";
 import { Badge } from "../ui/badge";
-import { ShoppingBasket, CheckCircle, AlertCircle } from "lucide-react";
+import { ShoppingBasket } from "lucide-react";
+import DataProvenance from "./DataProvenance";
 
 interface Commodity {
     name: string;
@@ -51,17 +52,10 @@ const CommodityPrices = ({ commodityData }: CommodityPricesProps) => {
                     </div>
                 </div>
                 <div className="flex gap-1">
-                    {scrapeStatus === "live" ? (
-                        <Badge className="bg-success/20 text-success text-xs flex items-center gap-1">
-                            <CheckCircle className="w-3 h-3" />
-                            Live
-                        </Badge>
-                    ) : (
-                        <Badge className="bg-warning/20 text-warning text-xs flex items-center gap-1">
-                            <AlertCircle className="w-3 h-3" />
-                            Baseline
-                        </Badge>
-                    )}
+                    {/* This card already distinguished live from baseline --
+                        it was the only one that did. Now shared, so the rest
+                        cannot quietly drift back to badging only success. */}
+                    <DataProvenance status={scrapeStatus} showAsOf={false} />
                     {summary.total_items > 0 && (
                         <Badge variant="outline" className="text-xs">
                             {summary.total_items} items

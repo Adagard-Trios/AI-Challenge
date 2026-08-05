@@ -4,6 +4,7 @@ import { Card } from "../ui/card";
 import { Badge } from "../ui/badge";
 import { Waves, AlertTriangle, CheckCircle, TrendingUp, Clock } from "lucide-react";
 import { motion } from "framer-motion";
+import DataProvenance from "./DataProvenance";
 
 // Mirrors what GET /api/rivernet actually returns (fetch_rivernet_levels in
 // backend/src/utils/utils.py). The previous shape -- location_key, status,
@@ -195,9 +196,15 @@ const RiverNetStatus = ({ riverData, compact = false }: RiverNetStatusProps) => 
                     </div>
                 </div>
                 <div className="text-right">
-                    <Badge className={`${statusInfo.bgColor} ${statusInfo.textColor}`}>
-                        {statusInfo.emoji} {statusInfo.label}
-                    </Badge>
+                    <div className="flex items-center gap-1 justify-end">
+                        <Badge className={`${statusInfo.bgColor} ${statusInfo.textColor}`}>
+                            {statusInfo.emoji} {statusInfo.label}
+                        </Badge>
+                        <DataProvenance
+                            status={(riverData as { scrape_status?: string })?.scrape_status}
+                            showAsOf={false}
+                        />
+                    </div>
                     <p className="text-xs text-muted-foreground mt-1">
                         {new Date(fetched_at).toLocaleTimeString()}
                     </p>

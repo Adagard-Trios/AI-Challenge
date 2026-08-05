@@ -1,8 +1,8 @@
 "use client";
 
 import { Card } from "../ui/card";
-import { Badge } from "../ui/badge";
-import { TrendingUp, TrendingDown, Minus, Landmark, DollarSign, Percent, Building2, Radio } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, Landmark, DollarSign, Percent, Building2 } from "lucide-react";
+import DataProvenance from "./DataProvenance";
 
 interface EconomicIndicatorsProps {
     economyData?: Record<string, unknown> | null;
@@ -43,17 +43,10 @@ const EconomicIndicators = ({ economyData }: EconomicIndicatorsProps) => {
                         <p className="text-xs text-muted-foreground">CBSL Indicators</p>
                     </div>
                 </div>
-                <div className="flex items-center gap-1">
-                    {scrapeStatus === "live" && (
-                        <Badge className="bg-success/20 text-success text-xs flex items-center gap-1">
-                            <Radio className="w-2 h-2 animate-pulse" />
-                            LIVE
-                        </Badge>
-                    )}
-                    <Badge className="bg-muted text-muted-foreground">
-                        {dataAsOf || "Latest"}
-                    </Badge>
-                </div>
+                {/* Was: a LIVE badge when live, and nothing otherwise -- so
+                    stale data was signalled by an absent badge, and the
+                    hardcoded 2.1% inflation figure looked live. */}
+                <DataProvenance status={scrapeStatus} asOf={dataAsOf} />
             </div>
 
             <div className="grid grid-cols-2 gap-2">

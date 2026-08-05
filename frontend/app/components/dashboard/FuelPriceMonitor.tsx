@@ -3,6 +3,7 @@
 import { Card } from "../ui/card";
 import { Badge } from "../ui/badge";
 import { Fuel, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import DataProvenance from "./DataProvenance";
 
 interface FuelPrice {
     price: number;
@@ -38,9 +39,10 @@ const FuelPriceMonitor = ({ fuelData }: FuelMonitorProps) => {
                         <p className="text-xs text-muted-foreground">CEYPETCO / LIOC</p>
                     </div>
                 </div>
-                <Badge className="bg-muted text-muted-foreground">
-                    {lastRevision || "Latest"}
-                </Badge>
+                <DataProvenance
+                    status={fuelData?.scrape_status as string}
+                    asOf={lastRevision}
+                />
             </div>
 
             <div className="grid grid-cols-2 gap-2">

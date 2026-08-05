@@ -3,6 +3,7 @@
 import { Card } from "../ui/card";
 import { Badge } from "../ui/badge";
 import { Droplets, AlertTriangle, CheckCircle } from "lucide-react";
+import DataProvenance from "./DataProvenance";
 
 interface WaterDisruption {
     area: string;
@@ -35,9 +36,15 @@ const WaterSupplyStatus = ({ waterData }: WaterSupplyStatusProps) => {
                         <p className="text-xs text-muted-foreground">NWSDB Status</p>
                     </div>
                 </div>
-                <Badge className={hasDisruptions ? "bg-warning/20 text-warning" : "bg-success/20 text-success"}>
-                    {hasDisruptions ? "⚠ DISRUPTIONS" : "✓ NORMAL"}
-                </Badge>
+                <div className="flex items-center gap-1">
+                    <Badge className={hasDisruptions ? "bg-warning/20 text-warning" : "bg-success/20 text-success"}>
+                        {hasDisruptions ? "⚠ DISRUPTIONS" : "✓ NORMAL"}
+                    </Badge>
+                    <DataProvenance
+                        status={waterData?.scrape_status as string}
+                        showAsOf={false}
+                    />
+                </div>
             </div>
 
             {hasDisruptions ? (

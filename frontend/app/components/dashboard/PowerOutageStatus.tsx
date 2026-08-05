@@ -3,6 +3,7 @@
 import { Card } from "../ui/card";
 import { Badge } from "../ui/badge";
 import { Zap, AlertTriangle, CheckCircle } from "lucide-react";
+import DataProvenance from "./DataProvenance";
 
 interface PowerStatusProps {
     powerData?: Record<string, unknown> | null;
@@ -38,9 +39,15 @@ const PowerOutageStatus = ({ powerData }: PowerStatusProps) => {
                         <p className="text-xs text-muted-foreground">CEB Sri Lanka</p>
                     </div>
                 </div>
-                <Badge className={getStatusColor()}>
-                    {getStatusLabel()}
-                </Badge>
+                <div className="flex items-center gap-1">
+                    <Badge className={getStatusColor()}>
+                        {getStatusLabel()}
+                    </Badge>
+                    <DataProvenance
+                        status={powerData?.scrape_status as string}
+                        showAsOf={false}
+                    />
+                </div>
             </div>
 
             {isActive ? (

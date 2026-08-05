@@ -456,12 +456,18 @@ def scrape_rivernet_impl(
         payload = response.json()
     except Exception as e:
         logger.error(f"[RIVERNET] API request failed: {e}")
-        return {
+        # Must carry the same shape as a successful call, summary included.
+        # Returning a dict without "summary" meant every consumer fell through
+        # to its .get() defaults and read zeros -- the failure was invisible.
+        failed = {
             "error": f"Could not reach the rivernet.lk API: {e}",
             "rivers": [],
             "alerts": [],
+            "summary": _summarise_rivernet({"rivers": [], "alerts": []}),
             "fetched_at": utc_now().isoformat(),
         }
+        failed["summary"]["status"] = "error"
+        return stamp(failed, "error", source_url="https://rivernet.lk")
 
     stations = (payload.get("results") or {}).get("data") or []
     wanted = {loc.lower() for loc in locations} if locations else None
@@ -535,6 +541,15 @@ def scrape_rivernet_impl(
         f"{results['summary']['alerts']} alert(s)"
     )
 
+    # Stations that stopped reporting make this partial rather than live: the
+    # feed is working, but it is not seeing the whole river network.
+    stamp(
+        results,
+        "live" if not results["summary"]["offline"] else "partial",
+        as_of=results.get("fetched_at"),
+        source_url="https://rivernet.lk",
+    )
+
     _rivernet_cache = results
     _rivernet_cache_time = utc_now()
     return results
@@ -567,8 +582,6 @@ def tool_district_weather(district: str = "colombo") -> Dict[str, Any]:
     Returns:
         District-specific weather forecast with temperature and conditions
     """
-    district_lower = district.lower().strip()
-
     # Use the weather nowcast tool and filter for district
     weather_data = tool_weather_nowcast(location=district)
 
@@ -578,12 +591,17 @@ def tool_district_weather(district: str = "colombo") -> Dict[str, Any]:
     # Extract district-specific information from the forecast
     forecast_text = weather_data.get("forecast", "")
 
-    # Try to find district-specific mention
+    # Try to find district-specific mention. Provenance is inherited from the
+    # nowcast -- including "partial", which is how this district gets told that
+    # meteo.gov.lk had readings, but not for it.
     district_info = {
         "district": district.title(),
         "forecast": forecast_text,
+        "reading": weather_data.get("selected"),
         "source": weather_data.get("source"),
         "fetched_at": weather_data.get("fetched_at"),
+        "scrape_status": weather_data.get("scrape_status", "live"),
+        "data_as_of": weather_data.get("data_as_of"),
     }
 
     # Look for district in the forecast text
@@ -722,20 +740,29 @@ def tool_calculate_national_threat(
     medium_risk_districts = []
 
     # 1. River status contribution (max 50 points)
+    #
+    # This read river["status"] with a "danger"/"warning"/"rising" vocabulary.
+    # fetch_rivernet_levels emits neither: the field is "severity", valued
+    # normal/alert/warning/critical, with the trend in "trend" and liveness in
+    # "reporting". So `status` was always the "unknown" default and the river
+    # half of the national flood threat -- 50 of its 100 points -- has never
+    # contributed anything, over a live 30-station feed.
     if river_data and river_data.get("rivers"):
         for river in river_data.get("rivers", []):
-            status = river.get("status", "unknown").lower()
+            severity = str(river.get("severity") or "unknown").lower()
+            trend = str(river.get("trend") or "").lower()
             region = river.get("region", "")
 
-            if status == "danger":
+            if severity == "critical":
                 breakdown["river_contribution"] += 15
                 if region and region not in critical_districts:
                     critical_districts.append(region)
-            elif status == "warning":
+            elif severity in ("warning", "alert"):
                 breakdown["river_contribution"] += 8
                 if region and region not in high_risk_districts:
                     high_risk_districts.append(region)
-            elif status == "rising":
+            elif trend == "rising" and river.get("reporting"):
+                # Rising water at a normal level is early warning, not a threat.
                 breakdown["river_contribution"] += 3
                 if region and region not in medium_risk_districts:
                     medium_risk_districts.append(region)
@@ -1037,6 +1064,60 @@ def tool_ceb_power_status() -> Dict[str, Any]:
     _ceb_cache = result
     _ceb_cache_time = utc_now()
 
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Data provenance
+#
+# Every tool in this module answers a question a business will act on, so every
+# tool must say where its answer came from. Six of the ten returned no
+# provenance at all, which is how a dashboard came to show a hardcoded 2.1 %
+# inflation figure indistinguishable from a live one.
+#
+# The vocabulary is closed and tested (tests/unit/test_provenance.py). The UI
+# switches on it, so adding a value is a deliberate act.
+# ---------------------------------------------------------------------------
+
+PROVENANCE_STATUSES = frozenset({"live", "partial", "baseline", "unavailable", "error"})
+
+
+def stamp(
+    result: Dict[str, Any],
+    status: str,
+    *,
+    as_of: Optional[str] = None,
+    source: Optional[str] = None,
+    source_url: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Record how a tool's data was obtained.
+
+      live        every value came from the source, this call
+      partial     some values are live, others fell back
+      baseline    the source could not be read; these are canned values
+      unavailable there is no readable source (needs credentials, etc.)
+      error       the attempt raised
+
+    ``as_of`` is the period the DATA describes, which is not the same as the
+    moment it was fetched -- CBSL's July figure retrieved in August is
+    as_of "July 2026", fetched_at now. Conflating the two is what made stale
+    numbers look current.
+    """
+    if status not in PROVENANCE_STATUSES:
+        raise ValueError(
+            f"unknown provenance status {status!r}; "
+            f"expected one of {sorted(PROVENANCE_STATUSES)}"
+        )
+
+    result["scrape_status"] = status
+    result.setdefault("fetched_at", utc_now().isoformat())
+    if as_of is not None:
+        result["data_as_of"] = as_of
+    if source is not None:
+        result["source"] = source
+    if source_url is not None:
+        result["source_url"] = source_url
     return result
 
 
@@ -1459,6 +1540,8 @@ def tool_health_alerts() -> Dict[str, Any]:
         "fetched_at": utc_now().isoformat(),
     }
 
+    scraped_any = False
+
     try:
         # Try to scrape Health Ministry
         resp = _safe_get("https://www.health.gov.lk/", timeout=30)
@@ -1542,6 +1625,7 @@ def tool_health_alerts() -> Dict[str, Any]:
             if dengue_match:
                 try:
                     result["dengue"]["weekly_cases"] = int(dengue_match.group(1))
+                    scraped_any = True
                     logger.info(
                         f"[HEALTH] Found Dengue cases: {result['dengue']['weekly_cases']}"
                     )
@@ -1551,6 +1635,14 @@ def tool_health_alerts() -> Dict[str, Any]:
     except Exception as e:
         logger.warning(f"[HEALTH] Scraping error: {e}")
         # Don't fail completely, return baseline
+
+    # The dengue caseload above is a hardcoded 850/week unless the scrape
+    # replaced it, so say which one the caller is looking at.
+    stamp(
+        result,
+        "live" if scraped_any else "baseline",
+        source_url="https://www.health.gov.lk/",
+    )
 
     # fallback: If still no alerts, maybe add seasonal one
     if not result["alerts"]:
@@ -1969,15 +2061,28 @@ def tool_water_supply_alerts() -> Dict[str, Any]:
                 f"[WATER] Fetched - Disruptions: {len(result['active_disruptions'])}"
             )
 
-        # If no disruptions found via scraping, report normal
-        if not result["active_disruptions"]:
-            result["status"] = "normal"
-            result["overall_supply"] = "Normal water supply across most areas"
+            # Reached the site and saw no disruption notice. That is a real
+            # observation, so "normal" is earned here -- unlike the branch
+            # below, where we never got to look.
+            if not result["active_disruptions"]:
+                result["status"] = "normal"
+                result["overall_supply"] = "No disruption notices on waterboard.lk"
+            stamp(result, "live", source_url="https://www.waterboard.lk/")
+        else:
+            # Could not read the source. Saying "Normal water supply across most
+            # areas" here was an assertion about the national supply made
+            # without having looked -- the same failure as CEB announcing normal
+            # power off a failed fetch.
+            result["status"] = "unknown"
+            result["overall_supply"] = "Could not reach waterboard.lk"
+            stamp(result, "error", source_url="https://www.waterboard.lk/")
 
     except Exception as e:
         logger.warning(f"[WATER] Scraping error: {e}")
-        # Don't overwrite default valid return structure, just add error
+        result["status"] = "unknown"
+        result["overall_supply"] = "Could not read waterboard.lk"
         result["error"] = str(e)
+        stamp(result, "error", source_url="https://www.waterboard.lk/")
 
     # Update cache
     _water_cache = result
@@ -1996,11 +2101,16 @@ def tool_dmc_alerts() -> Dict[str, Any]:
     url = "http://www.meteo.gov.lk/index.php?lang=en"
     resp = _safe_get(url)
     if not resp:
-        return {
-            "source": url,
-            "alerts": ["Failed to fetch alerts from DMC."],
-            "fetched_at": utc_now().isoformat(),
-        }
+        # "Failed to fetch" used to be pushed into `alerts` as though it were a
+        # weather alert. Consumers count and keyword-match that list -- the
+        # national threat score scans each entry for "severe"/"danger" -- so an
+        # outage message became an input to a risk figure. Errors belong in the
+        # status, never in the data.
+        return stamp(
+            {"alerts": [], "alert_count": 0},
+            "error",
+            source=url,
+        )
     soup = BeautifulSoup(resp.text, "html.parser")
     alerts: List[str] = []
     keywords = [
@@ -2020,13 +2130,17 @@ def tool_dmc_alerts() -> Dict[str, Any]:
             clean = re.sub(r"\s+", " ", text.strip())
             if clean not in alerts:
                 alerts.append(clean)
-    if not alerts:
-        alerts = ["No active severe weather alerts detected."]
-    return {
-        "source": url,
-        "alerts": alerts[:10],
-        "fetched_at": utc_now().isoformat(),
-    }
+    # An empty list means no alerts. It used to mean
+    # ["No active severe weather alerts detected."] -- a sentence containing the
+    # word "severe", which the national threat score matched against its
+    # ["red","danger","severe","extreme"] keywords and scored +10. The absence
+    # of alerts raised the threat level.
+    alerts = alerts[:10]
+    return stamp(
+        {"alerts": alerts, "alert_count": len(alerts)},
+        "live",
+        source=url,
+    )
 
 
 def tool_weather_nowcast(location: str = "Colombo") -> Dict[str, Any]:
@@ -2062,6 +2176,8 @@ def tool_weather_nowcast(location: str = "Colombo") -> Dict[str, Any]:
         return {
             "error": "Could not reach meteo.gov.lk",
             "location": location,
+            "districts": [],
+            "scrape_status": "error",
             "fetched_at": utc_now().isoformat(),
         }
 
@@ -2104,6 +2220,8 @@ def tool_weather_nowcast(location: str = "Colombo") -> Dict[str, Any]:
                 "layout has probably changed again -- check the parser."
             ),
             "location": location,
+            "districts": [],
+            "scrape_status": "error",
             "fetched_at": utc_now().isoformat(),
         }
 
@@ -2131,6 +2249,10 @@ def tool_weather_nowcast(location: str = "Colombo") -> Dict[str, Any]:
         ),
         "source": "meteo.gov.lk",
         "fetched_at": utc_now().isoformat(),
+        # The reading is live, but if the requested district is not among the
+        # markers the caller is getting other districts, not what it asked for.
+        "scrape_status": "live" if selected else "partial",
+        "data_as_of": (selected or {}).get("last_updated"),
     }
 
 

@@ -531,6 +531,12 @@ JSON array only:"""
             # storing that as the dedup key meant the md5 could never match the
             # next cycle's lookup, so exact-match dedup never fired and the same
             # events were re-emitted every 60 seconds forever.
+            #
+            # region / fake_news_score / llm_filtered are computed above and
+            # were not being persisted, so /api/feeds -- the endpoint the
+            # frontend loads first -- served events without them. The sidebar's
+            # region filter had nothing to filter on until a live update
+            # arrived over the websocket with the in-memory copy.
             self.storage.store_event(
                 event_id=event_id,
                 summary=summary,
@@ -540,6 +546,11 @@ JSON array only:"""
                 confidence_score=final_confidence,
                 timestamp=timestamp,
                 dedup_key=original_summary,
+                metadata={
+                    "region": region,
+                    "fake_news_score": fake_score,
+                    "llm_filtered": llm_filtered,
+                },
             )
 
         logger.info(

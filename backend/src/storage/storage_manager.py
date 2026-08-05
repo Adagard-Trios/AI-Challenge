@@ -27,6 +27,23 @@ except ImportError:
     logger.warning("[StorageManager] Trending detector not available")
 
 
+def _as_float(value: Any, default: Optional[float]) -> Optional[float]:
+    """
+    Read a number back out of ChromaDB metadata.
+
+    ChromaDBStore.add_event str()s every value it stores, so a confidence of
+    0.85 comes back as the string "0.85". Handing that straight to the API gave
+    the frontend a string where its type says number, and every comparison on it
+    was a string comparison.
+    """
+    if value is None or value == "" or value == "None":
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 class StorageManager:
     """
     Unified storage interface implementing 3-tier deduplication:
@@ -136,8 +153,15 @@ class StorageManager:
             # Key the exact-match tier on what was actually checked.
             self.sqlite_cache.add_entry(dedup_key or summary, event_id)
 
-            # Store in ChromaDB for semantic search
+            # Store in ChromaDB for semantic search.
+            #
+            # Caller metadata is merged in, not just handed to Neo4j: ChromaDB
+            # is what get_recent_feeds() reads back, and Neo4j is off by
+            # default. Anything not merged here is simply lost -- which is how
+            # region and fake_news_score, both computed per event, never reached
+            # the feed API. The core fields win on a key collision.
             chroma_metadata = {
+                **{k: v for k, v in (metadata or {}).items() if v is not None},
                 "domain": domain,
                 "severity": severity,
                 "impact_type": impact_type,
@@ -382,7 +406,21 @@ class StorageManager:
                                 "domain": metadata.get("domain", "unknown"),
                                 "severity": metadata.get("severity", "medium"),
                                 "impact_type": metadata.get("impact_type", "risk"),
-                                "confidence": metadata.get("confidence_score", 0.5),
+                                # ChromaDB metadata is all strings, so this used
+                                # to hand the API "0.85" where the frontend type
+                                # says number.
+                                "confidence": _as_float(
+                                    metadata.get("confidence_score"), 0.5
+                                ),
+                                "region": metadata.get("region", "sri_lanka"),
+                                # None means the LLM filter never judged this
+                                # event; that is not a score of 0.
+                                "fake_news_score": _as_float(
+                                    metadata.get("fake_news_score"), None
+                                ),
+                                "llm_filtered": str(
+                                    metadata.get("llm_filtered", "")
+                                ).lower() == "true",
                                 "timestamp": metadata.get(
                                     "timestamp", entry.get("last_seen")
                                 ),
@@ -491,7 +529,21 @@ class StorageManager:
                                 "domain": metadata.get("domain", "unknown"),
                                 "severity": metadata.get("severity", "medium"),
                                 "impact_type": metadata.get("impact_type", "risk"),
-                                "confidence": metadata.get("confidence_score", 0.5),
+                                # ChromaDB metadata is all strings, so this used
+                                # to hand the API "0.85" where the frontend type
+                                # says number.
+                                "confidence": _as_float(
+                                    metadata.get("confidence_score"), 0.5
+                                ),
+                                "region": metadata.get("region", "sri_lanka"),
+                                # None means the LLM filter never judged this
+                                # event; that is not a score of 0.
+                                "fake_news_score": _as_float(
+                                    metadata.get("fake_news_score"), None
+                                ),
+                                "llm_filtered": str(
+                                    metadata.get("llm_filtered", "")
+                                ).lower() == "true",
                                 "timestamp": metadata.get(
                                     "timestamp", entry.get("last_seen")
                                 ),

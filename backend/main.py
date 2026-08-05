@@ -739,6 +739,13 @@ def get_feeds_from_db(limit: int = 100, _user=Depends(require_user)):
         feeds = storage_manager.get_recent_feeds(limit=limit)
 
         # FIELD_NORMALIZATION + district categorization
+        #
+        # This whitelist silently dropped region, fake_news_score and
+        # llm_filtered. /api/feed (the in-memory copy) carried them and this
+        # endpoint did not, so the same event arrived with different fields
+        # depending on whether it came from the initial load or a live update --
+        # and the sidebar's region filter had nothing to work with until the
+        # first websocket push.
         normalized_feeds = []
         for feed in feeds:
             # Ensure frontend-compatible field names
@@ -749,6 +756,9 @@ def get_feeds_from_db(limit: int = 100, _user=Depends(require_user)):
                 "severity": feed.get("severity", "medium"),
                 "impact_type": feed.get("impact_type", "risk"),
                 "confidence": feed.get("confidence", 0.5),
+                "region": feed.get("region", "sri_lanka"),
+                "fake_news_score": feed.get("fake_news_score"),
+                "llm_filtered": feed.get("llm_filtered", False),
                 "timestamp": feed.get("timestamp"),
                 "district": categorize_feed_by_district(feed)
             }

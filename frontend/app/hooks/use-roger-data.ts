@@ -26,7 +26,12 @@ export interface RogerEvent {
   timestamp: string;
   category?: string;  // For flood_monitoring, flood_alert, etc.
   region?: 'sri_lanka' | 'world';  // NEW: for sidebar filtering
-  fake_news_score?: number;  // NEW: 0-1, higher = more likely fake
+  // 0-1, higher = more likely fake. null when the LLM filter could not judge
+  // this event (rate limited, malformed reply) -- it is NOT a score of 0.
+  fake_news_score?: number | null;
+  // false = no model verified this event; severity is the agent's own
+  // keyword-derived value. Treat these as provisional in the UI.
+  llm_filtered?: boolean;
 }
 
 export interface RiskDashboard {

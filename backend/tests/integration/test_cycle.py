@@ -562,3 +562,79 @@ def test_a_reply_without_the_entities_key_is_not_read_as_empty():
         "a reply with no entities field was recorded as a successful empty "
         "extraction"
     )
+
+
+# --- drivers ---------------------------------------------------------------
+
+def test_every_risk_index_can_be_opened_up():
+    """
+    `compliance_volatility: 0.7` tells a reader nothing on its own. The events
+    behind it were already in scope when the average was computed and were
+    simply discarded once their score had been folded in.
+    """
+    node = make_node()
+    snapshot = run_cycle(node)["snapshot"]
+
+    drivers = snapshot.get("drivers")
+    assert drivers, "snapshot has no drivers"
+
+    for index in ("logistics_friction", "compliance_volatility", "market_instability"):
+        assert index in drivers, f"{index} has no drivers"
+
+    assert drivers["compliance_volatility"], (
+        "political events were scored into compliance_volatility but none are "
+        "listed as driving it"
+    )
+
+
+def test_drivers_name_the_actual_events():
+    node = make_node()
+    out = run_cycle(node)
+
+    feed_ids = {e["event_id"] for e in out["final_ranked_feed"]}
+    for rows in out["snapshot"]["drivers"].values():
+        for row in rows:
+            assert row["event_id"] in feed_ids, "a driver is not in the feed"
+            assert row["summary"], "a driver with no summary explains nothing"
+            assert 0.0 <= row["contribution"] <= 1.0
+
+
+def test_drivers_are_ordered_by_contribution():
+    node = make_node()
+    snapshot = run_cycle(node)["snapshot"]
+
+    for rows in snapshot["drivers"].values():
+        contributions = [r["contribution"] for r in rows]
+        assert contributions == sorted(contributions, reverse=True)
+
+
+def test_drivers_follow_the_same_buckets_as_the_indices():
+    """
+    A bucket change that forgets its drivers must show as an empty list, not a
+    stale one pointing at the previous domains.
+    """
+    node = make_node()
+    out = run_cycle(node)
+
+    by_id = {e["event_id"]: e for e in out["final_ranked_feed"]}
+    drivers = out["snapshot"]["drivers"]
+
+    for row in drivers["compliance_volatility"]:
+        assert by_id[row["event_id"]]["domain"] == "political"
+
+    for row in drivers["logistics_friction"]:
+        assert by_id[row["event_id"]]["domain"] in ("social", "meteorological")
+
+    for row in drivers["market_instability"]:
+        assert by_id[row["event_id"]]["domain"] in ("economical", "intelligence")
+
+
+def test_opportunities_are_not_listed_as_risk_drivers():
+    """The buckets score risks; an opportunity driving a risk index is wrong."""
+    node = make_node()
+    out = run_cycle(node)
+
+    by_id = {e["event_id"]: e for e in out["final_ranked_feed"]}
+    for rows in out["snapshot"]["drivers"].values():
+        for row in rows:
+            assert by_id[row["event_id"]]["impact_type"] != "opportunity"

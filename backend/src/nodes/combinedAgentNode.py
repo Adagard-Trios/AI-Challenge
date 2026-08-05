@@ -882,6 +882,12 @@ JSON array only:"""
         domain_risks = {}
         opportunity_scores = []
 
+        # The events behind each domain's score, so an index can be opened up.
+        # `compliance_volatility: 0.7` tells a reader nothing on its own, and
+        # the contributing events are already in hand here -- they were simply
+        # discarded once their score had been averaged in.
+        domain_drivers: Dict[str, List[Dict[str, Any]]] = {}
+
         for item in feed:
             # Feed uses 'domain' field, not 'target_agent'
             domain = item.get("domain", item.get("target_agent", "unknown"))
@@ -896,6 +902,13 @@ JSON array only:"""
                 if domain not in domain_risks:
                     domain_risks[domain] = []
                 domain_risks[domain].append(score)
+
+                domain_drivers.setdefault(domain, []).append({
+                    "event_id": item.get("event_id"),
+                    "summary": str(item.get("summary", ""))[:160],
+                    "severity": item.get("severity"),
+                    "contribution": round(float(score), 3),
+                })
 
         # Helper for calculating averages safely
         def safe_avg(lst):
@@ -928,6 +941,22 @@ JSON array only:"""
         # NEW: Opportunity Index
         # Higher score means stronger positive signals
         snapshot["opportunity_index"] = round(safe_avg(opportunity_scores), 3)
+
+        # What moved each index. An index without its drivers is a number with
+        # authority and no accountability -- the reader cannot check it, argue
+        # with it, or act on the specific thing behind it. The mapping mirrors
+        # the buckets above exactly, so a bucket change that forgets its
+        # drivers shows up as an empty list rather than a stale one.
+        def top_drivers(*domains, limit=4):
+            rows = [d for name in domains for d in domain_drivers.get(name, [])]
+            rows.sort(key=lambda d: d["contribution"], reverse=True)
+            return rows[:limit]
+
+        snapshot["drivers"] = {
+            "logistics_friction": top_drivers("social", "meteorological"),
+            "compliance_volatility": top_drivers("political"),
+            "market_instability": top_drivers("economical", "intelligence"),
+        }
 
         snapshot["avg_confidence"] = round(avg_confidence, 3)
         snapshot["high_priority_count"] = high_priority_count

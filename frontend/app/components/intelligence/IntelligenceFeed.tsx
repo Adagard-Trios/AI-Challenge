@@ -8,6 +8,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useState } from "react";
 import IntelligenceSettings from "./IntelligenceSettings";
 import RelevanceBadge from "./RelevanceBadge";
+import WhyThisEvent from "./WhyThisEvent";
 
 const IntelligenceFeed = () => {
   const { events, isConnected } = useRogerData();
@@ -133,6 +134,10 @@ const IntelligenceFeed = () => {
                   {item.timestamp ? new Date(item.timestamp).toLocaleTimeString() : ""}
                 </span>
               </div>
+
+              {/* Provenance the pipeline already carries -- whether a model
+                  checked this, how credible it is, and why it ranks here. */}
+              <WhyThisEvent event={item} />
             </div>
           </div>
         </Card>

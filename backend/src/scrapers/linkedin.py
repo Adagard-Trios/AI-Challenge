@@ -84,6 +84,7 @@ def _harvest(ctx: ScrapeContext, max_items: int, fallback_url: str) -> List[dict
 
         try:
             posts = ctx.page.locator(POST).all()
+            ctx.note_containers(len(posts))
         except Exception:
             break
 

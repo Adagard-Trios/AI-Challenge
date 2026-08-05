@@ -114,6 +114,7 @@ def _harvest(ctx: ScrapeContext, max_items: int, *, poster_override: Optional[st
 
         try:
             tweets = ctx.page.locator(TWEET).all()
+            ctx.note_containers(len(tweets))
         except Exception:
             break
 

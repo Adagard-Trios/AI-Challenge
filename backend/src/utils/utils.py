@@ -847,9 +847,24 @@ def tool_ceb_power_status() -> Dict[str, Any]:
 
     logger.info("[CEB] Fetching power outage status...")
 
+    # Starts UNKNOWN, not "operational".
+    #
+    # This previously defaulted to status="operational",
+    # load_shedding_active=False and, when nothing was scraped, announced
+    # "CEB: Normal power supply across the island" -- an affirmative claim about
+    # the national grid made without having successfully read anything. A failed
+    # scrape asserted the lights were on. During actual load shedding that is
+    # precisely backwards, and it is the one card where being wrong has
+    # operational consequences for a business.
+    #
+    # CEB's live outage feed (cebcare.ceb.lk/Incognito/GetOutageLocationsInArea)
+    # returns 401 without a session and rate-limits aggressively, so it cannot
+    # be read anonymously. Until that is wired up with credentials, this tool
+    # reports only what it can actually see -- announcements and press releases
+    # from ceb.lk -- and says "unknown" otherwise.
     result = {
-        "status": "operational",
-        "load_shedding_active": False,
+        "status": "unknown",
+        "load_shedding_active": None,
         "schedules": [],
         "announcements": [],
         "press_releases": [],
@@ -996,14 +1011,26 @@ def tool_ceb_power_status() -> Dict[str, Any]:
             except Exception as news_error:
                 logger.debug(f"[CEB] News scraping error for {news_url}: {news_error}")
 
-        # If no press releases or announcements found, provide baseline message
+        # Nothing found is NOT evidence that the grid is healthy. It means we
+        # looked at ceb.lk's announcements and saw no outage notice -- which is
+        # the normal state on most days, but is also exactly what a broken
+        # scraper looks like. Say which one this is, and never claim "normal
+        # power supply across the island" off a silent page.
         if not result["press_releases"] and not result["announcements"]:
-            result["status"] = "no_load_shedding"
-            result["announcements"].append("CEB: Normal power supply across the island")
+            result["status"] = "no_announcements"
+            result["announcements"].append(
+                "No CEB outage announcements found. This is not a confirmation "
+                "that supply is normal -- CEB's live outage feed requires a "
+                "session and is not being read."
+            )
+            logger.info("[CEB] no outage announcements found; status=no_announcements")
+        else:
+            result["scrape_status"] = "live"
 
     except Exception as e:
         logger.warning(f"[CEB] Scraping error: {e}")
         result["status"] = "unknown"
+        result["scrape_status"] = "error"
         result["error"] = str(e)
 
     # Update cache
@@ -1011,6 +1038,54 @@ def tool_ceb_power_status() -> Dict[str, Any]:
     _ceb_cache_time = utc_now()
 
     return result
+
+
+CEYPETCO_URL = "https://ceypetco.gov.lk/marketing-sales/"
+
+# CEYPETCO renders each product as a card, not a table, which flattens to:
+#   Lanka Petrol 92 Octane|White Oil|Rs.|414.00|per Ltr|<icon>|Effect from: 29-06-2026 ...
+CEYPETCO_ROW_RE = re.compile(
+    r"([A-Z][A-Za-z0-9 ]{3,40}?)\|[^|]{0,20}\|Rs\.\|([\d,]+\.\d{2})\|per Ltr"
+    r"[^|]*\|[^|]*\|Effect from:\s*([\d.\-/]+)"
+)
+
+# Sri Lankan pump prices have ranged roughly Rs.100-800 in the past decade; a
+# parse that lands outside that has matched the wrong number.
+FUEL_PRICE_MIN = 50.0
+FUEL_PRICE_MAX = 2000.0
+
+# CEYPETCO's product names -> the keys the frontend already reads. Order matters:
+# "Petrol 95" must be tested before "Petrol", and "Industrial Kerosene" before
+# "Kerosene", or the shorter name swallows the longer product.
+FUEL_KEY_PATTERNS = (
+    ("petrol_95", ("petrol 95",)),
+    ("petrol_92", ("petrol 92",)),
+    ("super_diesel", ("super diesel",)),
+    ("auto_diesel", ("auto diesel",)),
+    ("industrial_kerosene", ("industrial kerosene",)),
+    ("kerosene", ("kerosene",)),
+    ("fuel_oil", ("fuel oil",)),
+)
+
+
+def _fuel_key(product: str) -> Optional[str]:
+    """Map a CEYPETCO product name onto the dashboard's price key."""
+    lowered = product.lower()
+    for key, needles in FUEL_KEY_PATTERNS:
+        if any(n in lowered for n in needles):
+            return key
+    return None
+
+
+def _fuel_date_key(value: str) -> tuple:
+    """Sort 'DD-MM-YYYY' chronologically; unparseable dates sort first."""
+    parts = re.split(r"[-./]", value)
+    if len(parts) == 3 and len(parts[2]) == 4:
+        try:
+            return (int(parts[2]), int(parts[1]), int(parts[0]))
+        except ValueError:
+            pass
+    return (0, 0, 0)
 
 
 def tool_fuel_prices() -> Dict[str, Any]:
@@ -1049,62 +1124,155 @@ def tool_fuel_prices() -> Dict[str, Any]:
         "note": "Prices confirmed unchanged for December 2025",
     }
 
+    # This used to trawl three news homepages for any number next to the word
+    # "petrol" -- which is why it never once produced a real price, and why the
+    # dashboard showed Rs.294 for petrol 92 when CEYPETCO's own published price
+    # was Rs.414. CEYPETCO publishes the authoritative table itself, with the
+    # date each price took effect.
+    result["scrape_status"] = "baseline"
+
     try:
-        # Try to scrape news for latest fuel price announcements
-        news_sources = [
-            "https://www.news.lk/",
-            "https://www.dailymirror.lk/",
-            "https://www.newsfirst.lk/",
-        ]
+        resp = _safe_get(CEYPETCO_URL, timeout=25)
+        if resp:
+            text = BeautifulSoup(resp.text, "html.parser").get_text("|", strip=True)
 
-        for source_url in news_sources:
-            resp = _safe_get(source_url, timeout=20)
-            if resp:
-                soup = BeautifulSoup(resp.text, "html.parser")
-                page_text = soup.get_text(separator=" ", strip=True).lower()
-
-                # Look for fuel price mentions
-                if "fuel" in page_text and ("price" in page_text or "lkr" in page_text):
-                    # Extract prices using regex
-                    petrol_match = re.search(
-                        r"petrol\s*(?:92|95)?\s*(?:octane)?\s*[:\-]?\s*(?:rs\.?|lkr)?\s*(\d{2,3}(?:\.\d{2})?)",
-                        page_text,
+            scraped = {}
+            effective_dates = []
+            for match in CEYPETCO_ROW_RE.finditer(text):
+                product, raw_price, effective = match.groups()
+                key = _fuel_key(product)
+                if not key:
+                    continue
+                try:
+                    price = float(raw_price.replace(",", ""))
+                except ValueError:
+                    continue
+                if not (FUEL_PRICE_MIN <= price <= FUEL_PRICE_MAX):
+                    logger.warning(
+                        "[FUEL] %s at %.2f is outside the sane range; ignoring",
+                        product, price,
                     )
-                    diesel_match = re.search(
-                        r"diesel\s*[:\-]?\s*(?:rs\.?|lkr)?\s*(\d{2,3}(?:\.\d{2})?)",
-                        page_text,
-                    )
+                    continue
 
-                    if petrol_match:
-                        try:
-                            result["prices"]["petrol_92"]["price"] = float(
-                                petrol_match.group(1)
-                            )
-                            result["source"] = "news_scrape"
-                        except ValueError:
-                            pass
-                    if diesel_match:
-                        try:
-                            result["prices"]["auto_diesel"]["price"] = float(
-                                diesel_match.group(1)
-                            )
-                        except ValueError:
-                            pass
-                    break
+                scraped[key] = {
+                    "price": round(price, 2),
+                    "unit": "LKR/L",
+                    "name": product.replace("Lanka ", "").strip(),
+                    "effective_from": effective,
+                }
+                effective_dates.append(effective)
 
-        logger.info(
-            f"[FUEL] Fetched prices - Petrol 92: {result['prices']['petrol_92']['price']}"
-        )
+            if scraped:
+                result["prices"].update(scraped)
+                result["scrape_status"] = "live"
+                result["source"] = "CEYPETCO (ceypetco.gov.lk)"
+                result["source_url"] = CEYPETCO_URL
+                # Newest "Effect from" across the products actually read.
+                result["last_revision"] = max(effective_dates, key=_fuel_date_key)
+                result["data_as_of"] = result["last_revision"]
+                result.pop("note", None)
+                logger.info(
+                    "[FUEL] scraped %d live prices from CEYPETCO (petrol 92: %s)",
+                    len(scraped), result["prices"]["petrol_92"]["price"],
+                )
+            else:
+                logger.warning(
+                    "[FUEL] reached CEYPETCO but parsed no prices -- the page "
+                    "layout has changed. Serving BASELINE values."
+                )
+        else:
+            logger.warning("[FUEL] could not reach CEYPETCO; serving BASELINE values")
 
     except Exception as e:
         logger.warning(f"[FUEL] Scraping error: {e}")
         result["error"] = str(e)
+        result["scrape_status"] = "error"
 
     # Update cache
     _fuel_cache = result
     _fuel_cache_time = utc_now()
 
     return result
+
+
+# CBSL publishes its headline numbers as prose in the press releases on the
+# homepage, not as a data widget. The previous patterns looked for a widget that
+# does not exist -- "CCPI Inflation 2.10%", "TT Buy 305.32" -- so nothing ever
+# matched and the tool silently served the hardcoded baseline below, which by
+# 2026-08 had inflation at 2.1% against an actual 7.3% and the policy rate at
+# 7.75% against an actual 8.75%.
+#
+# Matching prose is inherently more fragile than matching a table, so each
+# pattern is anchored on the phrasing CBSL has used consistently, every match is
+# range-checked, and tests/unit/test_cbsl_parser.py pins them against captured
+# text. If CBSL rewords, the tool reports "baseline" loudly rather than lying.
+CBSL_CCPI_RE = re.compile(
+    r"CCPI[^.]{0,120}?headline inflation[^.]{0,90}?"
+    r"to\s+(\d{1,2}(?:\.\d)?)\s*%\s*in\s+([A-Z][a-z]+\s+\d{4})",
+    re.I,
+)
+CBSL_FOOD_RE = re.compile(
+    r"food inflation[^.]{0,60}?to\s+(\d{1,2}(?:\.\d)?)\s*%\s*in\s+([A-Z][a-z]+\s+\d{4})",
+    re.I,
+)
+# Covers both "maintain ... at the current level of X%" and "reduce ... to X%".
+CBSL_OPR_RE = re.compile(
+    r"Overnight Policy Rate[^.]{0,140}?(?:at|to)\s+"
+    r"(?:the\s+current\s+level\s+of\s+)?(\d{1,2}\.\d{1,2})\s*%",
+    re.I,
+)
+
+# Sanity ranges. A regex that drifts onto the wrong number usually lands well
+# outside these, and a wrong-but-plausible economic figure is worse than none.
+CBSL_RANGES = {
+    "inflation": (-10.0, 80.0),
+    "policy_rate": (1.0, 30.0),
+    "usd_lkr": (150.0, 600.0),
+}
+
+
+def _cbsl_in_range(kind: str, value: float) -> bool:
+    lo, hi = CBSL_RANGES[kind]
+    return lo <= value <= hi
+
+
+def fetch_usd_lkr() -> Optional[Dict[str, Any]]:
+    """
+    Current USD/LKR.
+
+    CBSL's own exchange-rate page renders its table with JavaScript -- fetching
+    it yields ~5 KB of chrome and no numbers -- so it cannot be scraped with
+    requests, and standing up a browser for one number is not worth it. yfinance
+    is already a dependency of this module and carries the pair as USDLKR=X.
+    """
+    try:
+        import yfinance as _yf
+
+        hist = _yf.Ticker("USDLKR=X").history(period="5d")
+        if hist is None or hist.empty:
+            return None
+
+        rate = float(hist["Close"].iloc[-1])
+        if not _cbsl_in_range("usd_lkr", rate):
+            logger.warning("[CBSL] USD/LKR %.2f outside sane range; ignoring", rate)
+            return None
+
+        prev = float(hist["Close"].iloc[0]) if len(hist) > 1 else rate
+        if rate > prev * 1.005:
+            trend = "depreciating"
+        elif rate < prev * 0.995:
+            trend = "appreciating"
+        else:
+            trend = "stable"
+
+        return {
+            "usd_lkr": round(rate, 2),
+            "trend": trend,
+            "as_of": str(hist.index[-1].date()),
+        }
+    except Exception as exc:
+        logger.warning("[CBSL] USD/LKR lookup failed: %s", exc)
+        return None
 
 
 def tool_cbsl_indicators() -> Dict[str, Any]:
@@ -1168,6 +1336,10 @@ def tool_cbsl_indicators() -> Dict[str, Any]:
         "scrape_status": "baseline",
     }
 
+    scraped_any = False
+    live_fields: List[str] = []
+    fx = None
+
     try:
         # Try to scrape CBSL for updated rates
         resp = _safe_get("https://www.cbsl.gov.lk/", timeout=30)
@@ -1175,95 +1347,74 @@ def tool_cbsl_indicators() -> Dict[str, Any]:
             soup = BeautifulSoup(resp.text, "html.parser")
             page_text = soup.get_text(separator=" ", strip=True)
 
-            scraped_any = False
 
-            # Extract TT Buy exchange rate (format: "TT Buy 305.3238" or "TT Buy: 305.3238")
-            tt_buy_match = re.search(
-                r"TT\s*Buy[:\s]*(\d{2,3}(?:\.\d{2,4})?)", page_text, re.I
-            )
-            if tt_buy_match:
-                try:
-                    result["indicators"]["exchange_rate"]["usd_lkr_buy"] = round(
-                        float(tt_buy_match.group(1)), 2
-                    )
-                    scraped_any = True
-                except ValueError:
-                    pass
-
-            # Extract TT Sell exchange rate
-            tt_sell_match = re.search(
-                r"TT\s*Sell[:\s]*(\d{2,3}(?:\.\d{2,4})?)", page_text, re.I
-            )
-            if tt_sell_match:
-                try:
-                    result["indicators"]["exchange_rate"]["usd_lkr_sell"] = round(
-                        float(tt_sell_match.group(1)), 2
-                    )
-                    scraped_any = True
-                except ValueError:
-                    pass
-
-            # Calculate mid rate if we have both buy and sell
-            if tt_buy_match and tt_sell_match:
-                buy = result["indicators"]["exchange_rate"]["usd_lkr_buy"]
-                sell = result["indicators"]["exchange_rate"]["usd_lkr_sell"]
-                result["indicators"]["exchange_rate"]["usd_lkr"] = round(
-                    (buy + sell) / 2, 2
+            # Headline CCPI inflation. The release states the period, so
+            # data_as_of reports the month the figure is FOR -- not the day we
+            # happened to fetch it, which is what the old code stamped even when
+            # every value was a baseline constant.
+            m = CBSL_CCPI_RE.search(page_text)
+            if m and _cbsl_in_range("inflation", float(m.group(1))):
+                value = float(m.group(1))
+                previous = result["indicators"]["inflation"]["ccpi_yoy"]
+                result["indicators"]["inflation"]["ccpi_yoy"] = value
+                result["indicators"]["inflation"]["trend"] = (
+                    "rising" if value > previous
+                    else "falling" if value < previous
+                    else "stable"
                 )
+                result["data_as_of"] = m.group(2)
+                live_fields.append("inflation")
 
-            # Extract CCPI Inflation (format: "CCPI Inflation 2.10%" or just "Inflation 2.10 %")
-            inflation_patterns = [
-                r"CCPI\s*Inflation[:\s]*(\d{1,2}(?:\.\d{1,2})?)\s*%",
-                r"Inflation[:\s]*(\d{1,2}(?:\.\d{1,2})?)\s*%",
-                r"(\d{1,2}(?:\.\d{1,2})?)\s*%\s*(?:CCPI|Inflation)",
-            ]
-            for pattern in inflation_patterns:
-                inflation_match = re.search(pattern, page_text, re.I)
-                if inflation_match:
-                    try:
-                        result["indicators"]["inflation"]["ccpi_yoy"] = float(
-                            inflation_match.group(1)
-                        )
-                        scraped_any = True
-                        break
-                    except ValueError:
-                        pass
+            m = CBSL_FOOD_RE.search(page_text)
+            if m and _cbsl_in_range("inflation", float(m.group(1))):
+                # Food inflation, NOT NCPI -- the old shape conflated them.
+                result["indicators"]["inflation"]["food_yoy"] = float(m.group(1))
+                live_fields.append("food_inflation")
 
-            # Extract Overnight Policy Rate (format: "Overnight Policy Rate 7.75%" or "Policy Rate 7.75 %")
-            policy_patterns = [
-                r"Overnight\s*Policy\s*Rate[:\s]*(\d{1,2}(?:\.\d{1,2})?)\s*%",
-                r"Policy\s*Rate[:\s]*(\d{1,2}(?:\.\d{1,2})?)\s*%",
-                r"(\d{1,2}(?:\.\d{1,2})?)\s*%\s*(?:Policy\s*Rate)",
-            ]
-            for pattern in policy_patterns:
-                policy_match = re.search(pattern, page_text, re.I)
-                if policy_match:
-                    try:
-                        result["indicators"]["policy_rates"]["overnight_rate"] = float(
-                            policy_match.group(1)
-                        )
-                        scraped_any = True
-                        break
-                    except ValueError:
-                        pass
-
-            if scraped_any:
-                result["scrape_status"] = "live"
-                result["data_as_of"] = utc_now().strftime("%Y-%m")
-                logger.info(
-                    f"[CBSL] ✓ Scraped live data - "
-                    f"USD/LKR Buy: {result['indicators']['exchange_rate']['usd_lkr_buy']}, "
-                    f"Sell: {result['indicators']['exchange_rate']['usd_lkr_sell']}, "
-                    f"Inflation: {result['indicators']['inflation']['ccpi_yoy']}%"
+            m = CBSL_OPR_RE.search(page_text)
+            if m and _cbsl_in_range("policy_rate", float(m.group(1))):
+                result["indicators"]["policy_rates"]["overnight_rate"] = float(
+                    m.group(1)
                 )
+                live_fields.append("policy_rate")
+
+            if live_fields:
+                scraped_any = True
+                logger.info("[CBSL] scraped live: %s", ", ".join(live_fields))
             else:
-                logger.info("[CBSL] Using baseline data - no live values matched")
+                logger.warning(
+                    "[CBSL] reached cbsl.gov.lk (%d chars) but matched no "
+                    "indicators -- the page wording has changed and the "
+                    "patterns need updating. Serving BASELINE values.",
+                    len(page_text),
+                )
         else:
             logger.warning("[CBSL] Could not reach cbsl.gov.lk, using baseline data")
+
+        # Exchange rate comes from yfinance, not the page -- CBSL renders its
+        # rate table with JavaScript.
+        fx = fetch_usd_lkr()
+        if fx:
+            rate = fx["usd_lkr"]
+            result["indicators"]["exchange_rate"].update({
+                "usd_lkr": rate,
+                # CBSL's TT spread runs a little under a rupee either side.
+                "usd_lkr_buy": round(rate - 0.75, 2),
+                "usd_lkr_sell": round(rate + 0.75, 2),
+                "trend": fx["trend"],
+                "as_of": fx["as_of"],
+            })
+            scraped_any = True
+        else:
+            result["indicators"]["exchange_rate"]["stale"] = True
+
+        result["scrape_status"] = "live" if scraped_any else "baseline"
+        result["live_fields"] = live_fields + (["exchange_rate"] if fx else [])
 
     except Exception as e:
         logger.warning(f"[CBSL] Scraping error: {e}")
         result["error"] = str(e)
+        result["scrape_status"] = "error"
 
     # Update cache
     _cbsl_cache = result

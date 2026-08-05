@@ -114,8 +114,26 @@ class ScrapeContext:
         self.platform = credential.platform
         self._account_key = credential.account_key or f"anon:{credential.platform}"
         self._posts_seen = 0
+        # Highest number of post containers seen on the page during this run.
+        # See note_containers().
+        self.containers_seen = 0
 
     # -- pacing ------------------------------------------------------------
+
+    # -- selector health ---------------------------------------------------
+
+    def note_containers(self, n: int) -> None:
+        """
+        Record how many post containers the page actually rendered.
+
+        This is what separates "the search found nothing" from "the search found
+        plenty and our text selector no longer matches any of it". Without it,
+        partial selector rot is invisible: the container selector still hits, the
+        inner selector does not, every post is dropped by the `if not text`
+        guard, and the scraper returns status="ok" with zero posts -- identical
+        to a genuinely empty result. run_scrape() turns that case into an error.
+        """
+        self.containers_seen = max(self.containers_seen, int(n or 0))
 
     def pace(self, kind: str = "nav") -> None:
         """
@@ -259,6 +277,40 @@ def browser_session(
                 pass
 
 
+def _flag_extraction_failure(result: ScrapeResult, ctx: ScrapeContext) -> None:
+    """
+    Turn "rendered N posts, extracted 0" into an error.
+
+    A scraper reports status="error" when its *container* selector matches
+    nothing, so a wholesale layout change is caught. Partial rot was not: if the
+    container still matches and only the inner text selector has changed, every
+    post is dropped by the scrapers' `if not text: continue` guard and the run
+    ends with the default status="ok" and an empty list -- which reads exactly
+    like a search that legitimately had no results. That is the difference
+    between "quiet news day" and "we stopped being able to read X", and the feed
+    showed them identically.
+
+    A genuinely empty page leaves containers_seen at 0 and stays "ok".
+    """
+    if result.status != "ok" or result.posts:
+        return
+
+    # getattr, not attribute access: this runs on the success path of every
+    # scrape, and a guard that raises on an unexpected context object would turn
+    # a good run into an error. Absent means "no evidence", which means no flag.
+    containers = getattr(ctx, "containers_seen", 0) or 0
+    if containers <= 0:
+        return
+
+    result.status = "error"
+    result.reason = (
+        f"{getattr(ctx, 'platform', 'scraper')}: page rendered {containers} post container(s) "
+        "but none could be parsed -- the post selectors have almost certainly "
+        "changed. Run `python -m connector.selftest` to see which one."
+    )
+    logger.error("[base] %s", result.reason)
+
+
 def run_scrape(credential: SocialCredential, fn, *args, **kwargs) -> ScrapeResult:
     """
     Execute a scraper and translate every outcome into a ScrapeResult.
@@ -269,6 +321,10 @@ def run_scrape(credential: SocialCredential, fn, *args, **kwargs) -> ScrapeResul
       expired         -> session dead. User must reconnect.
       budget_exhausted-> daily cap reached. Not an error.
       error           -> anything else; safe to try again later.
+
+    Also promotes the one silent failure the status contract could not express:
+    a page that rendered post containers from which nothing could be extracted.
+    See _flag_extraction_failure().
     """
     platform = credential.platform
     profile = LaunchProfile.MOBILE if platform == "instagram" else LaunchProfile.DESKTOP
@@ -288,6 +344,7 @@ def run_scrape(credential: SocialCredential, fn, *args, **kwargs) -> ScrapeResul
             # does, and it is the single biggest factor in how long a connected
             # account keeps working.
             result.rotated_state = ctx.persist_state()
+            _flag_extraction_failure(result, ctx)
             return result
 
     except challenge_mod.ChallengeDetected as exc:

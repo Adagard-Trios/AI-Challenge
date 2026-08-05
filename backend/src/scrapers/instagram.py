@@ -79,6 +79,10 @@ def _caption_for(ctx: ScrapeContext, url: str) -> str:
 def _harvest(ctx: ScrapeContext, links: List[str], poster: str) -> List[dict]:
     results: List[dict] = []
 
+    # The grid gave us permalinks; if none of them yields a caption, the caption
+    # selectors have rotted rather than the posts being empty.
+    ctx.note_containers(len(links))
+
     for url in links:
         if ctx.posts_remaining() <= 0:
             logger.info("[instagram] daily post budget reached; stopping early")

@@ -124,6 +124,7 @@ def _harvest(ctx: ScrapeContext, max_items: int, source_url: str) -> List[dict]:
 
         try:
             messages = ctx.page.locator(MESSAGE).all()
+            ctx.note_containers(len(messages))
         except Exception:
             break
 

@@ -757,8 +757,19 @@ JSON array only:"""
             max(0, 1.0 - snapshot["logistics_friction"]), 3
         )
 
-        # Regulatory Activity (sum of political events)
-        snapshot["regulatory_activity"] = round(len(political_scores) * 0.1, 3)
+        # Regulatory activity is a COUNT of political stories this cycle, not a
+        # calibrated index. `len(political_scores) * 0.1` is a story tally with
+        # a scaling factor, and it sat on the dashboard beside genuinely scored
+        # metrics like compliance_volatility looking identical to them -- a
+        # reader had no way to know one was a model output and the other was
+        # "we saw seven political headlines".
+        #
+        # Kept because a rising count is real signal, but reported as what it
+        # is. The raw count travels alongside so the UI can say "7 stories"
+        # rather than implying a 0.7 index.
+        snapshot["regulatory_activity"] = round(min(1.0, len(political_scores) * 0.1), 3)
+        snapshot["regulatory_activity_is_count"] = True
+        snapshot["regulatory_story_count"] = len(political_scores)
 
         # Investment Climate (opportunity-weighted)
         if opportunity_scores:

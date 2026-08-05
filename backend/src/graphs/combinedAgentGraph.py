@@ -1,20 +1,19 @@
 """
 combinedAgentGraph.py - Main entry point for the Combined Agent System.
 
-This is the orchestrator main.py runs in production.
+The orchestrator. main.py runs this one, and it is now the only one.
 
-There is a second, similar orchestrator in RogerGraph.py (RogerFullGraph), used
-by app.py. Both classes were once called CombinedAgentGraphBuilder, so which one
-you got depended entirely on which module you imported. They are NOT
-interchangeable:
+Each domain agent is wrapped in a Python function that calls subgraph.invoke({})
+on a FRESH state and catches its exceptions, so one failing agent degrades to
+zero insights rather than failing the whole cycle. Five agents.
 
-  - Here, each domain agent is wrapped in a Python function that calls
-    subgraph.invoke({}) on a FRESH state and catches its exceptions, so one
-    failing agent degrades to zero insights instead of failing the cycle.
-    Five agents; no DataRetrievalAgent.
-  - RogerFullGraph adds the compiled subgraphs directly as LangGraph nodes, so
-    they share the parent state and an exception aborts the run. Six agents,
-    including DataRetrievalAgent.
+A second orchestrator lived in RogerGraph.py until 4914bc4: same class name
+(CombinedAgentGraphBuilder), different topology, six agents, subgraphs added
+directly as LangGraph nodes so a raising agent aborted the run. Which one you
+got depended on which module you imported -- main.py took this one, app.py the
+other. app.py was referenced by no Dockerfile, script or blueprint, so that
+topology had never actually run in production. Both are in git history if the
+fan-out-with-DataRetrievalAgent shape is ever wanted back.
 """
 
 from __future__ import annotations

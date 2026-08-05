@@ -25,7 +25,7 @@ STATES = PROJECT_ROOT / "src" / "states"
 # subgraph_runner.py, which are helpers rather than graph definitions.
 GRAPH_MODULES = sorted(
     p for p in GRAPHS.glob("*.py")
-    if p.name.endswith("AgentGraph.py") or p.name == "RogerGraph.py"
+    if p.name.endswith("AgentGraph.py")
 )
 
 
@@ -139,32 +139,31 @@ def test_langgraph_json_names_match_their_files():
 
 # --- orchestrator identity -------------------------------------------------
 
-def test_the_two_orchestrators_have_distinct_names():
+def test_there_is_exactly_one_orchestrator():
     """
-    REGRESSION. CombinedAgentGraphBuilder was defined in BOTH RogerGraph.py and
-    combinedAgentGraph.py with different topologies and different agent counts.
-    main.py imported one and app.py the other, so the class you got depended
-    entirely on the import path.
+    REGRESSION, now resolved by deletion. CombinedAgentGraphBuilder was defined
+    in BOTH RogerGraph.py and combinedAgentGraph.py with different topologies
+    and different agent counts; main.py imported one and app.py the other, so
+    which graph ran depended entirely on the import path. Renaming them made
+    that visible, but two orchestrators drifting apart is a fork waiting to
+    happen -- and app.py was referenced by no Dockerfile, script or blueprint,
+    so RogerFullGraph had never run in production at all.
     """
-    defined = {}
-    for path in (GRAPHS / "RogerGraph.py", GRAPHS / "combinedAgentGraph.py"):
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        for node in tree.body:
-            if isinstance(node, ast.ClassDef):
-                defined.setdefault(node.name, []).append(path.name)
-
-    collisions = {n: f for n, f in defined.items() if len(f) > 1}
-    assert not collisions, f"same class name in both orchestrators: {collisions}"
-    assert "RogerFullGraph" in defined
-    assert "CombinedAgentGraph" in defined
+    orchestrators = [
+        p for p in GRAPHS.glob("*.py")
+        if "CombinedAgentNode" in p.read_text(encoding="utf-8")
+    ]
+    assert len(orchestrators) == 1, (
+        f"expected one orchestrator, found: {[p.name for p in orchestrators]}"
+    )
+    assert orchestrators[0].name == "combinedAgentGraph.py"
 
 
-@pytest.mark.parametrize("path", ["RogerGraph.py", "combinedAgentGraph.py"])
-def test_orchestrators_document_the_other(path):
-    """A reader landing in either file must learn the other exists."""
-    doc = ast.get_docstring(ast.parse((GRAPHS / path).read_text(encoding="utf-8"))) or ""
-    other = "CombinedAgentGraph" if path == "RogerGraph.py" else "RogerFullGraph"
-    assert other in doc, f"{path} does not mention {other}"
+def test_the_dead_orchestrator_is_gone():
+    """Deleted, not merely unreferenced -- dead code that looks alive is the
+    whole problem this project keeps hitting."""
+    assert not (GRAPHS / "RogerGraph.py").exists()
+    assert not (PROJECT_ROOT / "app.py").exists()
 
 
 def test_no_unreachable_loop_branch():
@@ -174,7 +173,7 @@ def test_no_unreachable_loop_branch():
     and if it ever had been, the graph would have re-entered itself and hit
     LangGraph's recursion limit rather than looping.
     """
-    for name in ("RogerGraph.py", "combinedAgentGraph.py"):
+    for name in ("combinedAgentGraph.py",):
         src = (GRAPHS / name).read_text(encoding="utf-8")
         assert "add_conditional_edges" not in src, (
             f"{name} still routes DataRefreshRouter conditionally"

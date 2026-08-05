@@ -9,8 +9,7 @@
         "economical_agent_graph": "./src/graphs/economicalAgentGraph.py:graph",
         "social_agent_graph": "./src/graphs/socialAgentGraph.py:graph",
         "intelligence_agent_graph": "./src/graphs/intelligenceAgentGraph.py:graph",
-        "combined_agent_graph": "./src/graphs/combinedAgentGraph.py:graph",
-        "roger_full_graph": "./src/graphs/RogerGraph.py:graph"
+        "combined_agent_graph": "./src/graphs/combinedAgentGraph.py:graph"
     },
     "env": "./env"
 }

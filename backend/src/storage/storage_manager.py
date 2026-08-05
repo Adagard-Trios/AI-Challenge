@@ -128,6 +128,7 @@ class StorageManager:
         timestamp: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
         dedup_key: Optional[str] = None,
+        entities: Optional[List[Dict[str, Any]]] = None,
     ):
         """
         Store event in all databases.
@@ -181,6 +182,15 @@ class StorageManager:
                 timestamp=timestamp,
                 metadata=metadata,
             )
+
+            # Link canonical entities so relevance scoring has something to
+            # join a user's exposure profile against. Failures here are logged
+            # by the store and degrade that one event to "no entities" -- they
+            # must not lose the event itself, which is already written above.
+            if entities:
+                from src.intelligence.entity_store import get_entity_store
+
+                get_entity_store().link_event(event_id, entities)
 
             # Record keywords for trending detection
             if TRENDING_AVAILABLE:

@@ -92,10 +92,16 @@ def init_db() -> None:
     """
     Create tables if absent.
 
-    Deliberately not Alembic yet: five tables and one deployment. Alembic is a
-    discipline rather than a library, and adding it before the first schema
-    change is ceremony. Introduce it when that change lands.
+    Deliberately not Alembic yet: a handful of tables and one deployment.
+    Alembic is a discipline rather than a library, and adding it before the
+    first destructive schema change is ceremony. Introduce it when that lands.
     """
+    # Imported for the side effect of registering on Base.metadata. Without
+    # this, entities/event_entities/exposure_profiles are never created and
+    # every entity write fails against a missing table -- at runtime, in
+    # production, with the feature looking implemented.
+    from src.intelligence import models as _intelligence_models  # noqa: F401
+
     Base.metadata.create_all(bind=engine())
     logger.info("[auth.db] schema ready (%d tables)", len(Base.metadata.tables))
 

@@ -75,12 +75,13 @@ class InMemoryStorage:
 
     def store_event(self, event_id, summary, domain, severity, impact_type,
                     confidence_score, timestamp=None, metadata=None,
-                    dedup_key=None):
+                    dedup_key=None, entities=None):
         self.seen[self._key(dedup_key or summary)] = event_id
         self.events.append({
             "event_id": event_id, "summary": summary, "domain": domain,
             "severity": severity, "impact_type": impact_type,
             "confidence_score": confidence_score, "metadata": metadata or {},
+            "entities": entities or [],
         })
         self.stats["unique_stored"] += 1
 
@@ -114,6 +115,13 @@ class ScriptedLLM:
                 "severity": self._severity or "high",
                 "region": "sri_lanka",
                 "enhanced_summary": f"Cleaned summary {i}",
+                # Deliberately non-canonical surface forms: the pipeline is
+                # expected to fold these onto canonical names.
+                "entities": [
+                    {"type": "PLACE", "name": "Gampaha District", "role": "affected"},
+                    {"type": "INFRASTRUCTURE", "name": "Colombo Port", "role": "affected"},
+                    {"type": "SECTOR", "name": "garments", "role": "mentioned"},
+                ],
             }
             for i in range(n)
         ]
@@ -460,3 +468,97 @@ def test_storage_receives_the_computed_metadata():
             "region never reached storage, so /api/feeds cannot filter by it"
         )
         assert "llm_filtered" in stored["metadata"]
+
+
+# --- entities --------------------------------------------------------------
+
+def test_the_storage_double_matches_the_real_signature():
+    """
+    A double that drifts from the real signature stops testing what it claims
+    while still passing. This caught `entities` being added to store_event.
+    """
+    import inspect
+
+    from src.storage.storage_manager import StorageManager
+
+    real = set(inspect.signature(StorageManager.store_event).parameters)
+    fake = set(inspect.signature(InMemoryStorage.store_event).parameters)
+
+    missing = real - fake
+    assert not missing, (
+        f"InMemoryStorage.store_event is missing {sorted(missing)}; the double "
+        "no longer stands in for the real thing"
+    )
+
+
+def test_entities_are_canonicalised_before_they_reach_storage():
+    """
+    Relevance is a join on names. "Colombo Port" and "Port of Colombo" must
+    arrive as one identity or the join silently under-matches, which looks
+    exactly like a quiet news day.
+    """
+    storage = InMemoryStorage()
+    node = make_node(storage=storage)
+    run_cycle(node)
+
+    assert storage.events
+    names = {e["name"] for ev in storage.events for e in ev["entities"]}
+
+    assert "Port of Colombo" in names, f"not canonicalised: {sorted(names)}"
+    assert "Colombo Port" not in names, "a raw surface form reached storage"
+    assert "Gampaha" in names
+    assert "apparel" in names, "'garments' did not fold onto its canonical sector"
+
+
+def test_events_carry_entities_to_the_feed():
+    node = make_node()
+    feed = run_cycle(node)["final_ranked_feed"]
+
+    for event in feed:
+        assert "entities" in event
+        assert event["entities_extracted"] is True
+
+
+def test_an_llm_outage_reports_entities_as_not_extracted():
+    """
+    The honest failure path. Zero entities because no model ran must be
+    distinguishable from zero entities because the post named nothing --
+    otherwise relevance silently scores every event as irrelevant.
+    """
+    node = make_node(llm=DeadLLM())
+    feed = run_cycle(node)["final_ranked_feed"]
+
+    assert feed
+    for event in feed:
+        assert event["entities"] == []
+        assert event["entities_extracted"] is False
+
+
+def test_a_reply_without_the_entities_key_is_not_read_as_empty():
+    """A prompt or parsing regression must surface, not look like a quiet post."""
+
+    class NoEntitiesLLM:
+        def invoke(self, prompt):
+            import re
+
+            m = re.search(r"ids 0 to (\d+)", prompt)
+            n = int(m.group(1)) + 1 if m else 1
+
+            class R:
+                content = json.dumps([
+                    {"id": i, "keep": True, "is_meaningful": True,
+                     "fake_news_probability": 0.05, "severity": "medium",
+                     "region": "sri_lanka", "enhanced_summary": f"s{i}"}
+                    for i in range(n)
+                ])
+
+            return R()
+
+    node = make_node(llm=NoEntitiesLLM())
+    feed = run_cycle(node)["final_ranked_feed"]
+
+    assert feed
+    assert all(e["entities_extracted"] is False for e in feed), (
+        "a reply with no entities field was recorded as a successful empty "
+        "extraction"
+    )

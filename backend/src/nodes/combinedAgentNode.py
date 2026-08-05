@@ -16,6 +16,11 @@ from typing import Any, Dict, List, Optional
 # Import storage manager for production-grade persistence
 from src.storage.storage_manager import StorageManager
 
+# Canonical names for the things events are about. Relevance scoring is a join
+# between event entities and a user's exposure, and that join only works if both
+# sides agree on the name -- see src/intelligence/taxonomy.py.
+from src.intelligence.taxonomy import canonicalise_many
+
 # Import trending detector for velocity metrics
 try:
     from src.utils.trending_detector import get_trending_detector, record_topic_mention
@@ -96,6 +101,9 @@ class CombinedAgentNode:
             "enhanced_summary": " ".join(words[:200]) if len(words) > 200 else summary,
             "severity": None,
             "fake_news_score": None,
+            # No model ran, so nothing was extracted. Not an empty verdict.
+            "entities": [],
+            "entities_extracted": False,
             "region": self._guess_region(summary),
             "confidence_boost": 0.0,
             "original_summary": summary,
@@ -160,7 +168,10 @@ post, using the post's bracketed number as "id":
     "severity": "low/medium/high/critical",
     "region": "sri_lanka/world",
     "enhanced_summary": "Cleaned, concise summary (max 200 words)",
-    "is_meaningful": true/false
+    "is_meaningful": true/false,
+    "entities": [
+      {{"type": "PLACE|ORG|SECTOR|INFRASTRUCTURE|LANE", "name": "...", "role": "affected|actor|mentioned"}}
+    ]
   }}
 ]
 
@@ -170,7 +181,17 @@ Rules:
 3. region: "sri_lanka" if about Sri Lanka, otherwise "world"
 4. enhanced_summary: Clean, professional, max 200 words. Keep key facts.
 5. is_meaningful: false if no actionable intelligence or just social chatter
-6. Return exactly {len(summaries)} objects, ids 0 to {len(summaries) - 1}.
+6. entities: the real-world things this post is about, so a business can tell
+   whether it affects them. Extract only what the text actually names.
+   - PLACE: a Sri Lankan district, city or region (e.g. "Gampaha", "Colombo")
+   - ORG: a named company, ministry or authority (e.g. "CEB", "Hayleys")
+   - SECTOR: an industry (e.g. "apparel", "tea", "logistics", "banking")
+   - INFRASTRUCTURE: a port, airport, expressway or utility network
+   - LANE: a named trade route or corridor
+   role: "affected" if the thing is impacted, "actor" if it is doing something,
+   "mentioned" otherwise. Use [] when the post names nothing concrete -- do not
+   invent entities to fill the field.
+7. Return exactly {len(summaries)} objects, ids 0 to {len(summaries) - 1}.
 
 JSON array only:"""
 
@@ -223,8 +244,19 @@ JSON array only:"""
             if len(words) > 200:
                 enhanced = " ".join(words[:200])
 
+            # Entities drive relevance scoring, so "the model returned none"
+            # and "the model never answered" must not look the same. An absent
+            # key means the reply did not carry the field at all -- a prompt or
+            # parsing problem worth surfacing. An empty list is a real verdict:
+            # this post names nothing concrete.
+            raw_entities = verdict.get("entities")
+            extracted = raw_entities is not None
+            entities = canonicalise_many(raw_entities) if extracted else []
+
             results.append(
                 {
+                    "entities": entities,
+                    "entities_extracted": extracted,
                     "keep": keep,
                     "enhanced_summary": enhanced,
                     "severity": verdict.get("severity"),
@@ -520,6 +552,10 @@ JSON array only:"""
                 "region": region,  # NEW: for sidebar filtering
                 "fake_news_score": fake_score,  # None when unverified
                 "llm_filtered": llm_filtered,  # False = model never judged this
+                # What the event is ABOUT, canonicalised. This is what relevance
+                # scoring joins against a business's exposure profile.
+                "entities": llm_result.get("entities") or [],
+                "entities_extracted": bool(llm_result.get("entities_extracted")),
                 "timestamp": timestamp,
             }
             converted.append(classified)
@@ -551,6 +587,7 @@ JSON array only:"""
                     "fake_news_score": fake_score,
                     "llm_filtered": llm_filtered,
                 },
+                entities=classified["entities"],
             )
 
         logger.info(

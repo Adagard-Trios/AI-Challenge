@@ -70,9 +70,14 @@ class PostgresEntityStore:
 
     def __init__(self, session_factory=None):
         if session_factory is None:
-            from auth.db import SessionLocal
+            # auth.db exposes session_factory() -- a function returning the
+            # sessionmaker -- not a SessionLocal binding. Importing the wrong
+            # name raised, get_entity_store() caught it, and every write went
+            # to NullEntityStore: the feature would have looked implemented and
+            # stored nothing. Caught by the end-to-end check, not by a unit test.
+            from auth.db import session_factory as _factory
 
-            session_factory = SessionLocal
+            session_factory = _factory()
         self._session_factory = session_factory
 
     def link_event(self, event_id: str, entities: Iterable[dict]) -> int:
@@ -171,7 +176,6 @@ def get_entity_store():
     global _store
     if _store is None:
         try:
-            from auth.db import SessionLocal  # noqa: F401
             _store = PostgresEntityStore()
             logger.info("[entity_store] using Postgres")
         except Exception as exc:

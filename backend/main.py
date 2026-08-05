@@ -40,6 +40,7 @@ sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 from src.states.combinedAgentState import CombinedAgentState
 from src.storage.storage_manager import StorageManager
 from src import model_gateway, model_metadata
+from src.intelligence import feed_relevance
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("Roger_api")
@@ -220,10 +221,18 @@ try:
     from auth import routes as _auth_routes
     from auth import ws_tickets as _ws_tickets
     from auth.config import settings as _auth_settings
+    from auth.db import get_db
     from auth.dependencies import require_user
 
     _AUTH_READY = _auth_bootstrap.init()
     app.include_router(_auth_routes.router)
+
+    # Exposure profiles are per-user and live in the same database, so they
+    # only mount when the auth layer came up. Without them the feed is simply
+    # unranked -- relevance is null and the order is unchanged.
+    from src.intelligence import exposure_routes as _exposure_routes
+
+    app.include_router(_exposure_routes.router)
 except Exception:  # noqa: BLE001
     # Never let an auth problem take down a service that ran fine without it.
     # bootstrap.init() itself re-raises when AUTH_ENFORCED=1, which is the case
@@ -239,6 +248,12 @@ except Exception:  # noqa: BLE001
     # the opposite of degrading gracefully.
     def require_user():  # type: ignore[misc]
         return None
+
+    # Same reasoning for the session dependency. Yielding None means
+    # feed_relevance.load_exposure() returns no exposure, so the feed is served
+    # unranked rather than 500ing.
+    def get_db():  # type: ignore[misc]
+        yield None
 
 # Global state
 current_state: Dict[str, Any] = {
@@ -724,16 +739,37 @@ def get_dashboard(_user=Depends(require_user)):
 
 
 @app.get("/api/feed")
-def get_feed(_user=Depends(require_user)):
-    """Get current feed from memory"""
+def get_feed(
+    only_relevant: bool = False,
+    _user=Depends(require_user),
+    db=Depends(get_db),
+):
+    """
+    Current feed from memory, ranked against the caller's exposure profile.
+
+    A caller with no profile gets the feed exactly as before, in the same
+    order, with relevance null on every event -- explicitly "not scored", never
+    a score of zero.
+    """
+    events = list(current_state.get("final_ranked_feed", []))
+
+    exposure = feed_relevance.load_exposure(db, _user)
+    events = feed_relevance.annotate(events, exposure, only_relevant=only_relevant)
+
     return {
-        "events": current_state.get("final_ranked_feed", []),
-        "total": len(current_state.get("final_ranked_feed", []))
+        "events": events,
+        "total": len(events),
+        "ranked_by_relevance": exposure is not None,
     }
 
 
 @app.get("/api/feeds")
-def get_feeds_from_db(limit: int = 100, _user=Depends(require_user)):
+def get_feeds_from_db(
+    limit: int = 100,
+    only_relevant: bool = False,
+    _user=Depends(require_user),
+    db=Depends(get_db),
+):
     """Get feeds directly from database (for initial load)"""
     try:
         feeds = storage_manager.get_recent_feeds(limit=limit)
@@ -764,10 +800,16 @@ def get_feeds_from_db(limit: int = 100, _user=Depends(require_user)):
             }
             normalized_feeds.append(normalized)
 
+        exposure = feed_relevance.load_exposure(db, _user)
+        normalized_feeds = feed_relevance.annotate(
+            normalized_feeds, exposure, only_relevant=only_relevant
+        )
+
         return {
             "events": normalized_feeds,
             "total": len(normalized_feeds),
-            "source": "database"
+            "source": "database",
+            "ranked_by_relevance": exposure is not None,
         }
     except Exception as e:
         logger.error(f"[API] Error fetching feeds: {e}")

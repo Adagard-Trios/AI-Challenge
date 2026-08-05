@@ -2,11 +2,12 @@ import { Card } from "../ui/card";
 import { Badge } from "../ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { Button } from "../ui/button";
-import { Newspaper, Cloud, TrendingUp, FileText, Radio, Globe, MapPin, Settings } from "lucide-react";
+import { Newspaper, Cloud, TrendingUp, FileText, Radio, Globe, MapPin, Settings, Target } from "lucide-react";
 import { useRogerData, RogerEvent } from "../../hooks/use-roger-data";
 import { motion, AnimatePresence } from "framer-motion";
 import { useState } from "react";
 import IntelligenceSettings from "./IntelligenceSettings";
+import RelevanceBadge from "./RelevanceBadge";
 
 const IntelligenceFeed = () => {
   const { events, isConnected } = useRogerData();
@@ -17,14 +18,33 @@ const IntelligenceFeed = () => {
   // Settings panel toggle
   const [showSettings, setShowSettings] = useState(false);
 
+  // "Relevant to me" filter. Off by default, on purpose: the platform ranks,
+  // the user decides what to hide. A risk feed that silently drops something
+  // you needed is the worst failure it can have.
+  const [onlyRelevant, setOnlyRelevant] = useState(false);
+
   // ALWAYS ensure events is an array
   const safeEvents: RogerEvent[] = Array.isArray(events) ? events : [];
+
+  // Only offer the toggle when events actually carry relevance -- i.e. the
+  // user has an exposure profile. Otherwise it would filter on nothing and
+  // appear broken.
+  const isRanked = safeEvents.some(e => e?.relevance != null);
+  // Mirrors RELEVANT_THRESHOLD in backend/src/intelligence/relevance.py.
+  const RELEVANT_THRESHOLD = 0.35;
+  const relevantCount = safeEvents.filter(
+    e => (e?.relevance?.score ?? 0) >= RELEVANT_THRESHOLD
+  ).length;
 
   // Filter by region first
   const regionFilteredEvents = safeEvents.filter(e => {
     // If event has region field, use it; otherwise infer from domain
     const eventRegion = e?.region || "sri_lanka"; // Default to Sri Lanka
-    return eventRegion === region;
+    if (eventRegion !== region) return false;
+    if (onlyRelevant && isRanked) {
+      return (e?.relevance?.score ?? 0) >= RELEVANT_THRESHOLD;
+    }
+    return true;
   });
 
   // Then filter by category
@@ -98,6 +118,10 @@ const IntelligenceFeed = () => {
                 </Badge>
 
                 <Badge className="border border-border">{item.domain}</Badge>
+
+                {/* Why this is ranked where it is. Absent when the event was
+                    not scored -- which means "no profile", not "irrelevant". */}
+                <RelevanceBadge relevance={item.relevance} />
               </div>
 
               <h3 className="font-bold text-sm mb-1">{item.summary}</h3>
@@ -124,6 +148,23 @@ const IntelligenceFeed = () => {
           <h2 className="text-lg font-bold">INTELLIGENCE FEED</h2>
 
           <div className="ml-auto flex items-center gap-3">
+            {/* Only offered once the user has an exposure profile -- without
+                one every event scores null and the toggle would filter on
+                nothing. The count is shown so enabling it is never a surprise. */}
+            {isRanked && (
+              <Button
+                variant={onlyRelevant ? "default" : "outline"}
+                size="sm"
+                onClick={() => setOnlyRelevant(!onlyRelevant)}
+                className="flex items-center gap-1"
+                title="Show only events that touch your declared exposure"
+              >
+                <Target className="w-4 h-4" />
+                <span className="hidden sm:inline">
+                  Relevant to me ({relevantCount})
+                </span>
+              </Button>
+            )}
             <Button
               variant={showSettings ? "default" : "outline"}
               size="sm"

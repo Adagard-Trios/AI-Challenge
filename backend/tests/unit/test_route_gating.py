@@ -100,24 +100,50 @@ def test_every_route_is_either_gated_or_deliberately_public():
     Static guard: a new @app route added without a dependency would silently be
     public. Catches that at review time rather than in production.
     """
-    import re
+    import ast
 
+    # Parsed, not line-matched. The previous version checked only the single
+    # line following the decorator, so a handler whose signature wrapped across
+    # lines -- which any route with more than one dependency ends up doing --
+    # was reported as ungated even though it was not. A guard that fires on
+    # formatting teaches people to ignore it.
     source = (PROJECT_ROOT / "main.py").read_text(encoding="utf-8")
-    lines = source.splitlines()
+    tree = ast.parse(source)
     ungated = []
 
-    for i, line in enumerate(lines):
-        m = re.match(r'^@app\.(get|post|delete|put)\("([^"]+)"', line)
-        if not m:
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
-        path = m.group(2)
-        if path in PUBLIC:
+
+        paths = []
+        for decorator in node.decorator_list:
+            if (isinstance(decorator, ast.Call)
+                    and isinstance(decorator.func, ast.Attribute)
+                    and isinstance(decorator.func.value, ast.Name)
+                    and decorator.func.value.id == "app"
+                    and decorator.func.attr in ("get", "post", "delete", "put")
+                    and decorator.args
+                    and isinstance(decorator.args[0], ast.Constant)):
+                paths.append(decorator.args[0].value)
+
+        if not paths:
             continue
-        j = i + 1
-        while j < len(lines) and lines[j].lstrip().startswith("@"):
-            j += 1
-        if j < len(lines) and "Depends(require_user)" not in lines[j]:
-            ungated.append(path)
+
+        # Any parameter defaulting to Depends(require_user), wherever it sits
+        # in the signature.
+        gated = any(
+            isinstance(default, ast.Call)
+            and isinstance(default.func, ast.Name)
+            and default.func.id == "Depends"
+            and default.args
+            and isinstance(default.args[0], ast.Name)
+            and default.args[0].id == "require_user"
+            for default in [*node.args.defaults, *node.args.kw_defaults]
+            if default is not None
+        )
+
+        if not gated:
+            ungated.extend(p for p in paths if p not in PUBLIC)
 
     assert not ungated, (
         f"routes with no auth dependency: {ungated}. Add "

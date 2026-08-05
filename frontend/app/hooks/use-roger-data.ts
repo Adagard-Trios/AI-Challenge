@@ -32,6 +32,14 @@ export interface RogerEvent {
   // false = no model verified this event; severity is the agent's own
   // keyword-derived value. Treat these as provisional in the UI.
   llm_filtered?: boolean;
+  // How much this event matters to THIS user's business, and why.
+  // null means it was not scored -- no exposure profile -- which is different
+  // from a score of 0 ("scored, and it does not touch you").
+  relevance?: {
+    score: number;
+    matched_on: string[];
+    matches?: Array<Record<string, string | number>>;
+  } | null;
 }
 
 export interface RiskDashboard {

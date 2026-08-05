@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { API_BASE, apiFetch } from "@/app/lib/api";
+import ExposureProfileEditor from "./ExposureProfile";
 
 // API base URL - adjust based on your backend
 
@@ -182,6 +183,11 @@ const IntelligenceSettings = () => {
     }
 
     return (
+        <div className="space-y-6">
+        {/* What this business depends on. Drives per-user relevance ranking;
+            the settings below steer collection, which is global. */}
+        <ExposureProfileEditor />
+
         <Card className="p-6 bg-card border-border">
             <div className="flex items-center justify-between mb-6">
                 <div className="flex items-center gap-2">
@@ -423,6 +429,7 @@ const IntelligenceSettings = () => {
                 </div>
             </div>
         </Card>
+        </div>
     );
 };
 

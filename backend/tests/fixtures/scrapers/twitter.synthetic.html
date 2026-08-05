@@ -1,0 +1,54 @@
+<!-- SYNTHETIC fixture, hand-written to X's documented DOM shape.
+
+     What this catches: a change on OUR side that breaks extraction -- a
+     refactor of _harvest, a mistyped selector constant, a regression in the
+     engagement or timestamp helpers.
+
+     What this does NOT catch: X changing its markup. Only a real capture can,
+     via `python -m connector.selftest --platform twitter --capture`, which
+     writes twitter.html beside this file and takes precedence.
+-->
+<div id="fixture-root">
+
+  <article data-testid="tweet">
+    <div data-testid="User-Name">
+      <span>Ceylon Business Daily</span>
+      <span>@ceylonbizdaily</span>
+      <a href="/ceylonbizdaily/status/1234567890"><time datetime="2026-08-05T06:30:00.000Z">2h</time></a>
+    </div>
+    <div data-testid="tweetText">
+      Central Bank holds the Overnight Policy Rate at 8.75 percent amid rising food inflation.
+    </div>
+    <div role="group">
+      <button data-testid="reply" aria-label="14 replies"></button>
+      <button data-testid="retweet" aria-label="87 reposts"></button>
+      <button data-testid="like" aria-label="1,204 likes"></button>
+    </div>
+  </article>
+
+  <article data-testid="tweet">
+    <div data-testid="User-Name">
+      <span>Lanka Logistics</span>
+      <span>@lankalogistics</span>
+      <a href="/lankalogistics/status/1234567891"><time datetime="2026-08-05T05:10:00.000Z">4h</time></a>
+    </div>
+    <div data-testid="tweetText">
+      Fuel price revision pushes Colombo freight rates up again this quarter.
+    </div>
+    <div role="group">
+      <button data-testid="reply" aria-label="3 replies"></button>
+      <button data-testid="retweet" aria-label="12 reposts"></button>
+      <button data-testid="like" aria-label="256 likes"></button>
+    </div>
+  </article>
+
+  <!-- Promoted content must be skipped, not harvested. -->
+  <article data-testid="tweet">
+    <div data-testid="User-Name"><span>Some Advertiser</span></div>
+    <div data-testid="tweetText">
+      Buy our product today with this excellent limited time offer for you.
+    </div>
+    <span>Promoted</span>
+  </article>
+
+</div>

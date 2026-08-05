@@ -798,11 +798,24 @@ def get_rivernet_status(_user=Depends(require_user)):
         return river_data
     except Exception as e:
         logger.error(f"[API] Error fetching rivernet data: {e}")
+        # Must mirror the shape fetch_rivernet_levels actually returns. This
+        # used to answer with total_monitored/overall_status/has_alerts -- keys
+        # the success path has never produced -- so a client written against the
+        # error response read nothing on a good day, and vice versa.
         return {
             "rivers": [],
             "alerts": [],
-            "summary": {"total_monitored": 0, "overall_status": "error", "has_alerts": False},
-            "error": str(e)
+            "summary": {
+                "total_stations": 0,
+                "reporting": 0,
+                "offline": 0,
+                "rising": 0,
+                "alerts": 0,
+                "flood_alerts": 0,
+                "status": "error",
+                "regions": [],
+            },
+            "error": str(e),
         }
 
 

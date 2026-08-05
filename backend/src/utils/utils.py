@@ -294,6 +294,55 @@ RIVERNET_ALERT_COLOURS = {
     "#FFFFFF": "white",
 }
 
+# Severities that mean water, as opposed to a gauge that went quiet.
+RIVERNET_FLOOD_SEVERITIES = ("warning", "alert", "critical")
+
+
+def _summarise_rivernet(results: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Roll station readings up into the summary the API and the dashboard read.
+
+    results["alerts"] deliberately mixes two different things: stations at a
+    real warning level, and stations that have stopped reporting. Both deserve
+    attention -- a gauge going dark mid-monsoon is worth knowing -- but only the
+    first is a flood signal, so they are counted separately. Treating the
+    combined count as flood alerts raises a flood warning off offline hardware:
+    on a sample run, all four alerts were silent stations and no river was
+    rising.
+
+    Keys here are the contract for /api/rivernet, the meteorological bulletin
+    and the React flood panel. See tests/unit/test_rivernet_contract.py.
+    """
+    rivers = results.get("rivers") or []
+    alerts = results.get("alerts") or []
+
+    reporting = [r for r in rivers if r.get("reporting")]
+    flood_alerts = sum(
+        1 for a in alerts if a.get("severity") in RIVERNET_FLOOD_SEVERITIES
+    )
+    rising = sum(1 for r in reporting if r.get("trend") == "rising")
+
+    if flood_alerts:
+        status = "alert"
+    elif rising:
+        status = "rising"
+    elif reporting:
+        status = "normal"
+    else:
+        status = "unknown"
+
+    return {
+        "total_stations": len(rivers),
+        "reporting": len(reporting),
+        "offline": len(rivers) - len(reporting),
+        "rising": rising,
+        "alerts": len(alerts),
+        "flood_alerts": flood_alerts,
+        "status": status,
+        "regions": sorted({r["region"] for r in rivers if r.get("region")}),
+    }
+
+
 # All rivers monitored by rivernet.lk (expanded list)
 RIVERNET_LOCATIONS = {
     # Main rivers
@@ -479,15 +528,7 @@ def scrape_rivernet_impl(
             logger.warning(f"[RIVERNET] Skipped a malformed station record: {e}")
             continue
 
-    reporting = [r for r in results["rivers"] if r["reporting"]]
-    results["summary"] = {
-        "total_stations": len(results["rivers"]),
-        "reporting": len(reporting),
-        "offline": len(results["rivers"]) - len(reporting),
-        "rising": sum(1 for r in reporting if r["trend"] == "rising"),
-        "alerts": len(results["alerts"]),
-        "regions": sorted({r["region"] for r in results["rivers"] if r["region"]}),
-    }
+    results["summary"] = _summarise_rivernet(results)
 
     logger.info(
         f"[RIVERNET] {results['summary']['total_stations']} stations, "

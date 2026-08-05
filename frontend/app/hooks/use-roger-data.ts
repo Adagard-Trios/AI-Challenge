@@ -40,23 +40,46 @@ export interface RiskDashboard {
   last_updated: string;
 }
 
+// Mirrors GET /api/rivernet (fetch_rivernet_levels in backend). The previous
+// declaration described a shape the API has never sent -- location_key, status,
+// water_level, alerts[].text -- so consumers read undefined and threw.
 export interface RiverData {
-  location_key: string;
+  unit_id?: string;
   name: string;
   region: string;
-  status: 'danger' | 'warning' | 'rising' | 'normal' | 'unknown' | 'error';
-  water_level?: { value: number; unit: string };
-  url?: string;
+  severity: 'critical' | 'warning' | 'alert' | 'normal' | 'unknown';
+  level_m: number | null;
+  previous_level_m?: number | null;
+  max_level_m?: number | null;
+  trend?: 'rising' | 'falling' | 'steady' | 'unknown';
+  alert_colour?: string | null;
+  reading_time?: string | null;
+  reporting: boolean;
+  coordinates?: unknown;
 }
 
 export interface RiverNetData {
   rivers: RiverData[];
-  alerts: Array<{ text: string; severity: string; source: string }>;
+  // Mixes warning-level stations with ones that stopped reporting
+  // (severity "no_data"); use summary.flood_alerts for the flood signal.
+  alerts: Array<{
+    river: string;
+    region: string;
+    severity: string;
+    level_m: number | null;
+    max_level_m?: number | null;
+    trend?: string;
+    message: string;
+  }>;
   summary: {
-    total_monitored: number;
-    overall_status: string;
-    has_alerts: boolean;
-    status_breakdown?: Record<string, number>;
+    total_stations: number;
+    reporting: number;
+    offline: number;
+    rising: number;
+    alerts: number;
+    flood_alerts: number;
+    status: string;
+    regions?: string[];
   };
   fetched_at: string;
   source: string;

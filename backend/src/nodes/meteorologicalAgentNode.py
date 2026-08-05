@@ -132,12 +132,17 @@ class MeteorologicalAgentNode:
                 }
             )
 
-            # Log summary
+            # Log summary. These keys used to be total_monitored/overall_status,
+            # which fetch_rivernet_levels has never emitted -- so this line
+            # reported "0 rivers monitored, status: unknown" on top of a live
+            # 30-station feed.
             summary = river_data.get("summary", {})
-            overall_status = summary.get("overall_status", "unknown")
-            river_count = summary.get("total_monitored", 0)
             print(
-                f"  ✓ RiverNet: {river_count} rivers monitored, status: {overall_status}"
+                f"  ✓ RiverNet: {summary.get('total_stations', 0)} stations "
+                f"({summary.get('reporting', 0)} reporting, "
+                f"{summary.get('offline', 0)} offline), "
+                f"status: {summary.get('status', 'unknown')}, "
+                f"flood alerts: {summary.get('flood_alerts', 0)}"
             )
 
             # Add any flood alerts
@@ -561,11 +566,21 @@ Generate a brief (3-5 sentences) executive summary highlighting the most importa
         )
         active_districts = len([d for d in district_feeds if district_feeds.get(d)])
 
-        # River monitoring stats
+        # River monitoring stats.
+        #
+        # These read total_monitored / overall_status / has_alerts, and
+        # fetch_rivernet_levels emits none of them -- so rivers_monitored was 0,
+        # the status "unknown", and has_flood_alerts False on every cycle,
+        # regardless of the river network. That was invisible while river_data
+        # itself was being dropped by LangGraph; once it started arriving, the
+        # bulletin still reported nothing.
+        #
+        # flood_alerts, not alerts: the alerts list also carries stations that
+        # have stopped reporting, which is worth surfacing but is not a flood.
         river_summary = river_data.get("summary", {}) if river_data else {}
-        rivers_monitored = river_summary.get("total_monitored", 0)
-        river_status = river_summary.get("overall_status", "unknown")
-        has_flood_alerts = river_summary.get("has_alerts", False)
+        rivers_monitored = river_summary.get("total_stations", 0)
+        river_status = river_summary.get("status", "unknown")
+        has_flood_alerts = river_summary.get("flood_alerts", 0) > 0
 
         # Was `state.get("change_detected", False) or has_flood_alerts`, but no
         # node in any graph ever wrote change_detected -- it was declared in all
@@ -663,18 +678,44 @@ Source: Multi-platform aggregation (DMC, MetDept, RiverNet, Twitter, Facebook, L
                         }
                     )
 
-            # Add overall river status insight
-            if river_summary.get("has_alerts"):
+            # Add overall river status insight. Gated on has_flood_alerts, which
+            # counts only stations at a warning level -- `has_alerts` was never
+            # a key fetch_rivernet_levels emitted, so this block had never once
+            # run, and the raw `alerts` count would fire it off offline gauges.
+            if has_flood_alerts:
                 domain_insights.append(
                     {
                         "source_event_id": str(uuid.uuid4()),
                         "domain": "meteorological",
                         "category": "flood_alert",
-                        "summary": f"⚠️ FLOOD MONITORING ALERT: {rivers_monitored} rivers monitored, overall status: {river_status.upper()}",
-                        "severity": "high" if river_status == "danger" else "medium",
+                        "summary": (
+                            f"⚠️ FLOOD MONITORING ALERT: "
+                            f"{river_summary.get('flood_alerts', 0)} of "
+                            f"{rivers_monitored} stations at warning level, "
+                            f"overall status: {river_status.upper()}"
+                        ),
+                        "severity": "high",
                         "impact_type": "risk",
                         "source": "rivernet.lk",
                         "river_data": river_data,
+                        "timestamp": timestamp,
+                    }
+                )
+            elif river_summary.get("offline"):
+                # Not a flood, but a monitoring gap during monsoon matters.
+                domain_insights.append(
+                    {
+                        "source_event_id": str(uuid.uuid4()),
+                        "domain": "meteorological",
+                        "category": "monitoring_gap",
+                        "summary": (
+                            f"River monitoring gap: "
+                            f"{river_summary.get('offline')} of {rivers_monitored} "
+                            f"rivernet.lk stations are not reporting"
+                        ),
+                        "severity": "low",
+                        "impact_type": "risk",
+                        "source": "rivernet.lk",
                         "timestamp": timestamp,
                     }
                 )

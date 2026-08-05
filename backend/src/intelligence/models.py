@@ -18,7 +18,8 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import (
-    Boolean, DateTime, ForeignKey, Index, JSON, String, UniqueConstraint,
+    Boolean, DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -83,6 +84,74 @@ class EventEntity(Base):
     )
 
     entity: Mapped["Entity"] = relationship()
+
+
+class Story(Base):
+    """
+    A thread of related events.
+
+    The dedup pipeline already decides that a new event is semantically the
+    same as a prior one -- and then drops it. That decision is the thread. A
+    flood developing over three days should be one story that grows, not forty
+    disconnected events or thirty-nine discarded ones.
+    """
+
+    __tablename__ = "stories"
+    __table_args__ = (
+        Index("ix_stories_last_seen", "last_seen"),
+        Index("ix_stories_pending", "pending_events"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    title: Mapped[str] = mapped_column(String(300))
+
+    # Regenerated as the story gains events, in one batched call per cycle.
+    brief: Mapped[str] = mapped_column(Text, default="")
+    # True when regeneration failed. The previous brief is kept -- an old brief
+    # beats no brief -- but the UI must be able to say which it is showing.
+    brief_stale: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Events added since the brief was last written. Gates regeneration so the
+    # LLM cost stays flat as the number of live stories grows.
+    pending_events: Mapped[int] = mapped_column(Integer, default=0)
+
+    domain: Mapped[str] = mapped_column(String(40), default="unknown")
+    peak_severity: Mapped[str] = mapped_column(String(20), default="low")
+    # Set when severity rises after the story starts. Feeds derive_state().
+    escalated: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    event_count: Mapped[int] = mapped_column(Integer, default=1)
+    first_seen: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow
+    )
+    last_seen: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow
+    )
+
+
+class StoryEvent(Base):
+    """One event's membership of a story."""
+
+    __tablename__ = "story_events"
+    __table_args__ = (
+        UniqueConstraint("story_id", "event_id", name="uq_story_event"),
+        # An event belongs to at most one story, so a lookup by event id is how
+        # attach() finds the thread a match already belongs to.
+        Index("ix_story_events_event", "event_id"),
+        Index("ix_story_events_story", "story_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    story_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("stories.id", ondelete="CASCADE")
+    )
+    event_id: Mapped[str] = mapped_column(String(64))
+
+    # What the dedup tier scored this link at. Kept so a bad threshold can be
+    # diagnosed from the data rather than guessed at.
+    similarity: Mapped[float] = mapped_column(Float, default=0.0)
+    added_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow
+    )
 
 
 class ExposureProfile(Base):

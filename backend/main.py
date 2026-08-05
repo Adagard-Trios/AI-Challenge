@@ -763,6 +763,20 @@ def get_feed(
     }
 
 
+@app.get("/api/stories")
+def get_stories(limit: int = 20, _user=Depends(require_user)):
+    """
+    Ongoing stories -- events threaded together rather than deduplicated away.
+
+    Empty when threading has no database to write to, which is honest: no
+    stories exist in that case, as opposed to none having happened.
+    """
+    from src.intelligence.stories import get_story_tracker
+
+    stories = get_story_tracker().recent(limit=limit)
+    return {"stories": stories, "total": len(stories)}
+
+
 @app.get("/api/feeds")
 def get_feeds_from_db(
     limit: int = 100,

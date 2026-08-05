@@ -20,6 +20,7 @@ from src.storage.storage_manager import StorageManager
 # between event entities and a user's exposure, and that join only works if both
 # sides agree on the name -- see src/intelligence/taxonomy.py.
 from src.intelligence.taxonomy import canonicalise_many
+from src.intelligence.stories import get_story_tracker
 
 # Import trending detector for velocity metrics
 try:
@@ -109,6 +110,84 @@ class CombinedAgentNode:
             "original_summary": summary,
             "llm_filtered": False,
         }
+
+    # Stories whose briefs are refreshed in one call per cycle. The cap is what
+    # keeps this at ONE additional LLM call regardless of how many stories are
+    # live -- a per-story call would put the cost back on a 60s loop, which is
+    # the mistake the post filter already made once.
+    STORY_BRIEF_BATCH = 8
+
+    def regenerate_story_briefs(self) -> int:
+        """
+        Refresh the briefs of stories that have moved.
+
+        Dataminr's ReGenAI regenerates an event brief as the event unfolds;
+        this is that, batched. Returns how many briefs were rewritten.
+
+        A story whose brief could not be regenerated keeps its previous text
+        and is marked stale. An old brief beats no brief, but the UI has to be
+        able to say which one it is showing.
+        """
+        tracker = get_story_tracker()
+        pending = tracker.stories_needing_a_brief(limit=self.STORY_BRIEF_BATCH)
+        if not pending:
+            return 0
+
+        numbered = "\n\n".join(
+            f"[{i}] ({s['event_count']} reports, peak severity {s['peak_severity']})\n"
+            f"Current brief: {str(s['brief'])[:400]}"
+            for i, s in enumerate(pending)
+        )
+
+        prompt = f"""These {len(pending)} ongoing stories have received new reports.
+Rewrite each brief to reflect the story as it now stands.
+
+STORIES:
+{numbered}
+
+Respond with a JSON array only, one object per story, using the bracketed
+number as "id":
+[{{"id": 0, "title": "Short headline, max 12 words", "brief": "2-3 sentences on what is happening and what changed"}}]
+
+Rules:
+1. Write the CURRENT state, not a changelog. A reader arriving now should
+   understand the situation without reading earlier versions.
+2. Keep concrete facts -- places, numbers, named organisations.
+3. Do not speculate beyond what the reports say.
+4. Return exactly {len(pending)} objects, ids 0 to {len(pending) - 1}.
+
+JSON array only:"""
+
+        try:
+            response = self.llm.invoke(prompt)
+            content = (
+                response.content if hasattr(response, "content") else str(response)
+            )
+            verdicts = self._parse_batch_response(content, len(pending))
+        except Exception as exc:
+            logger.warning(
+                "[Stories] brief regeneration failed for %d stories (%s); "
+                "keeping previous briefs and marking them stale",
+                len(pending), exc,
+            )
+            for story in pending:
+                tracker.save_brief(story["id"], None)
+            return 0
+
+        written = 0
+        for i, story in enumerate(pending):
+            verdict = verdicts.get(i) or {}
+            brief = str(verdict.get("brief") or "").strip()
+            if tracker.save_brief(story["id"], brief or None):
+                written += 1
+
+        missed = len(pending) - written
+        if missed:
+            logger.warning(
+                "[Stories] %d of %d briefs were not regenerated and are marked "
+                "stale", missed, len(pending),
+            )
+        return written
 
     def _parse_batch_response(self, content: str, count: int) -> Dict[int, Dict]:
         """
@@ -405,7 +484,14 @@ JSON array only:"""
 
         # Step 3: PRODUCTION DEDUPLICATION - 3-tier pipeline (SQLite → ChromaDB → Accept)
         unique: List[Dict[str, Any]] = []
-        dedup_stats = {"exact_matches": 0, "semantic_matches": 0, "unique_events": 0}
+        dedup_stats = {
+            "exact_matches": 0, "semantic_matches": 0, "unique_events": 0,
+            # Semantic duplicates that became part of a story, and those that
+            # could not be (no database). Kept apart so a disabled feature
+            # never reads as a working one.
+            "threaded": 0, "thread_failed": 0,
+        }
+        story_tracker = get_story_tracker()
 
         for ins in flattened:
             summary = str(ins.get("summary", "")).strip()
@@ -420,14 +506,31 @@ JSON array only:"""
                     dedup_stats["exact_matches"] += 1
                 elif reason == "semantic_match":
                     dedup_stats["semantic_matches"] += 1
-                    # Link similar events in Neo4j knowledge graph
+                    # A semantic match is not noise to discard -- it is the
+                    # next instalment of a story already running. This is the
+                    # only place the system knows two events belong together,
+                    # and it used to spend that knowledge on
+                    # link_similar_events(), which writes to Neo4j, which
+                    # render.yaml disables. So a flood developing over three
+                    # days was thirty-nine silently dropped events and no
+                    # object anywhere representing the flood.
                     if match_data and "id" in match_data:
                         event_id = ins.get("source_event_id") or str(uuid.uuid4())
-                        self.storage.link_similar_events(
-                            event_id,
-                            match_data["id"],
-                            match_data.get("similarity", 0.85),
+                        story_id = story_tracker.attach(
+                            event_id=event_id,
+                            matched_event_id=match_data["id"],
+                            summary=summary,
+                            severity=str(ins.get("severity", "low")),
+                            domain=str(ins.get("domain", "unknown")),
+                            similarity=match_data.get("similarity", 0.85),
                         )
+                        if story_id:
+                            dedup_stats["threaded"] += 1
+                        else:
+                            # Threading unavailable (no database). The event is
+                            # still dropped, exactly as before -- but say so,
+                            # rather than letting a disabled feature look active.
+                            dedup_stats["thread_failed"] += 1
                 continue
 
             # Event is unique - accept it
@@ -603,6 +706,28 @@ JSON array only:"""
                 unverified_count,
                 len(converted),
             )
+        if dedup_stats["threaded"]:
+            logger.info(
+                "[FeedAggregatorAgent] %d duplicate(s) threaded into ongoing "
+                "stories rather than discarded", dedup_stats["threaded"],
+            )
+        if dedup_stats["thread_failed"]:
+            logger.warning(
+                "[FeedAggregatorAgent] %d duplicate(s) could not be threaded "
+                "(no database) and were dropped as before",
+                dedup_stats["thread_failed"],
+            )
+
+        # One batched call, after the feed is settled, and only for stories that
+        # actually moved this cycle.
+        try:
+            rewritten = self.regenerate_story_briefs()
+            if rewritten:
+                logger.info("[Stories] regenerated %d brief(s)", rewritten)
+        except Exception as exc:
+            # Never let a brief take down the cycle that produced the feed.
+            logger.error("[Stories] brief regeneration raised: %s", exc)
+
         logger.info(
             f"[FeedAggregatorAgent] ===== PRODUCED {len(converted)} QUALITY EVENTS ====="
         )

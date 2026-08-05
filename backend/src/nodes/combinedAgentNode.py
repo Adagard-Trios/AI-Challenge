@@ -694,7 +694,27 @@ JSON array only:"""
             for item in feed
         ]
         avg_confidence = sum(confidences) / len(confidences) if confidences else 0.0
-        high_priority_count = sum(1 for c in confidences if c >= 0.7)
+
+        # High priority is a severity question with a confidence qualifier, not
+        # a float comparison.
+        #
+        # This counted `confidence >= 0.7` alone. Severity "high" maps to a base
+        # of exactly 0.7 (severity_base_map), so the base and the threshold were
+        # the same number -- and confidence only moves DOWN from base for a
+        # typical event, because the fake-news penalty applies to almost
+        # everything while the corroboration boost applies to little. A "high"
+        # event carrying a fake_news_score of 0.05 landed at 0.69 and was not
+        # counted. In practice only "critical" could ever qualify.
+        #
+        # That is the same arithmetic-ceiling failure as the original
+        # risk_score bug, one decimal place further in: a tile named "High
+        # Priority Events" that a high-severity event could not enter. An event
+        # the agents called high or critical IS high priority; confidence is a
+        # separate axis and still promotes a heavily corroborated medium.
+        high_priority_count = sum(
+            1 for item, c in zip(feed, confidences)
+            if str(item.get("severity", "")).lower() in ("high", "critical") or c >= 0.7
+        )
 
         # Domain-specific scoring buckets
         domain_risks = {}

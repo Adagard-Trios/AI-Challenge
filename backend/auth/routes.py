@@ -92,6 +92,21 @@ class ConnectionUpsert(BaseModel):
     status: str = "ok"
     status_reason: Optional[str] = None
 
+    # Today's pacing budget, mirrored from the connector for display.
+    #
+    # Optional throughout: an older connector does not send it, and absent must
+    # read as "not reported" rather than as zero consumption -- a budget shown
+    # as 0/120 when it is really 118/120 is worse than showing nothing.
+    budget: Optional["BudgetReport"] = None
+
+
+class BudgetReport(BaseModel):
+    day: Optional[str] = None
+    requests_used: Optional[int] = None
+    requests_cap: Optional[int] = None
+    posts_used: Optional[int] = None
+    posts_cap: Optional[int] = None
+
 
 class IngestedPostIn(BaseModel):
     platform: str
@@ -254,6 +269,35 @@ def list_connections(user: Optional[User] = Depends(require_user),
         select(SocialConnection).where(SocialConnection.user_id == user.id)
     ).all()
 
+    def _budget_out(c: SocialConnection) -> Optional[dict]:
+        """
+        Today's pacing consumption, or None.
+
+        Pacing is the main thing standing between a personal account and a
+        restriction, and until now its consumption was invisible: the caps in
+        scrapers/hygiene.py were enforced silently, so "why did it stop
+        collecting?" had no answer anywhere in the interface.
+        """
+        if c.budget_requests_cap is None:
+            return None
+
+        today = datetime.now(timezone.utc).date().isoformat()
+        if c.budget_day != today:
+            return None  # yesterday's figures; today's budget is untouched
+
+        used = c.budget_requests_used or 0
+        cap = c.budget_requests_cap or 0
+        return {
+            "day": c.budget_day,
+            "requests_used": used,
+            "requests_cap": cap,
+            "posts_used": c.budget_posts_used or 0,
+            "posts_cap": c.budget_posts_cap or 0,
+            "requests_remaining": max(0, cap - used),
+            "fraction_used": round(used / cap, 3) if cap else None,
+            "exhausted": cap > 0 and used >= cap,
+        }
+
     def out(c: SocialConnection) -> dict:
         expires = c.session_expires_at
         days_left = None
@@ -271,6 +315,10 @@ def list_connections(user: Optional[User] = Depends(require_user),
             "last_collected_at": c.last_collected_at.isoformat() if c.last_collected_at else None,
             "posts_collected": c.posts_collected,
             "cooldown_until": c.cooldown_until.isoformat() if c.cooldown_until else None,
+            # None when the connector has not reported, and a stale day counts
+            # as not reported: yesterday's 118/120 shown as today's would send
+            # someone looking for a problem that reset hours ago.
+            "budget": _budget_out(c),
         }
 
     return {
@@ -486,6 +534,15 @@ def ingest(payload: IngestRequest,
         conn.session_expires_at = cs.session_expires_at or conn.session_expires_at
         conn.last_collected_at = utcnow()
         conn.posts_collected = (conn.posts_collected or 0) + stored
+
+        # Only overwrite when the connector actually reported. Defaulting a
+        # missing report to zero would show a nearly-spent budget as untouched.
+        if cs.budget is not None:
+            conn.budget_day = cs.budget.day
+            conn.budget_requests_used = cs.budget.requests_used
+            conn.budget_requests_cap = cs.budget.requests_cap
+            conn.budget_posts_used = cs.budget.posts_used
+            conn.budget_posts_cap = cs.budget.posts_cap
 
         # A challenge stops that account until a human resumes it.
         if cs.status == "challenged":

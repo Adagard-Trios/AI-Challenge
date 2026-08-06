@@ -79,6 +79,29 @@ class Collector:
     def connected(self) -> List[str]:
         return self.store.available()
 
+    @staticmethod
+    def _budget_for(platform: str, account_key: str) -> Optional[dict]:
+        """
+        Today's budget consumption for this account, or None if unavailable.
+
+        Never allowed to break a push: reporting how much budget is left is
+        strictly less important than delivering the posts that were collected.
+        """
+        try:
+            from src.scrapers.base import budget_snapshot
+
+            snapshot = budget_snapshot(account_key, platform)
+            return {
+                "day": snapshot["day"],
+                "requests_used": snapshot["requests_used"],
+                "requests_cap": snapshot["requests_cap"],
+                "posts_used": snapshot["posts_used"],
+                "posts_cap": snapshot["posts_cap"],
+            }
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[collect] no budget snapshot for %s: %s", platform, exc)
+            return None
+
     # -- server -----------------------------------------------------------
 
     def _push(self, posts: List[dict], status: dict) -> dict:
@@ -182,6 +205,13 @@ class Collector:
             "status_reason": result.reason,
             "session_expires_at": (credential.expires_at.isoformat()
                                    if credential.expires_at else None),
+            # How much of today's pacing budget this account has spent.
+            #
+            # The caps exist to protect the account and were enforced silently,
+            # so approaching one looked like collection quietly returning less
+            # and then stopping. The counter lives here, in this process -- the
+            # server only mirrors it for display.
+            "budget": self._budget_for(platform, credential.account_key),
         }
 
         pushed = self._push(posts, status)

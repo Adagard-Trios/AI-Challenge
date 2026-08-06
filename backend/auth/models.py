@@ -146,6 +146,23 @@ class SocialConnection(Base):
     # explicitly resumes -- never auto-resumed.
     cooldown_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # Today's collection budget, as last reported by the connector.
+    #
+    # The caps in scrapers/hygiene.py (120/60/40 requests per platform per day)
+    # have always been enforced and never shown. A user approaching one saw
+    # collection quietly return less, then stop, with the reason visible only in
+    # a local log. Pacing is the main thing standing between a personal account
+    # and a restriction, so how much of it has been spent is exactly what the
+    # person whose account it is should be able to see.
+    #
+    # Nullable and advisory: the authoritative counter lives in the connector
+    # process. This is a mirror for display, not a control.
+    budget_day: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    budget_requests_used: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    budget_requests_cap: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    budget_posts_used: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    budget_posts_cap: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     user: Mapped[User] = relationship(back_populates="connections")
 
 

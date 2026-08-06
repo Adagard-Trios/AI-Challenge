@@ -74,6 +74,37 @@ def reset_budgets() -> None:
     _budgets.clear()
 
 
+def budget_snapshot(account_key: str, platform: str) -> Dict[str, object]:
+    """
+    How much of today's collection budget this account has spent.
+
+    The caps have always been enforced and never reported. A user therefore had
+    no way to know they were approaching one: collection simply produced fewer
+    posts, then stopped, with `budget_exhausted` visible only in a connector log
+    nobody reads. "Why did it stop collecting?" had no answer in the interface.
+
+    Read-only, and it deliberately does not create a counter for an account that
+    has not run today -- asking about a budget should not start charging one.
+    """
+    caps = budget_for(platform)
+    today = date.today()
+    entry = _budgets.get(account_key)
+
+    # A stale entry is last UTC day's, which is spent-nothing for today.
+    used_requests = entry.requests if entry and entry.day == today else 0
+    used_posts = entry.posts if entry and entry.day == today else 0
+
+    return {
+        "platform": platform,
+        "day": today.isoformat(),
+        "requests_used": used_requests,
+        "requests_cap": caps["requests"],
+        "posts_used": used_posts,
+        "posts_cap": caps["posts"],
+        "exhausted": used_requests >= caps["requests"],
+    }
+
+
 @dataclass
 class ScrapeResult:
     """

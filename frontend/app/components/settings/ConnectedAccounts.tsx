@@ -31,7 +31,74 @@ interface Connection {
   last_collected_at: string | null;
   posts_collected: number;
   cooldown_until: string | null;
+  // Today's pacing consumption, as last reported by the connector. null means
+  // "not reported" — which is NOT the same as "nothing spent", so it must never
+  // be rendered as 0.
+  budget: {
+    day: string;
+    requests_used: number;
+    requests_cap: number;
+    posts_used: number;
+    posts_cap: number;
+    requests_remaining: number;
+    fraction_used: number | null;
+    exhausted: boolean;
+  } | null;
 }
+
+/**
+ * How much of today's collection budget this account has spent.
+ *
+ * scrapers/hygiene.py caps each platform per UTC day — 120 requests for
+ * X/Twitter, 60 for Facebook and Instagram, 40 for LinkedIn — and those caps
+ * are the main thing standing between a personal account and a restriction.
+ * They were enforced silently. A user near a cap saw collection return fewer
+ * posts and then stop, with the reason only in a local log, so "why did it stop
+ * collecting?" had no answer in the interface.
+ *
+ * Showing consumption is what lets someone act *before* a restriction lands
+ * rather than after — pause collection, spread it out, or leave it alone.
+ */
+const BudgetBar = ({ budget }: { budget: Connection["budget"] }) => {
+  if (!budget || !budget.requests_cap) return null;
+
+  const fraction = Math.max(0, Math.min(1, budget.fraction_used ?? 0));
+  const tone =
+    fraction >= 0.9
+      ? "bg-red-400"
+      : fraction >= 0.7
+        ? "bg-amber-400"
+        : "bg-emerald-400";
+
+  return (
+    <div className="mt-1.5 max-w-xs">
+      <div className="flex items-center justify-between text-xs text-slate-400 mb-0.5">
+        <span title="Requests this account has made today, against its daily cap">
+          Today&apos;s collection budget
+        </span>
+        <span className="font-mono">
+          {budget.requests_used}/{budget.requests_cap}
+        </span>
+      </div>
+      <div className="h-1 w-full rounded-full bg-slate-700 overflow-hidden">
+        <div
+          className={`h-full ${tone} transition-all duration-500`}
+          style={{ width: `${fraction * 100}%` }}
+        />
+      </div>
+      {budget.exhausted ? (
+        <p className="mt-1 text-xs text-amber-300/90">
+          Daily cap reached. Collection pauses until midnight UTC — this is the
+          pacing working, not a fault.
+        </p>
+      ) : fraction >= 0.7 ? (
+        <p className="mt-1 text-xs text-amber-300/90">
+          {budget.requests_remaining} requests left today.
+        </p>
+      ) : null}
+    </div>
+  );
+};
 
 const PLATFORMS = ["twitter", "linkedin", "facebook", "instagram"] as const;
 
@@ -336,6 +403,8 @@ export default function ConnectedAccounts() {
                       <span>{conn.posts_collected} posts collected</span>
                     </div>
                   )}
+
+                  {conn && <BudgetBar budget={conn.budget} />}
 
                   {conn?.status === "challenged" && (
                     <p className="max-w-xl text-xs text-red-300/80">

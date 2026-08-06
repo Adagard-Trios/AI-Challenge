@@ -161,21 +161,46 @@ def test_no_backend_endpoint_accepts_a_social_password():
 
 def test_the_connector_never_sends_credentials_upstream():
     """
-    The vault is read only by the local login flow. If it ever appears in the
-    push path, a password could leave the machine.
+    Credentials may be READ locally -- run_command pre-fills a browser on this
+    machine -- but must never reach an outbound request body.
+
+    This deliberately checks the functions that talk to the server rather than
+    banning the vault from the module. The earlier version banned the import,
+    which was easy to satisfy and stopped being true the moment the dashboard
+    could trigger a local connect. The real invariant is narrower and worth
+    more: nothing that leaves this machine carries a password.
     """
-    push_surfaces = [
-        REPO_ROOT / "connector" / "collect.py",
-        REPO_ROOT / "connector" / "storage.py",
-    ]
-    for path in push_surfaces:
-        if not path.exists():
-            continue
-        source = path.read_text(encoding="utf-8")
-        assert "CredentialVault" not in source, (
-            f"{path.name} touches the credential vault; only the local login "
-            "flow should"
+    import ast
+    import inspect
+
+    from connector.collect import Collector
+
+    # Every method that performs an outbound HTTP call.
+    outbound = []
+    for name, member in inspect.getmembers(Collector, inspect.isfunction):
+        source = inspect.getsource(member)
+        if "requests." in source:
+            outbound.append((name, source))
+
+    assert outbound, "no outbound calls found; has the collector been renamed?"
+
+    for name, source in outbound:
+        code = "\n".join(
+            line for line in source.splitlines()
+            if not line.strip().startswith("#")
         )
+        for forbidden in ("CredentialVault", "password", "storage_state"):
+            assert forbidden not in code, (
+                f"Collector.{name} makes a network call and references "
+                f"{forbidden!r} -- a credential could leave the machine"
+            )
+
+
+def test_the_session_store_does_not_touch_the_vault():
+    """Sessions and passwords stay in separate files with separate lifetimes."""
+    path = REPO_ROOT / "connector" / "storage.py"
+    if path.exists():
+        assert "CredentialVault" not in path.read_text(encoding="utf-8")
 
 
 # --- pre-fill stops where a human must take over --------------------------

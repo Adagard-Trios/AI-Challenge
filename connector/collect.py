@@ -39,6 +39,17 @@ DEFAULT_SCRAPERS = {
     "instagram": "scrape_instagram",
 }
 
+# Used when the dashboard asks for a one-off collect and supplies no query of
+# its own. Kept broad on purpose -- a targeted query belongs in the intel
+# config, not in a button.
+DEFAULT_QUERY = "Sri Lanka"
+
+# How often to check for dashboard instructions, independent of the collect
+# interval. The 15-minute collect cadence exists to protect the ACCOUNT;
+# applying it to a button press protects nothing and just makes Connect feel
+# broken, so commands are polled on a short cycle in between collections.
+COMMAND_POLL_SECONDS = 20.0
+
 
 class Collector:
     def __init__(self, store: Optional[SessionStore] = None,
@@ -212,6 +223,113 @@ class Collector:
                 results.append({"platform": platform, "status": "error", "error": str(exc)})
         return results
 
+
+    # -- commands from the dashboard ---------------------------------------
+
+    def _server(self):
+        """(url, token) for this paired connector, or (None, None)."""
+        device = self.config.load()
+        url = (device.get("server_url") or "").rstrip("/")
+        token = device.get("device_token")
+        return (url or None), token
+
+    def claim_commands(self) -> List[dict]:
+        """
+        Ask the server what the dashboard wants done.
+
+        Polled on the collect loop, so it doubles as the liveness ping the
+        dashboard reads to decide whether to say "your connector will do this
+        shortly" or "no connector is running".
+        """
+        import requests
+
+        url, token = self._server()
+        if not url or not token:
+            return []
+
+        try:
+            response = requests.get(
+                f"{url}/api/connector/commands/pending",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=20,
+            )
+            if response.status_code == 404:
+                # An older server without the command queue. Not an error --
+                # collection still works, the dashboard buttons just do nothing.
+                return []
+            response.raise_for_status()
+            return response.json().get("commands", [])
+        except Exception as exc:
+            logger.warning("[commands] could not poll: %s", exc)
+            return []
+
+    def _report(self, command_id: str, ok: bool, result: str) -> None:
+        import requests
+
+        url, token = self._server()
+        if not url or not token:
+            return
+        try:
+            requests.post(
+                f"{url}/api/connector/commands/{command_id}/result",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"ok": ok, "result": result[:2000]},
+                timeout=20,
+            )
+        except Exception as exc:
+            logger.warning("[commands] could not report %s: %s", command_id, exc)
+
+    def run_command(self, command: dict) -> None:
+        """
+        Execute one dashboard instruction, here on this machine.
+
+        Credentials come from the LOCAL vault, never from the command -- the
+        server has no idea what they are. The command carries a verb and a
+        platform name and nothing else.
+        """
+        action = command.get("action")
+        platform = command.get("platform", "")
+        command_id = command.get("id")
+
+        logger.info("[commands] %s %s (from the dashboard)", action, platform)
+
+        try:
+            if action == "connect":
+                from .connect import connect_via_login
+                from .vault import CredentialVault
+
+                prefill = None
+                try:
+                    prefill = CredentialVault().get(platform)
+                except Exception:
+                    pass
+
+                summary = connect_via_login(platform, prefill=prefill)
+                self._report(
+                    command_id, True,
+                    f"Connected{' as ' + summary['handle'] if summary.get('handle') else ''}.",
+                )
+
+            elif action == "disconnect":
+                from .connect import disconnect
+
+                removed = disconnect(platform)
+                self._report(
+                    command_id, bool(removed),
+                    "Disconnected." if removed else "Nothing was connected.",
+                )
+
+            elif action == "collect":
+                outcome = self.collect_platform(platform, DEFAULT_QUERY, 20)
+                self._report(command_id, True, str(outcome)[:500])
+
+            else:
+                self._report(command_id, False, f"Unknown action {action!r}")
+
+        except Exception as exc:
+            logger.exception("[commands] %s %s failed", action, platform)
+            self._report(command_id, False, str(exc)[:500])
+
     def run_forever(self, query: str, interval_seconds: int = 900,
                     max_items: int = 20) -> None:
         """
@@ -225,7 +343,26 @@ class Collector:
                     interval_seconds, self.connected() or "no connected accounts")
         while True:
             started = time.monotonic()
+
+            # Dashboard instructions first: a user who just clicked Connect is
+            # waiting on it, and a collect pass can take minutes.
+            for command in self.claim_commands():
+                self.run_command(command)
+
             for outcome in self.collect_all(query, max_items):
                 logger.info("[collect] %s", outcome)
+
             elapsed = time.monotonic() - started
-            time.sleep(max(30.0, interval_seconds - elapsed))
+
+            # Poll for commands far more often than the collect interval. The
+            # 15-minute cadence protects the ACCOUNT; making a button wait 15
+            # minutes protects nothing, so the sleep is broken into short naps
+            # that keep claiming commands in between.
+            remaining = max(30.0, interval_seconds - elapsed)
+            while remaining > 0:
+                nap = min(COMMAND_POLL_SECONDS, remaining)
+                time.sleep(nap)
+                remaining -= nap
+                if remaining > 0:
+                    for command in self.claim_commands():
+                        self.run_command(command)

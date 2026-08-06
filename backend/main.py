@@ -233,6 +233,12 @@ try:
     from src.intelligence import exposure_routes as _exposure_routes
 
     app.include_router(_exposure_routes.router)
+
+    # Lets the web dashboard drive the connector on the user's machine. Only
+    # ever carries an action and a platform name -- never a credential.
+    from src.intelligence import command_routes as _command_routes
+
+    app.include_router(_command_routes.router)
 except Exception:  # noqa: BLE001
     # Never let an auth problem take down a service that ran fine without it.
     # bootstrap.init() itself re-raises when AUTH_ENFORCED=1, which is the case

@@ -65,6 +65,8 @@ export default function ConnectedAccounts() {
   const [pairCode, setPairCode] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [connectorRunning, setConnectorRunning] = useState<boolean | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const data = await apiGet<{ connections: Connection[] }>(
@@ -72,8 +74,41 @@ export default function ConnectedAccounts() {
       { connections: [] },
     );
     setConnections(data.connections ?? []);
+
+    // Whether a connector is actually polling. Without this the buttons below
+    // would queue work that nothing picks up, with no explanation -- a button
+    // that appears to work and silently does nothing.
+    const cmds = await apiGet<{ connector_running: boolean }>(
+      "/api/connector/commands",
+      { connector_running: false },
+    );
+    setConnectorRunning(cmds.connector_running ?? false);
+
     setLoading(false);
   }, []);
+
+  const send = async (action: string, platform: string) => {
+    setBusy(platform);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await api<{ message: string; connector_running: boolean }>(
+        "/api/connector/commands",
+        {
+          method: "POST",
+          body: JSON.stringify({ action, platform }),
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+      setNotice(res.message);
+      setConnectorRunning(res.connector_running);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : `Could not ${action} ${platform}`);
+    } finally {
+      setBusy(null);
+    }
+  };
 
   useEffect(() => {
     void load();
@@ -160,6 +195,29 @@ export default function ConnectedAccounts() {
       {error && (
         <div className="rounded-lg border border-red-800/40 bg-red-950/20 p-3 text-sm text-red-200">
           {error}
+        </div>
+      )}
+
+      {notice && (
+        <div className="rounded-lg border border-sky-800/40 bg-sky-950/20 p-3 text-sm text-sky-200">
+          {notice}
+        </div>
+      )}
+
+      {/* Whether the buttons below will actually do anything.
+          The connector is what executes them, on the user's own machine. If it
+          is not running, a click queues work that nothing picks up -- so say so
+          before they click, not after nothing happens. */}
+      {connectorRunning === false && (
+        <div className="rounded-lg border border-amber-800/40 bg-amber-950/20 p-3 text-sm">
+          <p className="font-medium text-amber-200">Your connector is not running.</p>
+          <p className="mt-1 text-amber-100/70">
+            The buttons below queue work for it and it will pick them up within
+            a minute of starting. On your computer:
+          </p>
+          <code className="mt-2 block rounded bg-slate-900/60 px-2 py-1 font-mono text-xs text-slate-300">
+            python -m connector run
+          </code>
         </div>
       )}
 
@@ -290,7 +348,8 @@ export default function ConnectedAccounts() {
                   )}
                   {conn?.status === "expired" && (
                     <p className="text-xs text-amber-300/80">
-                      Reconnect in the connector: <code>python -m connector connect {platform}</code>
+                      The session expired. Reconnect below &mdash; your browser
+                      will open on your own machine.
                     </p>
                   )}
                 </div>
@@ -305,7 +364,34 @@ export default function ConnectedAccounts() {
                       <RefreshCw className="h-3.5 w-3.5" /> Resume
                     </button>
                   )}
-                  {conn ? (
+                  {conn && conn.status === "ok" && (
+                    <button
+                      onClick={() => send("collect", platform)}
+                      disabled={busy === platform}
+                      className="flex items-center gap-1.5 rounded-md border border-slate-600 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-700 disabled:opacity-50"
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" /> Collect now
+                    </button>
+                  )}
+
+                  {/* Connect and Reconnect are the same instruction: the
+                      connector opens a real browser on the user's machine and
+                      pre-fills from its own local vault. Nothing about the
+                      credential passes through here. */}
+                  <button
+                    onClick={() => send("connect", platform)}
+                    disabled={busy === platform}
+                    className="flex items-center gap-1.5 rounded-md bg-slate-700 px-3 py-1.5 text-xs text-slate-100 hover:bg-slate-600 disabled:opacity-50"
+                  >
+                    {busy === platform ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Plug className="h-3.5 w-3.5" />
+                    )}
+                    {conn ? "Reconnect" : "Connect"}
+                  </button>
+
+                  {conn && (
                     <button
                       onClick={() => disconnect(platform)}
                       disabled={busy === platform}
@@ -313,11 +399,6 @@ export default function ConnectedAccounts() {
                     >
                       <Trash2 className="h-3.5 w-3.5" /> Disconnect
                     </button>
-                  ) : (
-                    <span className="flex items-center gap-1.5 text-xs text-slate-500">
-                      <Plug className="h-3.5 w-3.5" />
-                      connect in the connector
-                    </span>
                   )}
                 </div>
               </div>

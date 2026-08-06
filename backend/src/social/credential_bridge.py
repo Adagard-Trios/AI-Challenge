@@ -56,7 +56,7 @@ class SessionStoreCredentialStore:
     @property
     def store(self):
         if self._store is None:
-            from connector.storage import SessionStore
+            from .storage import SessionStore
 
             self._store = SessionStore()
         return self._store

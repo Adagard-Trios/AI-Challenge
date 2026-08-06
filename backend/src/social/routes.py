@@ -174,6 +174,26 @@ def disconnect(payload: PlatformIn, user: Optional[User] = Depends(require_user)
     }
 
 
+@router.post("/resume")
+def resume(payload: PlatformIn, user: Optional[User] = Depends(require_user)):
+    """
+    Lift a challenge cooldown, on the user's word that they have checked.
+
+    Deliberately a manual action with no timer behind it. A challenge is the
+    platform asking for proof a person is present; auto-resuming answers that
+    with "no", and retrying into a challenge is what escalates it.
+    """
+    _require(user)
+    platform = _check_platform(payload.platform)
+
+    social_service.get_service().resume(platform)
+    return {
+        "status": "resumed",
+        "platform": platform,
+        "note": "Collection will retry on the next cycle.",
+    }
+
+
 @router.post("/collect")
 def collect_now(payload: PlatformIn,
                 user: Optional[User] = Depends(require_user),

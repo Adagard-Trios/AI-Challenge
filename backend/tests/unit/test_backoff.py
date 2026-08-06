@@ -15,11 +15,12 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).parent.parent.parent.parent
+PROJECT_ROOT = Path(__file__).parent.parent.parent
 for p in (str(REPO_ROOT), str(REPO_ROOT / "backend")):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from connector.backoff import (  # noqa: E402
+from src.social.backoff import (  # noqa: E402
     BASE_DELAY_SECONDS, CHALLENGE_COOLDOWN_SECONDS, MAX_DELAY_SECONDS,
     BackoffStore,
 )
@@ -146,9 +147,16 @@ def test_describe_is_human_readable(store):
 
 # --- wiring ----------------------------------------------------------------
 
-def test_collector_consults_backoff_before_scraping():
-    """A store nothing checks is decoration."""
-    src = (REPO_ROOT / "connector" / "collect.py").read_text(encoding="utf-8")
+def test_collection_consults_backoff_before_scraping():
+    """
+    A store nothing checks is decoration.
+
+    REGRESSION: this broke when collection moved out of the connector into
+    src/social. The service scraped without consulting the store at all, so a
+    challenged account would be retried on the very next cycle -- the behaviour
+    most likely to turn a recoverable challenge into a lasting restriction.
+    """
+    src = (PROJECT_ROOT / "src" / "social" / "service.py").read_text(encoding="utf-8")
     assert "self.backoff.is_challenged(platform)" in src
     assert "self.backoff.ready(platform)" in src
     assert "self.backoff.record_challenge(" in src

@@ -31,7 +31,7 @@ pytest.importorskip("cryptography")
 
 @pytest.fixture
 def vault(tmp_path):
-    from connector.vault import CredentialVault
+    from src.social.vault import CredentialVault
 
     return CredentialVault(directory=tmp_path)
 
@@ -159,48 +159,51 @@ def test_no_backend_endpoint_accepts_a_social_password():
         )
 
 
-def test_the_connector_never_sends_credentials_upstream():
+def test_nothing_that_leaves_this_machine_carries_a_credential():
     """
-    Credentials may be READ locally -- run_command pre-fills a browser on this
-    machine -- but must never reach an outbound request body.
+    The invariant, retargeted.
 
-    This deliberately checks the functions that talk to the server rather than
-    banning the vault from the module. The earlier version banned the import,
-    which was easy to satisfy and stopped being true the moment the dashboard
-    could trigger a local connect. The real invariant is narrower and worth
-    more: nothing that leaves this machine carries a password.
+    This used to check the connector's Collector, which pushed posts to a
+    remote server. That process is gone -- the backend collects in-process --
+    so the only thing that now leaves the machine is an HTTP *response*. The
+    property is unchanged and still the one that matters: nothing outbound
+    carries a password or a session.
     """
     import ast
-    import inspect
 
-    from connector.collect import Collector
+    routes = (PROJECT_ROOT / "src" / "social" / "routes.py").read_text(encoding="utf-8")
+    tree = ast.parse(routes)
 
-    # Every method that performs an outbound HTTP call.
-    outbound = []
-    for name, member in inspect.getmembers(Collector, inspect.isfunction):
-        source = inspect.getsource(member)
-        if "requests." in source:
-            outbound.append((name, source))
+    returned = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and any(
+            isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute)
+            and isinstance(d.func.value, ast.Name) and d.func.value.id == "router"
+            for d in node.decorator_list
+        ):
+            for inner in ast.walk(node):
+                if isinstance(inner, ast.Return) and inner.value is not None:
+                    returned.append(ast.get_source_segment(routes, inner.value) or "")
 
-    assert outbound, "no outbound calls found; has the collector been renamed?"
+    assert returned, "no route returns anything; has the router been renamed?"
 
-    for name, source in outbound:
+    for body in returned:
         code = "\n".join(
-            line for line in source.splitlines()
+            line for line in body.splitlines()
             if not line.strip().startswith("#")
         )
-        for forbidden in ("CredentialVault", "password", "storage_state"):
+        for forbidden in ("storage_state", "CredentialVault", ".get(platform)"):
             assert forbidden not in code, (
-                f"Collector.{name} makes a network call and references "
-                f"{forbidden!r} -- a credential could leave the machine"
+                f"a route response references {forbidden!r} -- a credential "
+                "could leave the machine"
             )
 
 
 def test_the_session_store_does_not_touch_the_vault():
     """Sessions and passwords stay in separate files with separate lifetimes."""
-    path = REPO_ROOT / "connector" / "storage.py"
-    if path.exists():
-        assert "CredentialVault" not in path.read_text(encoding="utf-8")
+    path = PROJECT_ROOT / "src" / "social" / "storage.py"
+    assert path.exists(), "the session store has moved again"
+    assert "CredentialVault" not in path.read_text(encoding="utf-8")
 
 
 # --- pre-fill stops where a human must take over --------------------------
@@ -213,7 +216,7 @@ def test_prefill_does_not_submit_the_form_or_answer_challenges():
     """
     import inspect
 
-    from connector import connect
+    from src.social import browser_login as connect
 
     source = inspect.getsource(connect._prefill_login)
     code = "\n".join(
@@ -228,7 +231,7 @@ def test_prefill_does_not_submit_the_form_or_answer_challenges():
 
 
 def test_every_supported_platform_has_login_field_selectors():
-    from connector.connect import LOGIN_FIELDS, LOGIN_URLS
+    from src.social.browser_login import LOGIN_FIELDS, LOGIN_URLS
 
     missing = set(LOGIN_URLS) - set(LOGIN_FIELDS)
     assert not missing, f"no pre-fill selectors for {sorted(missing)}"

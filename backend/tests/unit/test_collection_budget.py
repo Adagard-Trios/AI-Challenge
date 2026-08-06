@@ -95,47 +95,44 @@ def test_yesterdays_counter_does_not_leak_into_today():
 
 # --- the connector reports it ----------------------------------------------
 
-def test_the_connector_attaches_a_budget_to_every_status_push():
+def test_every_account_row_carries_its_budget():
     """
-    Status is pushed even when nothing was collected -- especially then -- so
-    the budget rides along with it and stays current without an extra call.
+    The dashboard renders a bar per account, so the budget has to ride along
+    with the account listing rather than needing a second call. Previously the
+    connector attached it to each status push; the backend now assembles it
+    directly.
     """
     import ast
 
-    source = (REPO_ROOT / "connector" / "collect.py").read_text(encoding="utf-8")
+    source = (PROJECT_ROOT / "src" / "social" / "service.py").read_text(encoding="utf-8")
     tree = ast.parse(source)
 
     fn = next(
-        (n for n in ast.walk(tree)
-         if isinstance(n, ast.FunctionDef) and n.name == "collect_platform"),
-        None,
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef) and n.name == "accounts"
     )
-    assert fn is not None, "collect_platform is gone; has the connector been rewritten?"
-
     body = ast.get_source_segment(source, fn) or ""
-    assert '"budget"' in body, "the status push carries no budget report"
+    assert '"budget"' in body, "account rows carry no budget"
+    assert "self._budget(" in body
 
 
-def test_a_budget_failure_never_costs_the_collected_posts():
+def test_a_budget_failure_never_breaks_the_account_listing():
     """
-    Reporting how much budget is left is strictly less important than
-    delivering the posts already collected.
+    Reporting how much budget is left is strictly less important than showing
+    the accounts at all.
     """
     import ast
 
-    source = (REPO_ROOT / "connector" / "collect.py").read_text(encoding="utf-8")
+    source = (PROJECT_ROOT / "src" / "social" / "service.py").read_text(encoding="utf-8")
     tree = ast.parse(source)
 
     fn = next(
-        (n for n in ast.walk(tree)
-         if isinstance(n, ast.FunctionDef) and n.name == "_budget_for"),
-        None,
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef) and n.name == "_budget"
     )
-    assert fn is not None, "_budget_for is missing"
-
     body = ast.get_source_segment(source, fn) or ""
     assert "except" in body and "return None" in body, (
-        "_budget_for can raise into the push path"
+        "_budget can raise into the account listing"
     )
 
 
@@ -233,7 +230,7 @@ def test_the_ui_does_not_promise_that_accounts_will_never_be_restricted():
     """
     card = (
         REPO_ROOT / "frontend" / "app" / "components" / "settings"
-        / "ConnectedAccounts.tsx"
+        / "SocialAccounts.tsx"
     )
     if not card.exists():
         pytest.skip("frontend not present")

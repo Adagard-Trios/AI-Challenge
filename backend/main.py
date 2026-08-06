@@ -250,12 +250,6 @@ try:
 
     app.include_router(_exposure_routes.router)
 
-    # Lets the web dashboard drive the connector on the user's machine. Only
-    # ever carries an action and a platform name -- never a credential.
-    from src.intelligence import command_routes as _command_routes
-
-    app.include_router(_command_routes.router)
-
     # Social accounts connected from the dashboard itself, for the case where
     # this server IS the user's machine. Shares the connector's vault and
     # session store, so the CLI and the web UI see the same accounts rather

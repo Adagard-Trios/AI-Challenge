@@ -31,7 +31,7 @@ import {
   Loader2, LogIn, Monitor, RefreshCw, ShieldCheck, Trash2,
 } from "lucide-react";
 
-import { api, apiGet } from "@/app/lib/api";
+import { ApiError, api } from "@/app/lib/api";
 
 interface Job {
   platform: string;
@@ -57,6 +57,8 @@ interface Account {
   username: string | null;
   job: Job | null;
   budget: Budget | null;
+  /** Set when a challenge or backoff has paused collection for this account. */
+  paused: { paused: boolean; kind: string; detail: string } | null;
 }
 
 const LABELS: Record<string, string> = {
@@ -181,6 +183,15 @@ const AccountRow = ({
         + "“log out of all devices” to end it there too.");
     });
 
+  const resume = () =>
+    run("resume", async () => {
+      await api("/api/social/resume", {
+        method: "POST",
+        body: JSON.stringify({ platform }),
+      });
+      setNote("Collection resumed. It will retry on the next cycle.");
+    });
+
   const forget = () =>
     run("forget", async () => {
       await api(`/api/social/credentials/${platform}`, { method: "DELETE" });
@@ -231,6 +242,27 @@ const AccountRow = ({
           )}
         </div>
       </div>
+
+      {/* A challenge stops this account until a person confirms they have
+          checked it. Without somewhere to say that, a challenged account stays
+          silently stopped forever. */}
+      {account.paused && (
+        <div className="mb-3 flex flex-wrap items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-2.5 text-xs text-amber-200">
+          <AlertTriangle className="mt-0.5 w-3.5 h-3.5 shrink-0" />
+          <span className="flex-1">
+            {account.paused.kind === "challenged"
+              ? `${LABELS[platform] ?? platform} asked for a verification step, so collection stopped. Open the account in a browser, complete whatever it asks, then resume here. It will not retry on its own.`
+              : `Backing off after repeated failures. ${account.paused.detail}`}
+          </span>
+          <button
+            onClick={resume}
+            disabled={busy !== null}
+            className="rounded-md border border-amber-400/50 px-2 py-1 text-xs text-amber-100 hover:bg-amber-500/20 disabled:opacity-50"
+          >
+            {busy === "resume" ? "Resuming…" : "I've checked — resume"}
+          </button>
+        </div>
+      )}
 
       {/* Credential fields. Saving is separate from connecting on purpose:
           saving stores a password, connecting opens a browser, and merging them
@@ -347,15 +379,23 @@ const AccountRow = ({
 const SocialAccounts = () => {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
+  const [signedOut, setSignedOut] = useState(false);
   const anyRunning = useRef(false);
 
   const load = useCallback(async () => {
-    const data = await apiGet<{ accounts: Account[] }>(
-      "/api/social/accounts", { accounts: [] },
-    );
-    setAccounts(data.accounts ?? []);
-    anyRunning.current = (data.accounts ?? []).some((a) => a.job?.running);
-    setLoading(false);
+    try {
+      const data = await api<{ accounts: Account[] }>("/api/social/accounts");
+      setAccounts(data.accounts ?? []);
+      anyRunning.current = (data.accounts ?? []).some((a) => a.job?.running);
+      setSignedOut(false);
+    } catch (e) {
+      // Distinguish "not signed in" from "no accounts". Swallowing the 401 into
+      // an empty list is what made this panel look broken: it rendered nothing
+      // and gave no reason, when the actual answer is one command away.
+      setSignedOut(e instanceof ApiError && e.status === 401);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -414,7 +454,29 @@ const SocialAccounts = () => {
         </div>
       </div>
 
-      {loading && accounts.length === 0 ? (
+      {signedOut ? (
+        /* The 401 used to render as an empty list with no explanation. These
+           endpoints store a password and open a browser, so they will not work
+           anonymously by design -- but "why is this blank" deserves an answer
+           and a command, not silence. */
+        <div className="rounded-lg border border-slate-700/50 bg-slate-800/30 p-4 text-sm">
+          <p className="mb-2 font-medium text-slate-200">
+            Sign in to manage social accounts.
+          </p>
+          <p className="mb-3 text-xs text-slate-400">
+            These fields store a password and open a browser on this machine, so
+            they always require an account — even when auth is otherwise off.
+            There is no self-registration; create the first account with:
+          </p>
+          <pre className="overflow-x-auto rounded bg-slate-900/70 p-2.5 text-xs text-slate-300">
+            cd backend{"\n"}python scripts/create_admin.py
+          </pre>
+          <p className="mt-2 text-xs text-slate-500">
+            That account is only for this dashboard. It is unrelated to your
+            social media passwords, which are stored separately and encrypted.
+          </p>
+        </div>
+      ) : loading && accounts.length === 0 ? (
         <p className="text-sm text-slate-400">Loading accounts…</p>
       ) : (
         <div className="space-y-3">

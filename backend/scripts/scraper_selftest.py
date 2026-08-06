@@ -1,11 +1,11 @@
 """
-connector/selftest.py
+backend/scripts/scraper_selftest.py
 Are the scrapers still working?
 
 Run this when the social feed goes quiet, after a platform redesign, or before
 trusting a run:
 
-    python -m connector.selftest --platform all --max-items 5
+    cd backend && python scripts/scraper_selftest.py --platform all
 
 Nothing else in the project can answer that question. The unit tests cover
 registration, wiring and the status vocabulary, but not one of them would fail
@@ -40,7 +40,8 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
+# Run as a script from anywhere: backend/ has to be importable for `src.*`.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.scrapers import registry  # noqa: E402
 from src.scrapers.base import ScrapeResult, browser_session  # noqa: E402

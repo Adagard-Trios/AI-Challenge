@@ -157,16 +157,11 @@ def test_the_login_form_is_still_never_submitted():
     The property that keeps accounts alive, unchanged by the move into the
     backend: the browser pre-fills two fields and a human does the rest.
     """
-    from connector import connect
+    from src.social import browser_login as connect
 
-    source = ast.get_source_segment(
-        (REPO_ROOT / "connector" / "connect.py").read_text(encoding="utf-8"),
-        next(
-            n for n in ast.walk(ast.parse(
-                (REPO_ROOT / "connector" / "connect.py").read_text(encoding="utf-8")))
-            if isinstance(n, ast.FunctionDef) and n.name == "_prefill_login"
-        ),
-    ) or ""
+    source = _function(
+        PROJECT_ROOT / "src" / "social" / "browser_login.py", "_prefill_login",
+    )
 
     code = "\n".join(
         line for line in source.splitlines() if not line.strip().startswith("#")
@@ -258,8 +253,8 @@ def test_the_dashboard_and_the_cli_share_one_store():
     the other.
     """
     source = SERVICE.read_text(encoding="utf-8")
-    assert "from connector.vault import CredentialVault" in source
-    assert "from connector.storage import SessionStore" in source
+    assert "from .vault import CredentialVault" in source
+    assert "from .storage import SessionStore" in source
 
 
 def test_collection_writes_rotated_cookies_back():
@@ -314,7 +309,7 @@ def test_the_scrapers_are_pointed_at_the_dashboard_store():
 def test_the_bridge_reads_the_same_store_the_dashboard_writes():
     bridge = PROJECT_ROOT / "src" / "social" / "credential_bridge.py"
     source = bridge.read_text(encoding="utf-8")
-    assert "from connector.storage import SessionStore" in source
+    assert "from .storage import SessionStore" in source
 
 
 def test_the_bridge_does_not_cache_sessions():

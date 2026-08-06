@@ -101,7 +101,6 @@ def init_db() -> None:
     # every entity write fails against a missing table -- at runtime, in
     # production, with the feature looking implemented.
     from src.intelligence import models as _intelligence_models  # noqa: F401
-    from src.intelligence import commands as _connector_commands  # noqa: F401
 
     Base.metadata.create_all(bind=engine())
     logger.info("[auth.db] schema ready (%d tables)", len(Base.metadata.tables))

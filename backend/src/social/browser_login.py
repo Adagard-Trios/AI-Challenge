@@ -31,17 +31,13 @@ from __future__ import annotations
 
 import json
 import logging
-import sys
-from pathlib import Path
 from typing import Optional
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
-
-from src.scrapers.credentials import (  # noqa: E402
+from src.scrapers.credentials import (
     CredentialError, derive_expiry, filter_first_party, missing_required, validate,
 )
 
-from .storage import SessionStore  # noqa: E402
+from .storage import SessionStore
 
 logger = logging.getLogger("connector.connect")
 

@@ -15,7 +15,6 @@ import HistoricalIntel from "../components/dashboard/HistoricalIntel";
 import TrendingTopics from "../components/dashboard/TrendingTopics";
 import SatelliteView from "../components/map/SatelliteView";
 import LoadingScreen from "../components/LoadingScreen";
-import ConnectedAccounts from "../components/settings/ConnectedAccounts";
 import SocialAccounts from "../components/settings/SocialAccounts";
 import CollectedPosts from "../components/settings/CollectedPosts";
 import { Activity, Map, Radio, BarChart3, Zap, Brain, Cloud, DollarSign, Satellite, Link2, Layers } from "lucide-react";
@@ -193,10 +192,6 @@ const Index = () => {
                 whole flow ended at a row count in a database. */}
             <CollectedPosts />
 
-            {/* The remote-server path: a connector running on someone else's
-                desktop, paired by code. Still supported, and still the right
-                shape when the backend is not the user's own machine. */}
-            <ConnectedAccounts />
           </TabsContent>
         </Tabs>
       </main>

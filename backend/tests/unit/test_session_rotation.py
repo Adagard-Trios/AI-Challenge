@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).parent.parent.parent.parent
+PROJECT_ROOT = Path(__file__).parent.parent.parent
 BACKEND = REPO_ROOT / "backend"
 for p in (str(REPO_ROOT), str(BACKEND)):
     if p not in sys.path:
@@ -72,9 +73,9 @@ def test_run_scrape_captures_the_post_run_session(monkeypatch):
     assert result.rotated_state == rotated
 
 
-def test_connector_persists_rotated_cookies(tmp_path, monkeypatch):
+def test_rotated_cookies_are_persisted(tmp_path, monkeypatch):
     """The end-to-end property: a run leaves the stored session updated."""
-    from connector.storage import KeyStore, SessionStore
+    from src.social.storage import KeyStore, SessionStore
 
     monkeypatch.setattr(KeyStore, "_keyring", lambda self: None)
     store = SessionStore(tmp_path)
@@ -101,9 +102,9 @@ def test_challenge_does_not_overwrite_a_good_session():
     Whatever a platform hands back mid-challenge is not a session worth
     keeping, and overwriting a working one with it would be destructive.
     """
-    source = (REPO_ROOT / "connector" / "collect.py").read_text(encoding="utf-8")
+    source = (PROJECT_ROOT / "src" / "social" / "service.py").read_text(encoding="utf-8")
     assert 'result.status != "challenged"' in source, (
-        "connector must skip persistence on a challenge"
+        "collection must skip persistence on a challenge"
     )
 
 
@@ -113,7 +114,7 @@ def test_persist_state_is_actually_called():
     it without calling it fixes nothing, and that is easy to reintroduce.
     """
     base_src = (BACKEND / "src" / "scrapers" / "base.py").read_text(encoding="utf-8")
-    conn_src = (REPO_ROOT / "connector" / "collect.py").read_text(encoding="utf-8")
+    svc_src = (PROJECT_ROOT / "src" / "social" / "service.py").read_text(encoding="utf-8")
 
     assert "ctx.persist_state()" in base_src, "run_scrape must capture the session"
-    assert "result.rotated_state" in conn_src, "connector must write it back"
+    assert "result.rotated_state" in svc_src, "collection must write it back"

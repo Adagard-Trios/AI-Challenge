@@ -3,7 +3,7 @@ src/social/service.py
 Connect and collect social accounts from the dashboard.
 
 The interesting problem here is that logging in takes a human a minute or two,
-and an HTTP request cannot wait that long. The connector CLI solved it with
+and an HTTP request cannot wait that long. The old connector CLI solved it with
 `input("Press Enter once you are signed in...")`, which is fine in a terminal
 and impossible in a web request.
 
@@ -18,20 +18,11 @@ notices the moment it does.
 from __future__ import annotations
 
 import logging
-import sys
 import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Dict, List, Optional
-
-# connector/ is a sibling of backend/, and this module reuses its vault and
-# session store on purpose -- same files, so the CLI and the dashboard see the
-# same accounts rather than each keeping a private copy.
-_REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
 
 logger = logging.getLogger("Roger.social")
 
@@ -102,13 +93,14 @@ class SocialService:
         self._jobs: Dict[str, Job] = {}
         self._vault = None
         self._sessions = None
+        self._backoff = None
 
     # -- lazily built, so importing this module never touches the keychain ----
 
     @property
     def vault(self):
         if self._vault is None:
-            from connector.vault import CredentialVault
+            from .vault import CredentialVault
 
             self._vault = CredentialVault()
         return self._vault
@@ -116,10 +108,25 @@ class SocialService:
     @property
     def sessions(self):
         if self._sessions is None:
-            from connector.storage import SessionStore
+            from .storage import SessionStore
 
             self._sessions = SessionStore()
         return self._sessions
+
+    @property
+    def backoff(self):
+        """
+        Challenge state and failure pacing, persisted across restarts.
+
+        Surviving a restart is the whole point: restarting is exactly what
+        people do after failures, and an in-memory counter would reset at the
+        moment it matters most.
+        """
+        if self._backoff is None:
+            from .backoff import BackoffStore
+
+            self._backoff = BackoffStore()
+        return self._backoff
 
     # -- credentials ---------------------------------------------------------
 
@@ -195,7 +202,7 @@ class SocialService:
                             "pip install playwright && playwright install chromium")
             return
 
-        from connector.connect import (
+        from .browser_login import (
             LOGIN_URLS, _detect_handle, _launch_browser, _persist, _prefill_login,
         )
         from src.scrapers.credentials import missing_required
@@ -299,6 +306,32 @@ class SocialService:
     def disconnect(self, platform: str) -> bool:
         return self.sessions.delete(platform.lower())
 
+    def resume(self, platform: str) -> None:
+        """
+        Clear a challenge and let this account collect again.
+
+        Never automatic. A challenge means the platform asked for proof a human
+        is present; resuming on a timer answers that with "no", and retrying
+        into a challenge is what converts it into a lasting restriction. So the
+        cooldown lifts only when a person says they have checked the account.
+        """
+        self.backoff.resume(platform.lower())
+        logger.info("[social] %s resumed by the user", platform)
+
+    def challenge_state(self, platform: str) -> Optional[dict]:
+        """Why this account is paused, if it is."""
+        platform = platform.lower()
+        try:
+            if self.backoff.is_challenged(platform):
+                return {"paused": True, "kind": "challenged",
+                        "detail": self.backoff.describe(platform)}
+            if not self.backoff.ready(platform):
+                return {"paused": True, "kind": "backing_off",
+                        "detail": self.backoff.describe(platform)}
+        except Exception:  # noqa: BLE001
+            return None
+        return None
+
     def accounts(self) -> List[dict]:
         """
         Everything the dashboard needs to render the Accounts tab.
@@ -326,6 +359,10 @@ class SocialService:
                 "username": usernames.get(platform),
                 "job": job.as_dict() if job else None,
                 "budget": self._budget(platform),
+                # Why collection is paused, if it is. Without this a challenged
+                # account looks identical to a working one that happens to be
+                # quiet, and the user has nothing to act on.
+                "paused": self.challenge_state(platform),
             })
         return out
 
@@ -359,6 +396,21 @@ class SocialService:
         if scraper is None:
             return {"platform": platform, "status": "unsupported", "posts": []}
 
+        # A challenge stops this account until a human resumes it, and a run of
+        # failures backs off exponentially. Both survive a restart.
+        #
+        # This was lost when collection moved out of the connector and into the
+        # backend, and the tests that caught it were the ones asserting the old
+        # Collector consulted the store. Without it a challenged account gets
+        # retried on the very next cycle -- which is the behaviour most likely
+        # to turn a recoverable challenge into a lasting restriction.
+        if self.backoff.is_challenged(platform):
+            return {"platform": platform, "status": "challenged", "posts": [],
+                    "reason": self.backoff.describe(platform)}
+        if not self.backoff.ready(platform):
+            return {"platform": platform, "status": "backing_off", "posts": [],
+                    "reason": self.backoff.describe(platform)}
+
         record = self.sessions.load(platform)
         if record is None:
             return {"platform": platform, "status": "not_connected", "posts": []}
@@ -390,11 +442,19 @@ class SocialService:
                                platform, exc)
 
         if result.status == "challenged":
+            self.backoff.record_challenge(platform, result.reason)
             logger.error(
                 "[social] %s served a challenge. Collection for this account is "
                 "stopped until you resume it. It will NOT retry on its own.",
                 platform,
             )
+        elif result.status in ("ok", "budget_exhausted"):
+            self.backoff.record_success(platform)
+        else:
+            # `expired` counts as a failure for pacing: retrying a dead session
+            # every cycle is pointless traffic against an account the platform
+            # is already watching.
+            self.backoff.record_failure(platform, result.reason)
 
         return {
             "platform": platform,

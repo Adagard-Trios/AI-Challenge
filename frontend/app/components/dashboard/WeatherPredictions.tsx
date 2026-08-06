@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { API_BASE, apiFetch } from "@/app/lib/api";
 import ModelStaleness, { type TrainingInfo } from "./ModelStaleness";
+import ModelUnavailable from "./ModelUnavailable";
 
 interface DistrictPrediction {
     temperature: {
@@ -48,6 +49,7 @@ export default function WeatherPredictions() {
     const [training, setTraining] = useState<TrainingInfo | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [unavailable, setUnavailable] = useState(false);
     const [selectedDistrict, setSelectedDistrict] = useState<string | null>(null);
     const [filter, setFilter] = useState<string>("all");
 
@@ -67,7 +69,15 @@ export default function WeatherPredictions() {
             if (data.status === "success") {
                 setPredictions(data);
                 setError(null);
+                setUnavailable(false);
+            } else if (data.status === "unavailable") {
+                // Not an error. The model is a TensorFlow build that does not
+                // fit on the deployed instance, and saying "Failed to load"
+                // describes a broken product rather than an unpaid-for one.
+                setUnavailable(true);
+                setError(data.message ?? null);
             } else {
+                setUnavailable(false);
                 setError(data.message || "Failed to load predictions");
             }
         } catch (err) {
@@ -139,7 +149,13 @@ export default function WeatherPredictions() {
 
             <ModelStaleness training={training} className="mb-4" />
 
-            {error ? (
+            {unavailable ? (
+                <ModelUnavailable
+                    capability="District weather and flood-risk prediction"
+                    serviceEnv="WEATHER_SERVICE_URL"
+                    message={error}
+                />
+            ) : error ? (
                 <div className="text-center py-8">
                     <p className="text-red-400 mb-4">{error}</p>
                     <button

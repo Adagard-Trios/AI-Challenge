@@ -4,6 +4,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
 import DashboardOverview from "../components/dashboard/DashboardOverview";
 import MapView from "../components/map/MapView";
 import IntelligenceFeed from "../components/intelligence/IntelligenceFeed";
+import StoryFeed from "../components/intelligence/StoryFeed";
+import RiskIndices from "../components/dashboard/RiskIndices";
 import StockPredictions from "../components/dashboard/StockPredictions";
 import AnomalyDetection from "../components/dashboard/AnomalyDetection";
 import WeatherPredictions from "../components/dashboard/WeatherPredictions";
@@ -14,7 +16,7 @@ import TrendingTopics from "../components/dashboard/TrendingTopics";
 import SatelliteView from "../components/map/SatelliteView";
 import LoadingScreen from "../components/LoadingScreen";
 import ConnectedAccounts from "../components/settings/ConnectedAccounts";
-import { Activity, Map, Radio, BarChart3, Zap, Brain, Cloud, DollarSign, Satellite, Link2 } from "lucide-react";
+import { Activity, Map, Radio, BarChart3, Zap, Brain, Cloud, DollarSign, Satellite, Link2, Layers } from "lucide-react";
 import { useRogerData } from "../hooks/use-roger-data";
 import { Badge } from "../components/ui/badge";
 
@@ -87,7 +89,7 @@ const Index = () => {
       <main className="container mx-auto px-3 sm:px-6 py-4 sm:py-6">
         <Tabs defaultValue="overview" className="w-full">
           <div className="overflow-x-auto hide-scrollbar -mx-3 px-3 sm:mx-0 sm:px-0">
-            <TabsList className="inline-flex w-max sm:grid sm:w-full sm:grid-cols-8 mb-4 sm:mb-6 bg-card border border-border min-w-full sm:min-w-0">
+            <TabsList className="inline-flex w-max sm:grid sm:w-full sm:grid-cols-9 mb-4 sm:mb-6 bg-card border border-border min-w-full sm:min-w-0">
               <TabsTrigger value="overview" className="data-ready gap-2 px-3 sm:px-4 py-2.5 sm:py-2">
                 <BarChart3 className="w-4 h-4" />
                 <span className="hidden sm:inline">OVERVIEW</span>
@@ -99,6 +101,10 @@ const Index = () => {
               <TabsTrigger value="intelligence" className="data-ready gap-2 px-3 sm:px-4 py-2.5 sm:py-2">
                 <Radio className="w-4 h-4" />
                 <span className="hidden sm:inline">INTEL FEED</span>
+              </TabsTrigger>
+              <TabsTrigger value="stories" className="data-ready gap-2 px-3 sm:px-4 py-2.5 sm:py-2">
+                <Layers className="w-4 h-4" />
+                <span className="hidden sm:inline">STORIES</span>
               </TabsTrigger>
               <TabsTrigger value="satellite" className="data-ready gap-2 px-3 sm:px-4 py-2.5 sm:py-2">
                 <Satellite className="w-4 h-4" />
@@ -125,6 +131,9 @@ const Index = () => {
 
           <TabsContent value="overview" className="space-y-6 animate-fade-in">
             <DashboardOverview />
+            {/* The four risk indices the aggregator has always computed and
+                nothing rendered -- each one openable to the events behind it. */}
+            <RiskIndices />
             <TrendingTopics />
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <StockPredictions />
@@ -138,6 +147,10 @@ const Index = () => {
 
           <TabsContent value="intelligence" className="animate-fade-in">
             <IntelligenceFeed />
+          </TabsContent>
+
+          <TabsContent value="stories" className="animate-fade-in">
+            <StoryFeed />
           </TabsContent>
 
           <TabsContent value="satellite" className="animate-fade-in">

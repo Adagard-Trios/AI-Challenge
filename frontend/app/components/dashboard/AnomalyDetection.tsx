@@ -25,6 +25,33 @@ interface ModelStatus {
     models_available: string[];
     vectorizer_loaded: boolean;
     batch_threshold: number;
+    /** "minilm" in production, "bert" locally, null when nothing loaded. */
+    embedding?: string | null;
+    inference?: string;
+    training_card?: {
+        embedder?: string;
+        dimensions?: number;
+        training_documents?: number;
+        contamination?: number;
+        trained_at?: string;
+    } | null;
+}
+
+/**
+ * What /api/anomalies says about its own answer.
+ *
+ * `is_ml` is the field that matters. Without it the card cannot tell a real
+ * isolation-forest prediction from the severity+keyword fallback, and it used
+ * to present both under a heading that said "ML ANOMALY DETECTION" — which was
+ * true half the time and misleading the other half.
+ */
+interface AnomalyResponse {
+    anomalies?: AnomalyEvent[];
+    is_ml?: boolean;
+    model_status?: string;
+    embedding?: string | null;
+    scored?: number;
+    message?: string;
 }
 
 // Use environment variable for API base URL
@@ -32,6 +59,7 @@ interface ModelStatus {
 const AnomalyDetection = () => {
     const [anomalies, setAnomalies] = useState<AnomalyEvent[]>([]);
     const [modelStatus, setModelStatus] = useState<ModelStatus | null>(null);
+    const [detection, setDetection] = useState<AnomalyResponse | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
@@ -43,10 +71,11 @@ const AnomalyDetection = () => {
                 apiFetch(`${API_BASE}/api/model/status`)
             ]);
 
-            const anomalyData = await anomalyRes.json();
+            const anomalyData: AnomalyResponse = await anomalyRes.json();
             const statusData = await statusRes.json();
 
             setAnomalies(anomalyData.anomalies || []);
+            setDetection(anomalyData);
             setModelStatus(statusData);
             setError(null);
         } catch (err) {
@@ -63,6 +92,11 @@ const AnomalyDetection = () => {
         const interval = setInterval(fetchAnomalies, 30000);
         return () => clearInterval(interval);
     }, []);
+
+    // Whether a model actually scored these events. Falls back to the model
+    // status only when the detection response predates the is_ml field.
+    const isMl = detection?.is_ml ?? Boolean(modelStatus?.model_loaded);
+    const card = modelStatus?.training_card ?? null;
 
     const getScoreColor = (score: number) => {
         if (score >= 0.8) return "text-destructive";
@@ -87,9 +121,15 @@ const AnomalyDetection = () => {
                         <Brain className="w-6 h-6 text-primary" />
                     </div>
                     <div>
-                        <h2 className="text-lg font-bold">ML ANOMALY DETECTION</h2>
+                        <h2 className="text-lg font-bold">ANOMALY DETECTION</h2>
                         <p className="text-xs text-muted-foreground font-mono">
-                            Powered by BERT + Isolation Forest
+                            {/* The old subtitle said "BERT + Isolation Forest"
+                                unconditionally, including when no model was
+                                loaded at all. It now describes what actually
+                                answered this request. */}
+                            {isMl
+                                ? `Isolation Forest on ${card?.dimensions ?? 384}-dim sentence embeddings`
+                                : "Severity + keyword heuristic — no model loaded"}
                         </p>
                     </div>
                 </div>
@@ -101,34 +141,77 @@ const AnomalyDetection = () => {
                     >
                         <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
                     </button>
-                    {modelStatus && (
-                        <Badge className={modelStatus.model_loaded ? "bg-success/20 text-success" : "bg-warning/20 text-warning"}>
-                            {modelStatus.model_loaded ? "Model Active" : "Model Training..."}
+                    {detection && (
+                        <Badge
+                            className={isMl ? "bg-success/20 text-success" : "bg-warning/20 text-warning"}
+                            title={
+                                isMl
+                                    ? "A trained model scored these events."
+                                    : "No model is loaded. These scores come from severity weighting and keyword matches — useful, but not machine learning."
+                            }
+                        >
+                            {isMl ? "ML INFERENCE" : "HEURISTIC"}
                         </Badge>
                     )}
                 </div>
             </div>
 
-            {/* Model Status Bar */}
-            {modelStatus && (
-                <div className="mb-4 p-3 rounded-lg bg-muted/30 flex items-center gap-4 text-xs">
-                    <div className="flex items-center gap-2">
-                        <Database className="w-4 h-4 text-muted-foreground" />
-                        <span>Batch Threshold: <strong>{modelStatus.batch_threshold}</strong> records</span>
-                    </div>
-                    <Separator orientation="vertical" className="h-4" />
+            {/* What produced these numbers. A score with no provenance invites
+                exactly the over-trust this card should not earn. */}
+            {detection && (
+                <div className="mb-4 p-3 rounded-lg bg-muted/30 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
                     <div className="flex items-center gap-2">
                         <Zap className="w-4 h-4 text-muted-foreground" />
-                        <span>Models: <strong>{modelStatus.models_available?.length || 0}</strong> trained</span>
+                        <span>
+                            Method:{" "}
+                            <strong>
+                                {isMl ? "Isolation Forest" : "severity + keyword"}
+                            </strong>
+                        </span>
                     </div>
-                    {modelStatus.models_available?.length > 0 && (
+
+                    {isMl && card?.embedder && (
                         <>
                             <Separator orientation="vertical" className="h-4" />
-                            <span className="text-muted-foreground">
-                                {modelStatus.models_available.join(', ')}
+                            <div className="flex items-center gap-2">
+                                <Database className="w-4 h-4 text-muted-foreground" />
+                                <span title="Embeddings are computed in this container — no external inference service">
+                                    Embedding: <strong>{card.embedder}</strong>
+                                </span>
+                            </div>
+                        </>
+                    )}
+
+                    {isMl && card?.training_documents != null && (
+                        <>
+                            <Separator orientation="vertical" className="h-4" />
+                            <span
+                                className="text-muted-foreground"
+                                title="Corpus the model was fitted on. A small corpus is worth knowing about."
+                            >
+                                Fitted on <strong>{card.training_documents}</strong> events
+                                {card.contamination != null &&
+                                    ` · expects ${Math.round(card.contamination * 100)}% anomalous`}
                             </span>
                         </>
                     )}
+
+                    {detection.scored != null && (
+                        <>
+                            <Separator orientation="vertical" className="h-4" />
+                            <span className="text-muted-foreground">
+                                Scored <strong>{detection.scored}</strong> events
+                            </span>
+                        </>
+                    )}
+                </div>
+            )}
+
+            {/* The fallback is legitimate; presenting it as ML is not. */}
+            {detection && !isMl && detection.message && (
+                <div className="mb-4 flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/10 p-3 text-xs text-warning">
+                    <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                    <span>{detection.message}</span>
                 </div>
             )}
 

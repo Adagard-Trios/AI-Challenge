@@ -16,6 +16,14 @@ const MAX_LOADING_TIME = 120000; // 2 minutes max loading time
 const INITIAL_FETCH_DELAY = 1000; // Fetch from REST after 1s if no WS data
 const FALLBACK_POLL_INTERVAL = 2000; // Poll REST every 2s when WS disconnected
 
+// A real-world thing an event is about, canonicalised through the taxonomy so
+// that five spellings of "Colombo Port" join to one exposure entry.
+export interface EventEntity {
+  type: 'PLACE' | 'ORG' | 'SECTOR' | 'INFRASTRUCTURE' | 'LANE' | string;
+  name: string;
+  role?: 'affected' | 'actor' | 'mentioned' | string;
+}
+
 export interface RogerEvent {
   event_id: string;
   domain: string;
@@ -40,6 +48,20 @@ export interface RogerEvent {
     matched_on: string[];
     matches?: Array<Record<string, string | number>>;
   } | null;
+  // What the event is about, canonicalised. Empty because nothing was named is
+  // different from empty because the model never ran -- entities_extracted
+  // carries that distinction.
+  entities?: EventEntity[];
+  entities_extracted?: boolean;
+}
+
+// One contributing event behind a risk index. The aggregator collects these
+// while averaging each bucket (snapshot["drivers"] in combinedAgentNode.py).
+export interface IndexDriver {
+  event_id: string | null;
+  summary: string;
+  severity: string | null;
+  contribution: number;
 }
 
 export interface RiskDashboard {
@@ -51,6 +73,14 @@ export interface RiskDashboard {
   high_priority_count: number;
   total_events: number;
   last_updated: string;
+  // Absent on an older backend, so optional rather than defaulted -- an empty
+  // driver list means "nothing contributed", which is a different statement
+  // from "this backend does not send drivers".
+  drivers?: {
+    logistics_friction?: IndexDriver[];
+    compliance_volatility?: IndexDriver[];
+    market_instability?: IndexDriver[];
+  };
 }
 
 // Mirrors GET /api/rivernet (fetch_rivernet_levels in backend). The previous

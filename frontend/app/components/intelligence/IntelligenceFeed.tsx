@@ -9,6 +9,7 @@ import { useState } from "react";
 import IntelligenceSettings from "./IntelligenceSettings";
 import RelevanceBadge from "./RelevanceBadge";
 import WhyThisEvent from "./WhyThisEvent";
+import EntityChips from "./EntityChips";
 import { formatExact, formatWhen } from "@/app/lib/format";
 
 const IntelligenceFeed = () => {
@@ -127,6 +128,15 @@ const IntelligenceFeed = () => {
               </div>
 
               <h3 className="font-bold text-sm mb-1">{item.summary}</h3>
+
+              {/* What this event is actually about. These are the canonical
+                  names the relevance scorer joins on, so showing them is what
+                  makes a "matched on Port of Colombo" badge checkable. */}
+              <EntityChips
+                entities={item.entities}
+                extracted={item.entities_extracted}
+                className="mb-1.5"
+              />
 
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <span>Confidence: {Math.round((item.confidence ?? 0) * 100)}%</span>

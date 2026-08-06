@@ -7,6 +7,7 @@ import { motion } from "framer-motion";
 import { useRogerData } from "../../hooks/use-roger-data";
 import { useState, useEffect } from "react";
 import ModelStaleness, { type TrainingInfo } from "./ModelStaleness";
+import ModelUnavailable from "./ModelUnavailable";
 import { API_BASE, apiFetch } from "@/app/lib/api";
 import { formatTime } from "@/app/lib/format";
 
@@ -42,6 +43,7 @@ const StockPredictions = () => {
   const [training, setTraining] = useState<TrainingInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [unavailable, setUnavailable] = useState(false);
 
   // Fetch stock predictions from API
   const fetchPredictions = async () => {
@@ -57,7 +59,14 @@ const StockPredictions = () => {
       if (data.status === "success") {
         setPredictions(data.predictions);
         setError(null);
+        setUnavailable(false);
+      } else if (data.status === "unavailable") {
+        // TensorFlow models on a 512 MB instance. Say so rather than showing
+        // a red error that reads as a broken integration.
+        setUnavailable(true);
+        setError(data.message ?? null);
       } else {
+        setUnavailable(false);
         setError(data.message || "Failed to load predictions");
       }
     } catch (err) {
@@ -145,6 +154,12 @@ const StockPredictions = () => {
             <RefreshCw className="w-8 h-8 animate-spin text-muted-foreground mb-4" />
             <p className="text-muted-foreground">Loading predictions...</p>
           </div>
+        ) : unavailable ? (
+          <ModelUnavailable
+            capability="CSE stock-price prediction"
+            serviceEnv="STOCK_SERVICE_URL"
+            message={error}
+          />
         ) : error ? (
           <div className="flex flex-col items-center justify-center py-12 text-center">
             <AlertCircle className="w-12 h-12 text-destructive mb-4" />

@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { API_BASE, apiFetch } from "@/app/lib/api";
 import ModelStaleness, { type TrainingInfo } from "./ModelStaleness";
+import ModelUnavailable from "./ModelUnavailable";
 
 interface CurrencyPrediction {
     prediction_date: string;
@@ -33,6 +34,7 @@ export default function CurrencyPrediction() {
     const [history, setHistory] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [unavailable, setUnavailable] = useState(false);
 
     useEffect(() => {
         fetchPrediction();
@@ -54,7 +56,13 @@ export default function CurrencyPrediction() {
             if (data.status === "success") {
                 setPrediction(data.prediction);
                 setError(null);
+                setUnavailable(false);
+            } else if (data.status === "unavailable") {
+                // A GRU that needs TensorFlow, on a 512 MB instance. Not a fault.
+                setUnavailable(true);
+                setError(data.message ?? null);
             } else {
+                setUnavailable(false);
                 setError(data.message || "Failed to load prediction");
             }
         } catch (err) {
@@ -112,7 +120,13 @@ export default function CurrencyPrediction() {
 
             <ModelStaleness training={training} className="mb-4" />
 
-            {error ? (
+            {unavailable ? (
+                <ModelUnavailable
+                    capability="USD/LKR exchange-rate prediction"
+                    serviceEnv="CURRENCY_SERVICE_URL"
+                    message={error}
+                />
+            ) : error ? (
                 <div className="text-center py-8">
                     <p className="text-red-400 mb-4">{error}</p>
                     <button

@@ -2,7 +2,7 @@
 
 import { Card } from "../ui/card";
 import { Badge } from "../ui/badge";
-import { Gauge, Scale, TrendingDown, TrendingUp } from "lucide-react";
+import { FileText, Gauge, Scale, TrendingDown, TrendingUp } from "lucide-react";
 import { useRogerData } from "../../hooks/use-roger-data";
 import IndexDrivers from "./IndexDrivers";
 import { formatPercent } from "../../lib/format";
@@ -117,6 +117,36 @@ const RiskIndices = () => {
                         </div>
                     );
                 })}
+
+                {/* Regulatory activity is a COUNT, not a score.
+                    `len(political_scores) * 0.1` is a story tally with a scaling
+                    factor, and rendering it as a percentage next to genuinely
+                    scored indices made a reader unable to tell a model output
+                    from "we saw seven political headlines". The backend flags
+                    it; this shows the count it actually is. */}
+                {dashboard?.regulatory_activity_is_count && (
+                    <div className="pt-3 border-t border-border">
+                        <div className="flex items-center justify-between gap-3">
+                            <span className="flex items-center gap-2 text-sm text-foreground">
+                                <FileText className="w-4 h-4 text-muted-foreground" />
+                                Regulatory activity
+                            </span>
+                            <span className="font-mono text-sm font-semibold text-foreground">
+                                {dashboard.regulatory_story_count ?? 0}
+                                <span className="ml-1.5 text-xs font-normal text-muted-foreground">
+                                    {(dashboard.regulatory_story_count ?? 0) === 1
+                                        ? "story"
+                                        : "stories"}
+                                </span>
+                            </span>
+                        </div>
+                        <p className="mt-1.5 text-xs text-muted-foreground">
+                            A count of political and regulatory stories this cycle —
+                            not a calibrated index. A rising count is real signal;
+                            it just is not a score, so it is not shown as one.
+                        </p>
+                    </div>
+                )}
 
                 {/* Opportunity is the one index where higher is better, so it is
                     kept visually apart rather than sharing the risk colouring. */}

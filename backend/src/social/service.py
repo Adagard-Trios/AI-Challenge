@@ -35,7 +35,21 @@ if str(_REPO_ROOT) not in sys.path:
 
 logger = logging.getLogger("Roger.social")
 
-SUPPORTED_PLATFORMS = ("twitter", "linkedin", "facebook", "instagram", "reddit")
+# Which platforms the search scrapers can collect from with a session.
+#
+# Deliberately NOT the vault's list, which also includes reddit. Reddit has no
+# session scraper -- r/srilanka is read through its public JSON API and needs no
+# account -- so offering a reddit login here would let someone save a password,
+# complete a browser sign-in, click Collect, and get "unsupported". A dead end
+# built out of a list that was copied rather than derived.
+COLLECTORS = {
+    "twitter": "scrape_twitter",
+    "linkedin": "scrape_linkedin",
+    "facebook": "scrape_facebook",
+    "instagram": "scrape_instagram",
+}
+
+SUPPORTED_PLATFORMS = tuple(COLLECTORS)
 
 # How long to leave the login window open before giving up. Long enough for a
 # password manager, a 2FA code from a phone, and a mistyped password; short
@@ -341,12 +355,7 @@ class SocialService:
         from src.scrapers.base import run_scrape
         from src.scrapers.credentials import SocialCredential, derive_expiry
 
-        scraper = {
-            "twitter": "scrape_twitter",
-            "linkedin": "scrape_linkedin",
-            "facebook": "scrape_facebook",
-            "instagram": "scrape_instagram",
-        }.get(platform)
+        scraper = COLLECTORS.get(platform)
         if scraper is None:
             return {"platform": platform, "status": "unsupported", "posts": []}
 

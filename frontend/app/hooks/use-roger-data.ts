@@ -81,6 +81,13 @@ export interface RiskDashboard {
     compliance_volatility?: IndexDriver[];
     market_instability?: IndexDriver[];
   };
+  // Regulatory activity is a story TALLY with a scaling factor, not a
+  // calibrated index. It sat beside genuinely scored metrics looking identical
+  // to them, so the backend flags it and ships the raw count for the UI to
+  // show instead of implying a 0.7 index.
+  regulatory_activity?: number;
+  regulatory_activity_is_count?: boolean;
+  regulatory_story_count?: number;
 }
 
 // Mirrors GET /api/rivernet (fetch_rivernet_levels in backend). The previous

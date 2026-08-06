@@ -263,6 +263,17 @@ try:
     from src.social import routes as _social_routes
 
     app.include_router(_social_routes.router)
+
+    # Point the scrapers at those accounts.
+    #
+    # Without this the feature is complete right up to the part that matters:
+    # you can sign in, see "Connected" with a handle and an expiry, and the five
+    # agents still scrape nothing -- because every scraper calls
+    # get_credential(), whose default hands out nothing. No error, just a social
+    # feed that is permanently empty.
+    from src.social import credential_bridge as _credential_bridge
+
+    _credential_bridge.install()
 except Exception:  # noqa: BLE001
     # Never let an auth problem take down a service that ran fine without it.
     # bootstrap.init() itself re-raises when AUTH_ENFORCED=1, which is the case

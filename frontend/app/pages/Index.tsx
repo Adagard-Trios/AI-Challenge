@@ -17,6 +17,7 @@ import SatelliteView from "../components/map/SatelliteView";
 import LoadingScreen from "../components/LoadingScreen";
 import ConnectedAccounts from "../components/settings/ConnectedAccounts";
 import SocialAccounts from "../components/settings/SocialAccounts";
+import CollectedPosts from "../components/settings/CollectedPosts";
 import { Activity, Map, Radio, BarChart3, Zap, Brain, Cloud, DollarSign, Satellite, Link2, Layers } from "lucide-react";
 import { useRogerData } from "../hooks/use-roger-data";
 import { Badge } from "../components/ui/badge";
@@ -187,6 +188,10 @@ const Index = () => {
             {/* Sign in here — the server is this machine, so the fields and the
                 browser window are both in front of you. */}
             <SocialAccounts />
+
+            {/* Proof the accounts above are actually working. Without this the
+                whole flow ended at a row count in a database. */}
+            <CollectedPosts />
 
             {/* The remote-server path: a connector running on someone else's
                 desktop, paired by code. Still supported, and still the right

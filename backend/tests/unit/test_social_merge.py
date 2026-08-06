@@ -291,6 +291,106 @@ def test_collected_posts_deduplicate_against_the_connector_path():
     assert "content_hash" in store
 
 
+# --- the agent pipeline can actually see connected accounts -----------------
+
+def test_the_scrapers_are_pointed_at_the_dashboard_store():
+    """
+    The gap that made this feature complete-looking and non-functional.
+
+    Every scraper calls get_credential(), whose default is NullCredentialStore
+    -- correct for a shared server, fatal here. Without the bridge you could
+    sign in, see "Connected" with a handle and an expiry, and all five agents
+    would still scrape nothing. No error; the social feed was just always
+    empty.
+    """
+    source = (PROJECT_ROOT / "main.py").read_text(encoding="utf-8")
+    assert "credential_bridge" in source, (
+        "nothing installs a credential store, so connected accounts are "
+        "invisible to the agents"
+    )
+    assert "_credential_bridge.install()" in source
+
+
+def test_the_bridge_reads_the_same_store_the_dashboard_writes():
+    bridge = PROJECT_ROOT / "src" / "social" / "credential_bridge.py"
+    source = bridge.read_text(encoding="utf-8")
+    assert "from connector.storage import SessionStore" in source
+
+
+def test_the_bridge_does_not_cache_sessions():
+    """
+    collect() writes rotated cookies back after every run. A cached credential
+    would go stale exactly when a platform rotated -- the failure the write-back
+    exists to prevent.
+    """
+    bridge = PROJECT_ROOT / "src" / "social" / "credential_bridge.py"
+    source = bridge.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+
+    get = next(
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef) and n.name == "get"
+    )
+    body = ast.get_source_segment(source, get) or ""
+    assert "self.store.load(" in body, "get() does not read through to the store"
+
+
+def test_the_bridge_shares_a_budget_key_with_collect_now():
+    """
+    Two readers of one account must share one counter, or each could spend a
+    full daily allowance without the other noticing.
+    """
+    bridge = (PROJECT_ROOT / "src" / "social" / "credential_bridge.py").read_text(
+        encoding="utf-8")
+    service = SERVICE.read_text(encoding="utf-8")
+
+    assert 'f"local:{platform}"' in bridge
+    assert 'f"local:{platform}"' in service
+
+
+# --- offered platforms must be collectable ----------------------------------
+
+def test_every_platform_offered_for_login_can_actually_be_collected():
+    """
+    Reddit has a login URL and vault support but NO session scraper -- it is
+    read through its public JSON API. Listing it would let someone save a
+    password, complete a browser sign-in, click Collect and get "unsupported".
+    """
+    from src.scrapers import registry
+    from src.social import service as svc
+
+    for platform in svc.SUPPORTED_PLATFORMS:
+        scraper = svc.COLLECTORS[platform]
+        assert scraper in registry.REGISTRY, (
+            f"{platform} is offered for login but {scraper} is not registered"
+        )
+
+
+def test_the_platform_list_is_derived_not_copied():
+    source = SERVICE.read_text(encoding="utf-8")
+    assert "SUPPORTED_PLATFORMS = tuple(COLLECTORS)" in source, (
+        "the list is hand-maintained again and will drift from what can collect"
+    )
+
+
+# --- collected posts are visible --------------------------------------------
+
+def test_collected_posts_have_a_frontend_consumer():
+    """
+    /api/ingest/recent existed with no consumer, so "scrape the posts" ended at
+    a row count in a database that nothing displayed.
+    """
+    app_dir = REPO_ROOT / "frontend" / "app"
+    if not app_dir.exists():
+        pytest.skip("frontend not present")
+
+    hits = [
+        path for path in app_dir.rglob("*.tsx")
+        if "ingest/recent" in path.read_text(encoding="utf-8", errors="ignore")
+    ]
+    assert hits, "nothing in the frontend reads /api/ingest/recent"
+
+
 # --- no false promises ------------------------------------------------------
 
 def test_the_ui_does_not_promise_accounts_are_safe():

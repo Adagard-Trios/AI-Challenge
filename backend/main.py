@@ -255,6 +255,14 @@ try:
     from src.intelligence import command_routes as _command_routes
 
     app.include_router(_command_routes.router)
+
+    # Social accounts connected from the dashboard itself, for the case where
+    # this server IS the user's machine. Shares the connector's vault and
+    # session store, so the CLI and the web UI see the same accounts rather
+    # than each keeping a private copy -- one store, two front doors.
+    from src.social import routes as _social_routes
+
+    app.include_router(_social_routes.router)
 except Exception:  # noqa: BLE001
     # Never let an auth problem take down a service that ran fine without it.
     # bootstrap.init() itself re-raises when AUTH_ENFORCED=1, which is the case

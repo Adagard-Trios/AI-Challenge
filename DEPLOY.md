@@ -54,10 +54,39 @@ passes long before the first (lazy) model load.
   while the committed artifact is `artifacts/models/stock_model.pkl`. Predictions come from its
   simulated fallback; `/model/status` exposes `predictor_artifacts_found`. Note this resolves
   differently on Linux than on Windows, where `Artifacts` matches `artifacts` case-insensitively.
-- **Anomaly**: embedding-based scoring is **opt-in** via `ANOMALY_ML_ENABLED=1`. Left off, the
-  service uses the same keyword/severity heuristic the monolith falls back to, and responds in
-  ~50 ms. Turned on with a cold `models_cache/`, the first `/detect` blocks for minutes downloading
-  BERT weights — so enable it only after confirming the cache is warm via `/model/status`.
+- **Anomaly**: this model no longer needs a separate service. It runs **in the backend
+  container** on 384-dim ONNX MiniLM embeddings, which chromadb already ships and the slim
+  image already carries. Leave `ANOMALY_SERVICE_URL` unset. See below for why.
+
+### Anomaly detection: why it moved in-process
+
+The committed `isolation_forest_{english,tamil}.joblib` models take 768-dim distilBERT
+vectors from `models/anomaly-detection/src/utils/vectorizer.py`, which needs
+`transformers` + `torch` — the ~3 GB stack `requirements-service.txt` deliberately omits.
+
+**That vectorizer does not fail when they are missing. It returns `np.zeros(768)`.**
+Measured with both blocked exactly as the deployed image has them:
+
+```
+nonzero_dims=0  pred=-1  score=+0.012138   Heavy flooding in Ratnapura...
+nonzero_dims=0  pred=-1  score=+0.012138   Colombo Port operating normally...
+nonzero_dims=0  pred=-1  score=+0.012138   Central Bank holds rate steady...
+```
+
+Every event identical, every event flagged anomalous, `/api/anomalies` reporting
+`model_status: "ml_active"` throughout. Fabricated output presented as inference.
+
+So the shipped model is re-fitted on embeddings the container can actually compute:
+
+```bash
+cd backend && python scripts/train_anomaly_minilm.py
+```
+
+It writes `isolation_forest_minilm.joblib` plus a sidecar `.json` recording the corpus
+size and contamination, and **refuses to write anything** if the model flags more than
+3× its configured rate on held-out data. `/api/model/status` returns that card, and
+`/api/anomalies` returns `is_ml` so the dashboard can never present the heuristic
+fallback as machine learning.
 
 ---
 
@@ -150,6 +179,37 @@ from the dashboard. For a dashboard nobody opens over a holiday, that is a real 
 Cutover: deploy → create the admin → log in → confirm → set `AUTH_ENFORCED=1`.
 One env var, instantly revertible. `/api/status` stays public (`render.yaml` uses
 it as the health check).
+
+### 0.7 Verify the deployment without shell access
+
+`/api/status` carries a `configuration` block naming every unset variable **and what it
+broke**. It reports whether a value exists, never the value.
+
+```bash
+curl -s https://<backend>/api/status | jq .configuration
+```
+
+```json
+{
+  "healthy": false,
+  "failures": [
+    { "key": "DATABASE_URL",
+      "consequence": "Falling back to SQLite on the container's ephemeral disk. Every account, exposure profile, story and paired device is destroyed on the next deploy, restart or spin-down.",
+      "detail": "Set the Supabase transaction-pooler URL (port 6543)." }
+  ],
+  "warnings": [ ... ],
+  "configured": ["AUTH_SECRET", "GROQ_API_KEY", "anomaly_model"]
+}
+```
+
+This exists because the failure mode here is always the same shape: missing configuration
+degrades into something that *looks* like it works. A missing `DATABASE_URL` silently
+becomes ephemeral SQLite. A missing `BOOTSTRAP_ADMIN_EMAIL` makes the seeder return early
+with no log line, so **nobody can ever log in** and nothing anywhere says why. Both are
+reasonable local defaults and production outages.
+
+The same problems are logged at ERROR on startup. `"healthy": true` with an empty
+`failures` array is the green light.
 
 ---
 

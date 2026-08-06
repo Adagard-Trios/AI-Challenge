@@ -2,14 +2,57 @@
 
 **Real-Time Situational Awareness for Sri Lanka**
 
-A multi-agent AI system that aggregates intelligence from **50+ data sources** to provide risk analysis and opportunity detection for businesses operating in Sri Lanka.
+A multi-agent AI system that watches Sri Lankan government, hydrological,
+economic and news sources continuously, and tells a district office or a
+business what just changed that affects *them* — with the reasoning attached.
 
 ## 🌐 Live Demo
 
 | Component | URL |
 |-----------|-----|
-| **Frontend Dashboard** | Vercel — set after deploy (see [DEPLOY.md](DEPLOY.md)) |
-| **Backend API** | Render — set after deploy (see [DEPLOY.md](DEPLOY.md)) |
+| **Frontend Dashboard** | _Vercel — see [DEPLOY.md](DEPLOY.md)_ |
+| **Backend API** | _Render — see [DEPLOY.md](DEPLOY.md)_ |
+| **Health + configuration** | `<backend>/api/status` — reports which features are live and which are not |
+
+---
+
+## 🎯 The problem
+
+Sri Lanka's disruption data already exists in public — river gauges at
+rivernet.lk, DMC weather warnings, CEB power notices, CBSL indicators, gazettes,
+news. It is **published, not delivered**: spread across a dozen sites in three
+languages and several formats, with no alerting and no notion of who is
+affected.
+
+So the people who need it find out late. A district officer learns a river is
+rising when someone phones. A business learns a road is cut when a driver calls
+from it. The information existed hours earlier, on a page nobody was watching.
+
+**This platform watches those pages continuously, and pushes what matters.**
+
+## 🌍 UN SDG alignment
+
+| SDG | How this platform contributes |
+|-----|-------------------------------|
+| **SDG 13 — Climate Action** *(primary)* | Continuous monitoring of **30 rivernet.lk river-gauge stations** and DMC weather warnings, converted into district-level flood risk with severity and confidence. Climate adaptation depends on early warning; this is early warning built from Sri Lanka's own public instrumentation. |
+| **SDG 11 — Sustainable Cities & Communities** *(primary)* | Disruption awareness across **25 districts**: floods, power interruptions, water-supply outages, transport and health alerts — the resilience layer a city or district office needs to act before an incident becomes a crisis. |
+| **SDG 9 — Industry, Innovation & Infrastructure** | Port, rail and road-corridor disruption tracking, so infrastructure friction is visible while it can still be routed around. |
+| **SDG 8 — Decent Work & Economic Growth** | Small and mid-sized businesses get the exposure-aware risk picture that, until now, only organisations with a dedicated analyst could afford. |
+
+### How impact is measured
+
+The honest metric is **time-to-awareness**: how much earlier an affected party
+learns of a flood, outage or disruption than they would by waiting for the news
+cycle. It is measurable in the product — every story records `first_seen`, so
+the gap between our detection and mainstream coverage of the same event is a
+number, not a claim.
+
+Supporting measures, all verifiable in the running system:
+
+- **30** river-gauge stations and **25** districts under continuous watch
+- **12 of 19** public sources verified reachable (see the source table below)
+- **Relevance precision** — the share of surfaced events that match a user's
+  declared exposure profile, shown per event with the reason it matched
 
 ---
 
@@ -32,36 +75,85 @@ A multi-agent AI system that aggregates intelligence from **50+ data sources** t
 - **Commodity Prices** - 15 essential goods (rice, sugar, gas, eggs, etc.)
 - **Water Supply Status** - NWSDB disruption alerts
 
-✅ **ML Anomaly Detection Pipeline** (Integrated into Graph):
-- Language-specific BERT models (Sinhala, Tamil, English)
-- Real-time anomaly inference on every graph cycle
-- Clustering (DBSCAN, KMeans, HDBSCAN)
-- Anomaly Detection (Isolation Forest, LOF)
-- MLflow + DagsHub tracking
+### 🤖 What the AI actually does — and where it runs
 
-✅ **Weather Prediction ML Pipeline**:
-- LSTM Neural Network (30-day sequences)
-- Predicts: Temperature, Rainfall, Flood Risk, Severity
-- 21 weather stations → 25 districts
-- Airflow DAG runs daily at 4 AM
+The distinction between **running on the live URL** and **runs locally with the
+full ML stack** is stated explicitly, because a 512 MB free instance cannot host
+TensorFlow and the API at the same time. Nothing below is claimed as live unless
+it is.
 
-✅ **Currency Prediction ML Pipeline**:
-- GRU Neural Network (optimized for 8GB RAM)
-- Predicts: USD/LKR exchange rate
-- Features: Technical indicators + CSE + Gold + Oil + USD Index
-- MLflow tracking + Airflow DAG at 4 AM
+| Capability | Model | On the live URL? |
+|---|---|---|
+| **Event classification** — severity, impact type, confidence, fake-news score | LLM (Groq) | ✅ **Live** |
+| **Entity extraction** — districts, ports, organisations, canonicalised | LLM, batched onto existing calls | ✅ **Live** |
+| **Story briefs** — living summaries that regenerate as an event develops | LLM | ✅ **Live** |
+| **Relevance scoring** — ranks the feed against your declared exposure, with `matched_on` reasons | Deterministic scorer | ✅ **Live** |
+| **Anomaly detection** — isolation forest over sentence embeddings | scikit-learn + 384-dim ONNX all-MiniLM-L6-v2 | ✅ **Live, in-process** |
+| **RAG chatbot** over collected intelligence | LLM + ChromaDB | ✅ **Live** |
+| Weather prediction (temp, rainfall, flood risk) | LSTM (Keras) | ⚠️ Local only — needs TensorFlow |
+| Currency prediction (USD/LKR) | GRU (Keras) | ⚠️ Local only — needs TensorFlow |
+| Stock price prediction (10 CSE stocks) | LSTM/GRU/BiLSTM/BiGRU + Optuna | ⚠️ Local only — needs TensorFlow |
 
-✅ **Stock Price Prediction ML Pipeline**:
-- Multi-Architecture: LSTM, GRU, BiLSTM, BiGRU
-- Optuna hyperparameter tuning (30 trials per stock)
-- Per-stock best model selection
-- 10 top CSE stocks (JKH, COMB, DIAL, HNB, etc.)
+The three Keras pipelines are real and trained — they simply do not fit
+alongside the API in 512 MB. In the deployed build they report `unavailable`
+and the dashboard says so, rather than rendering an empty card. Set their
+`*_SERVICE_URL` to a dedicated instance to switch them on.
+
+**On anomaly detection specifically.** The originally committed isolation
+forests take 768-dim distilBERT vectors, which the deployed image cannot
+produce — and their vectorizer returns `np.zeros(768)` instead of failing, so
+every event scored identically while the endpoint reported `ml_active`. The
+model is therefore re-fitted on 384-dim ONNX MiniLM embeddings that the
+container *can* compute (`scripts/train_anomaly_minilm.py`), and the training
+script refuses to write a model that flags more than 3× its configured rate on
+held-out data. See [backend/src/embeddings.py](backend/src/embeddings.py).
 
 ✅ **RAG-Powered Chatbot**:
 - Chat-history aware Q&A
 - Queries all ChromaDB intelligence collections
 - Domain filtering (political, economic, weather, social)
 - Floating chat UI in dashboard
+
+### 📡 Data sources — the actual count
+
+**23 sources are integrated: 19 public web sources plus 4 social platforms.
+12 of the 19 were verified reachable on 6 Aug 2026.**
+
+An earlier version of this README claimed "50+ data sources". That was not
+accurate and has been corrected. Every number here is reproducible — run
+`python scripts/check_sources.py` and it prints the table below plus the counts
+this README should state.
+
+| Source | Provides | 6 Aug 2026 |
+|---|---|---|
+| rivernet.lk | Flood / river gauges (30 stations) | ✅ live |
+| meteo.gov.lk | DMC weather + warnings | ✅ live |
+| cbsl.gov.lk | Central Bank — inflation, policy rate, USD/LKR | ✅ live |
+| ceypetco.gov.lk | Fuel prices | ✅ live |
+| ceb.lk | Power / load shedding | ✅ live |
+| gazette.lk | Government gazette | ✅ live |
+| parliament.lk | Parliament proceedings | ✅ live |
+| health.gov.lk | Dengue / disease alerts | ✅ live |
+| cse.lk | Colombo Stock Exchange | ✅ live |
+| data.humdata.org | WFP commodity prices | ✅ live |
+| dailymirror.lk | News | ✅ live |
+| newsfirst.lk | News | ✅ live |
+| ft.lk | News (financial) | ⚠️ intermittent timeouts |
+| news.lk | Government news portal | ⚠️ 307 redirect loop |
+| eservices.railway.gov.lk | Rail schedules | ⚠️ TLS handshake fails |
+| reddit.com | r/srilanka | ⚠️ 403 from datacenter IPs |
+| api.rivernet.lk | River gauge API | ⚠️ 404 — HTML scrape used instead |
+| aterboard.lk | Water supply | ⚠️ DNS failure |
+| nitter.net | Twitter mirror (fallback) | ⚠️ empty body |
+
+Plus **4 social platforms** — X/Twitter, LinkedIn, Facebook, Instagram —
+collected through the user's own connector on their own machine, never from the
+server. See [Social account connection](#-social-account-connection) for why
+that distinction is load-bearing rather than cosmetic.
+
+The failures are listed deliberately. Several are informative: reddit's 403 and
+nitter's empty body are exactly the datacenter-IP blocking that motivated
+moving social collection onto the user's machine.
 
 ✅ **Trending/Velocity Detection**:
 - SQLite-based topic frequency tracking (24-hour rolling window)

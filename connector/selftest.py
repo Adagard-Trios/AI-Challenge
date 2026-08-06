@@ -307,6 +307,23 @@ def main(argv: Optional[List[str]] = None) -> int:
         format="%(levelname)s %(name)s: %(message)s",
     )
 
+    # Read the same sessions everything else does.
+    #
+    # probe() calls get_credential(), whose default store hands out nothing --
+    # correct for a server, useless here. Without this the tool reports
+    # "no account connected" for every platform even when accounts are
+    # connected, which is the most misleading possible answer from a tool whose
+    # entire job is telling you whether collection works.
+    #
+    # The backend installs this at startup; a standalone CLI run has to do it
+    # for itself.
+    try:
+        from src.social.credential_bridge import install as _install_sessions
+
+        _install_sessions()
+    except Exception as exc:  # noqa: BLE001
+        print(f"  ! could not open the local session store: {exc}")
+
     targets = list(PLATFORM_SCRAPERS) if args.platform == "all" else [args.platform]
 
     print(f"\nScraper self-test -- {args.max_items} posts per platform\n")

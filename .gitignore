@@ -46,7 +46,22 @@ wheels/
 *.pb
 
 # Model output directories (training intermediates - regenerable)
-**/Artifacts/
+#
+# `**/Artifacts/` used to be here and has been removed. It was over-broad in a
+# way that was actively harmful: no directory in this repo is actually spelled
+# with a capital A, but git on Windows matches ignore patterns
+# case-insensitively, so it swallowed every `models/*/artifacts/` -- including
+# the trained models we deliberately ship.
+#
+# The existing .h5/.pkl/.joblib files under artifacts/models/ survive only
+# because they were force-added before the rule existed. A NEW artifact was
+# silently ignored, never committed, and therefore absent from the deployed
+# image -- which would have meant anomaly detection quietly falling back to
+# heuristic scoring in production while working perfectly on the machine that
+# trained it. Exactly the class of silent failure this codebase keeps hitting.
+#
+# The stage rules below are what was actually wanted: they name the regenerable
+# intermediates and leave model_trainer/ and models/ tracked.
 **/artifacts/data_ingestion/
 **/artifacts/data_validation/
 **/artifacts/data_transformation/

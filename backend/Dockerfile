@@ -24,6 +24,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY backend/requirements-service.txt .
 RUN pip install --no-cache-dir -r requirements-service.txt
 
+# Bake the ONNX sentence embedder into the image.
+#
+# chromadb downloads all-MiniLM-L6-v2 (~80 MB) to ~/.cache/chroma on first use.
+# Render's free tier has no persistent disk, so that download would repeat on
+# every cold start -- adding ~30 s to the first request after a spin-down, and
+# failing outright if the instance has no egress at that moment.
+#
+# Anomaly detection depends on this embedder (src/embeddings.py), so fetching
+# it at build time is the difference between ML inference that works on the
+# first request and ML inference that works eventually.
+RUN python -c "from chromadb.utils import embedding_functions as ef; ef.ONNXMiniLM_L6_V2()(['warm the cache'])"
+
 # NOTE: `playwright install chromium` was here. Removed with the browser itself;
 # see the apt block above. If a future server-side scraper needs a browser, put
 # it in its own service rather than back into this one.

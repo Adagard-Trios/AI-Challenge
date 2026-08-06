@@ -1,0 +1,11 @@
+{
+  "model": "IsolationForest",
+  "embedder": "chromadb ONNXMiniLM_L6_V2 (all-MiniLM-L6-v2)",
+  "dimensions": 384,
+  "contamination": 0.08,
+  "n_estimators": 200,
+  "training_documents": 171,
+  "flagged_in_training": 14,
+  "trained_at": "2026-08-06T11:46:15.207685+00:00",
+  "note": "Fitted on ONNX MiniLM embeddings so inference runs on a 512 MB instance. The 768-dim distilBERT forests need transformers+torch, which the deployed image does not install."
+}

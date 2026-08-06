@@ -24,9 +24,13 @@
 #
 # CONSEQUENCE
 # -----------
-# The in-process model fallback cannot work with this set. Every model endpoint
-# requires its <MODEL>_SERVICE_URL to be set, or it returns the gateway's
-# unavailable response. That is the intended deployed topology.
+# Three of the four models cannot run in-process with this set: weather and
+# currency are Keras .h5 and need TensorFlow, and stock needs it too. They
+# require their <MODEL>_SERVICE_URL to be set, or they return the gateway's
+# unavailable response — and the dashboard says so rather than showing a card
+# that looks broken.
+#
+# Anomaly detection is the exception and DOES run here; see scikit-learn below.
 #
 # Use requirements.txt for local development where in-process models are wanted.
 
@@ -77,6 +81,20 @@ yfinance
 # (~300 KB); included so that path raises a useful error rather than ImportError.
 joblib
 
+# Anomaly detection runs IN THIS CONTAINER. ~35 MB installed, well within the
+# 512 MB budget, and it is the one ML model that fits.
+#
+# The catch was never sklearn -- it was the embeddings. The committed 768-dim
+# isolation forests take distilBERT vectors from transformers + torch, which
+# are not installed here, and their vectorizer returns np.zeros(768) instead of
+# failing. Measured: every event then scored +0.012138 and was flagged
+# anomalous, while /api/anomalies reported "ml_active".
+#
+# So the production model is re-fitted on 384-dim all-MiniLM-L6-v2 ONNX
+# embeddings, which chromadb below already ships (no torch). See
+# src/embeddings.py and scripts/train_anomaly_minilm.py.
+scikit-learn
+
 # --- API server ---
 fastapi
 uvicorn[standard]
@@ -116,7 +134,6 @@ tqdm
 #   torch, transformers, sentence-transformers  -> only reachable via
 #       langchain_groq's soft import; not used by any backend code path
 #   tensorflow, tf_keras                        -> in-process weather/currency
-#   scikit-learn, joblib                        -> in-process stock/anomaly
 #   hdbscan, umap-learn, optuna                 -> model *training* only
 #   fasttext-wheel, lingua-language-detector    -> anomaly language detection
 #   mlflow, dagshub                             -> experiment tracking

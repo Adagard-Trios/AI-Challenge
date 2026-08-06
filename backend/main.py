@@ -206,6 +206,22 @@ logger.info(
 )
 
 # ============================================
+# CONFIGURATION PREFLIGHT
+# ============================================
+# Runs before auth so that a missing DATABASE_URL is reported as a named
+# problem with a stated consequence, rather than as a silent fallback to a
+# SQLite file that is wiped on the next restart. Reporting only -- enforcement
+# stays in auth/config.py, which fails closed where it must.
+try:
+    from src import preflight as _preflight
+
+    _PREFLIGHT = _preflight.report()
+except Exception:  # noqa: BLE001
+    logger.exception("[STARTUP] preflight failed to run")
+    _preflight = None
+    _PREFLIGHT = None
+
+# ============================================
 # AUTH
 # ============================================
 # Registered as an APIRouter. The 39 pre-existing routes below are deliberately
@@ -730,13 +746,30 @@ def read_root():
 
 @app.get("/api/status")
 def get_status():
-    return {
+    """
+    Liveness plus a configuration report.
+
+    Render's health check hits this, so it stays cheap and never raises. The
+    `configuration` block exists because the deployed instance has no shell:
+    when a feature is missing in production, this is the only place that says
+    which variable is unset and what it broke. It reports whether a value is
+    present, never the value itself.
+    """
+    body = {
         "status": current_state.get("status"),
         "run_count": current_state.get("run_count"),
         "last_update": current_state.get("last_update"),
         "active_connections": len(manager.active_connections),
         "total_events": len(current_state.get("final_ranked_feed", []))
     }
+
+    if _preflight is not None:
+        try:
+            body["configuration"] = _preflight.run().as_dict()
+        except Exception:  # noqa: BLE001
+            logger.exception("[status] preflight unavailable")
+
+    return body
 
 
 @app.get("/api/dashboard")
@@ -1332,14 +1365,59 @@ def record_topic_mention(topic: str, source: str = "manual", domain: str = "gene
 # ============================================
 
 # Lazy-loaded anomaly detection components
+#
+# WHY THIS IS NOT THE ORIGINAL PER-LANGUAGE LOADER
+# ------------------------------------------------
+# The committed isolation_forest_{english,tamil}.joblib models take 768-dim
+# distilBERT vectors from models/anomaly-detection/src/utils/vectorizer.py.
+# That vectorizer needs transformers + torch, which requirements-service.txt
+# deliberately does not install (they are ~3 GB and OOM a 512 MB instance).
+#
+# It does not fail when they are absent. It logs and returns np.zeros(768).
+# Measured with transformers and torch blocked exactly as the deployed image
+# has them, every event scored identically:
+#
+#     nonzero_dims=0  pred=-1  score=+0.012138   Heavy flooding in Ratnapura...
+#     nonzero_dims=0  pred=-1  score=+0.012138   Colombo Port operating normally...
+#     nonzero_dims=0  pred=-1  score=+0.012138   Central Bank holds rate steady...
+#
+# Everything flagged anomalous, one constant score, and the endpoint reporting
+# model_status "ml_active" throughout. That is a fabricated result presented as
+# inference, which is worse than reporting nothing.
+#
+# So: the production path uses 384-dim all-MiniLM-L6-v2 ONNX embeddings, which
+# chromadb already ships and the slim image already carries, with an isolation
+# forest re-fitted on those (scripts/train_anomaly_minilm.py). The 768-dim
+# models are still used when transformers really is installed -- local dev --
+# but they are never fed a zero vector to keep up appearances.
 _anomaly_models = {}  # {language: model}
+_anomaly_mode = None  # "minilm" | "bert" | None
 _vectorizer = None
 _language_detector = None
 
+_MINILM_MODEL = "isolation_forest_minilm.joblib"
+
+
+def _bert_vectorizer_usable() -> bool:
+    """
+    True only when the 768-dim path can produce real vectors.
+
+    Checked by import rather than by trying it, because trying it returns
+    zeros rather than raising -- which is the entire problem.
+    """
+    import importlib.util
+
+    return all(importlib.util.find_spec(m) for m in ("transformers", "torch"))
+
 
 def _load_anomaly_components():
-    """Load per-language anomaly detection models and vectorizer"""
-    global _anomaly_models, _vectorizer, _language_detector
+    """
+    Load whichever anomaly model this environment can actually run.
+
+    Returns False when none can run, which routes the endpoints to their
+    labelled heuristic scoring rather than to a model fed garbage.
+    """
+    global _anomaly_models, _anomaly_mode, _vectorizer, _language_detector
 
     if _anomaly_models:
         return True
@@ -1348,11 +1426,46 @@ def _load_anomaly_components():
         import joblib
         from pathlib import Path
 
-        # Model directories
-        output_dir = Path(__file__).parent.parent / "models" / "anomaly-detection" / "output"
-        artifacts_dir = Path(__file__).parent.parent / "models" / "anomaly-detection" / "artifacts" / "model_trainer"
+        models_root = Path(__file__).parent.parent / "models" / "anomaly-detection"
+        output_dir = models_root / "output"
+        artifacts_dir = models_root / "artifacts" / "model_trainer"
 
-        # Load per-language models
+        # --- preferred: MiniLM, which runs anywhere the API runs ------------
+        for search_dir in (artifacts_dir, output_dir):
+            minilm_path = search_dir / _MINILM_MODEL
+            if not minilm_path.exists():
+                continue
+            try:
+                from src import embeddings
+
+                if not embeddings.available():
+                    logger.warning("[AnomalyAPI] MiniLM model present but embedder unavailable")
+                    break
+
+                _anomaly_models["minilm"] = joblib.load(minilm_path)
+                _anomaly_mode = "minilm"
+                _vectorizer = lambda texts: embeddings.embed(texts)  # noqa: E731
+                _language_detector = None
+                logger.info(
+                    "[AnomalyAPI] anomaly detection active: %s on %d-dim ONNX MiniLM",
+                    minilm_path.name, embeddings.EMBEDDING_DIM,
+                )
+                return True
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[AnomalyAPI] could not load %s: %s", minilm_path.name, exc)
+                _anomaly_models.pop("minilm", None)
+                break
+
+        # --- legacy 768-dim path, only when it can genuinely run ------------
+        if not _bert_vectorizer_usable():
+            logger.warning(
+                "[AnomalyAPI] no MiniLM model and transformers/torch are not "
+                "installed, so the 768-dim models would score zero vectors. "
+                "Falling back to labelled heuristic scoring. Build the "
+                "production model with: python scripts/train_anomaly_minilm.py"
+            )
+            return False
+
         for lang in ["english", "sinhala", "tamil"]:
             for search_dir in [artifacts_dir, output_dir]:
                 model_path = search_dir / f"isolation_forest_{lang}.joblib"
@@ -1361,7 +1474,6 @@ def _load_anomaly_components():
                     logger.info(f"[AnomalyAPI] Loaded {lang} model from {model_path.name}")
                     break
 
-        # Fallback to legacy model if no per-language models found
         if not _anomaly_models:
             legacy_paths = [
                 output_dir / "isolation_forest_embeddings_only.joblib",
@@ -1377,12 +1489,12 @@ def _load_anomaly_components():
             logger.warning("[AnomalyAPI] No trained models found. Run training first.")
             return False
 
-        # Load vectorizer and language detector
         from models.anomaly_detection.src.utils.vectorizer import get_vectorizer
         from models.anomaly_detection.src.utils.language_detector import detect_language
 
         _vectorizer = get_vectorizer()
         _language_detector = detect_language
+        _anomaly_mode = "bert"
 
         logger.info(f"[AnomalyAPI] ✓ Loaded models for: {list(_anomaly_models.keys())}")
         return True
@@ -1390,6 +1502,37 @@ def _load_anomaly_components():
     except Exception as e:
         logger.error(f"[AnomalyAPI] Failed to load components: {e}")
         return False
+
+
+def _score_texts(texts):
+    """
+    Score a batch, returning [(prediction, raw_score), ...].
+
+    One code path for both endpoints so they cannot drift apart, and one place
+    that knows the embedding width must match the fitted model.
+    """
+    import numpy as np
+
+    if _anomaly_mode == "minilm":
+        vectors = np.array(_vectorizer(list(texts)))
+        model = _anomaly_models["minilm"]
+        preds = model.predict(vectors)
+        scores = -model.decision_function(vectors)
+        return [(int(p), float(s)) for p, s in zip(preds, scores)], "isolation_forest_minilm"
+
+    out = []
+    for text in texts:
+        lang, _ = _language_detector(text)
+        vector = _vectorizer.vectorize(text, lang)
+        model = _anomaly_models.get(lang) or _anomaly_models.get("english")
+        if model is None:
+            out.append((1, 0.0))
+            continue
+        out.append((
+            int(model.predict([vector])[0]),
+            float(-model.decision_function([vector])[0]),
+        ))
+    return out, "isolation_forest_bert"
 
 
 @app.post("/api/predict")
@@ -1429,67 +1572,36 @@ def predict_anomaly(texts: List[str] = None, text: str = None, _user=Depends(req
                 "message": "Model not trained yet. Using default scores."
             }
 
-        # Process texts with per-language models
-        predictions = []
-        for t in texts:
-            try:
-                # Detect language
-                lang, lang_conf = _language_detector(t)
+        # One scoring path shared with /api/anomalies. A failure here reports
+        # itself rather than degrading to zeros: a 0.0 anomaly score is
+        # indistinguishable from a confident "this is normal".
+        try:
+            scored, method = _score_texts(texts)
+        except Exception as e:
+            logger.error(f"[AnomalyAPI] scoring failed: {e}", exc_info=True)
+            return {
+                "predictions": [],
+                "total": 0,
+                "model_status": "error",
+                "message": f"Scoring failed: {e}",
+            }
 
-                # Vectorize
-                vector = _vectorizer.vectorize(t, lang)
-
-                # Select appropriate model
-                if lang in _anomaly_models:
-                    model = _anomaly_models[lang]
-                    method = f"isolation_forest_{lang}"
-                elif "english" in _anomaly_models:
-                    model = _anomaly_models["english"]
-                    method = "isolation_forest_english_fallback"
-                else:
-                    # No model available
-                    predictions.append({
-                        "text": t[:100] + "..." if len(t) > 100 else t,
-                        "is_anomaly": False,
-                        "anomaly_score": 0.0,
-                        "language": lang,
-                        "method": "no_model"
-                    })
-                    continue
-
-                # Predict: -1 = anomaly, 1 = normal
-                prediction = model.predict([vector])[0]
-
-                # Get anomaly score
-                if hasattr(model, 'decision_function'):
-                    score = -model.decision_function([vector])[0]
-                elif hasattr(model, 'score_samples'):
-                    score = -model.score_samples([vector])[0]
-                else:
-                    score = 1.0 if prediction == -1 else 0.0
-
-                predictions.append({
-                    "text": t[:100] + "..." if len(t) > 100 else t,
-                    "is_anomaly": prediction == -1,
-                    "anomaly_score": float(score),
-                    "language": lang,
-                    "method": method
-                })
-
-            except Exception as e:
-                logger.error(f"[AnomalyAPI] Error predicting: {e}")
-                predictions.append({
-                    "text": t[:100] + "..." if len(t) > 100 else t,
-                    "is_anomaly": False,
-                    "anomaly_score": 0.0,
-                    "error": str(e)
-                })
+        predictions = [
+            {
+                "text": t[:100] + "..." if len(t) > 100 else t,
+                "is_anomaly": prediction == -1,
+                "anomaly_score": round(score, 6),
+                "method": method,
+            }
+            for t, (prediction, score) in zip(texts, scored)
+        ]
 
         return {
             "predictions": predictions,
             "total": len(predictions),
             "anomalies_found": sum(1 for p in predictions if p.get("is_anomaly")),
             "model_status": "loaded",
+            "embedding": _anomaly_mode,
             "models_available": list(_anomaly_models.keys())
         }
 
@@ -1572,69 +1684,57 @@ def get_anomalies(limit: int = 20, threshold: float = 0.5, _user=Depends(require
                 "total": len(anomalies),
                 "threshold": threshold,
                 "model_status": "fallback_scoring",
-                "message": "Using severity + keyword scoring. Train ML model for advanced detection."
+                "method": "severity + keyword heuristic",
+                "is_ml": False,
+                "message": (
+                    "Heuristic scoring, not a model: severity weighting plus "
+                    "keyword matches. No ML inference is running."
+                ),
             }
 
-        # ML Models are loaded - use per-language models for scoring
+        # --- real model inference -------------------------------------------
+        scorable = [f for f in feeds if str(f.get("summary", "")).strip()]
+        if not scorable:
+            return {"anomalies": [], "total": 0, "threshold": threshold,
+                    "model_status": "no_events", "is_ml": True}
+
+        try:
+            scored, method = _score_texts([f["summary"] for f in scorable])
+        except Exception as e:
+            # Do not fall through to a model-shaped answer that isn't one.
+            logger.error(f"[AnomalyAPI] scoring failed: {e}", exc_info=True)
+            return {
+                "anomalies": [], "total": 0, "threshold": threshold,
+                "model_status": "error", "is_ml": False,
+                "message": f"Model inference failed: {e}",
+            }
+
         anomalies = []
-        per_lang_counts = {"english": 0, "sinhala": 0, "tamil": 0}
+        for feed, (prediction, raw) in zip(scorable, scored):
+            # decision_function is roughly [-0.5, 0.5] around the fitted
+            # boundary; shifting by 0.5 puts it on a 0-1 scale for the UI while
+            # keeping the raw value for anyone who wants to see it.
+            normalized = max(0.0, min(1.0, raw + 0.5))
+            if prediction == -1 or normalized >= threshold:
+                anomalies.append({
+                    **feed,
+                    "anomaly_score": float(round(normalized, 3)),
+                    "raw_score": round(raw, 6),
+                    "is_anomaly": prediction == -1,
+                    "detection_method": method,
+                })
 
-        for feed in feeds:
-            summary = feed.get("summary", "")
-            if not summary:
-                continue
-
-            try:
-                lang, _ = _language_detector(summary)
-                vector = _vectorizer.vectorize(summary, lang)
-
-                # Select appropriate model
-                if lang in _anomaly_models:
-                    model = _anomaly_models[lang]
-                    method = f"isolation_forest_{lang}"
-                elif "english" in _anomaly_models:
-                    model = _anomaly_models["english"]
-                    method = "isolation_forest_english_fallback"
-                else:
-                    continue
-
-                per_lang_counts[lang] = per_lang_counts.get(lang, 0) + 1
-                prediction = model.predict([vector])[0]
-
-                if hasattr(model, 'decision_function'):
-                    score = -model.decision_function([vector])[0]
-                else:
-                    score = 1.0 if prediction == -1 else 0.0
-
-                # Normalize score to 0-1 range
-                normalized_score = max(0, min(1, (score + 0.5)))
-
-                if prediction == -1 or normalized_score >= threshold:
-                    anomalies.append({
-                        **feed,
-                        "anomaly_score": float(round(normalized_score, 3)),
-                        "is_anomaly": prediction == -1,
-                        "language": lang,
-                        "detection_method": method
-                    })
-
-                    if len(anomalies) >= limit:
-                        break
-
-            except Exception as e:
-                logger.debug(f"[AnomalyAPI] Error scoring feed: {e}")
-                continue
-
-        # Sort by anomaly score
         anomalies.sort(key=lambda x: x.get("anomaly_score", 0), reverse=True)
 
         return {
-            "anomalies": anomalies,
+            "anomalies": anomalies[:limit],
             "total": len(anomalies),
+            "scored": len(scorable),
             "threshold": threshold,
             "model_status": "ml_active",
+            "is_ml": True,
+            "embedding": _anomaly_mode,
             "models_loaded": list(_anomaly_models.keys()),
-            "per_language_counts": per_lang_counts
         }
 
     except Exception as e:
@@ -1648,24 +1748,43 @@ def get_model_status(_user=Depends(require_user)):
     try:
         from pathlib import Path
 
-        output_dir = Path(__file__).parent.parent / "models" / "anomaly-detection" / "output"
+        models_root = Path(__file__).parent.parent / "models" / "anomaly-detection"
+        output_dir = models_root / "output"
+        artifacts_dir = models_root / "artifacts" / "model_trainer"
+
         models_found = []
+        for directory in (artifacts_dir, output_dir):
+            if directory.exists():
+                models_found.extend(f.name for f in directory.glob("*.joblib"))
 
-        if output_dir.exists():
-            for f in output_dir.glob("*.joblib"):
-                models_found.append(f.name)
+        # Load lazily so this reports what would actually happen on a request,
+        # rather than "not loaded" simply because nobody has asked yet.
+        loaded = _load_anomaly_components()
 
-        # The global is _anomaly_models, a {language: model} dict. The singular
-        # name never existed, so this raised NameError on every call.
-        loaded = bool(_anomaly_models)
+        # What the model was fitted on. Written by
+        # scripts/train_anomaly_minilm.py; absent for the legacy 768-dim models,
+        # which is itself worth knowing.
+        training_card = None
+        card_path = artifacts_dir / "isolation_forest_minilm.json"
+        if card_path.exists():
+            try:
+                training_card = json.loads(card_path.read_text(encoding="utf-8"))
+            except Exception:  # noqa: BLE001
+                training_card = None
 
         return {
             "model_loaded": loaded,
-            "models_available": models_found,
+            "embedding": _anomaly_mode,
+            "inference": (
+                "in-process (this container)" if loaded
+                else "unavailable -- endpoints use labelled heuristic scoring"
+            ),
+            "models_available": sorted(set(models_found)),
             "vectorizer_loaded": _vectorizer is not None,
             "batch_threshold": int(os.getenv("BATCH_THRESHOLD", "1000")),
             "output_directory": str(output_dir),
             "training": model_metadata.staleness("anomaly"),
+            "training_card": training_card,
         }
 
     except Exception as e:

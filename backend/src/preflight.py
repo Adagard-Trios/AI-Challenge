@@ -27,9 +27,28 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable, List, Optional
 
 logger = logging.getLogger("Roger.preflight")
+
+# Load .env here rather than relying on someone else having done it.
+#
+# This module reports missing configuration, so it must not depend on import
+# ordering to see the configuration that exists. It did at first: main.py runs
+# the preflight before the auth block, and auth/config.py is what calls
+# load_dotenv() -- so a perfectly well configured instance was reported as
+# missing GROQ_API_KEY, purely because nothing had read the file yet.
+#
+# A checker that cries wolf is worse than no checker, because the next real
+# warning gets ignored too. Same two paths auth/config.py uses.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(Path(__file__).resolve().parent.parent / ".env")   # backend/.env
+    load_dotenv()                                                   # repo-root .env
+except ImportError:  # pragma: no cover
+    pass
 
 
 def _isset(name: str) -> bool:

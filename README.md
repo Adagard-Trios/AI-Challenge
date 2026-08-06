@@ -8,11 +8,17 @@ business what just changed that affects *them* — with the reasoning attached.
 
 ## 🌐 Live Demo
 
-| Component | URL |
-|-----------|-----|
-| **Frontend Dashboard** | _Vercel — see [DEPLOY.md](DEPLOY.md)_ |
-| **Backend API** | _Render — see [DEPLOY.md](DEPLOY.md)_ |
-| **Health + configuration** | `<backend>/api/status` — reports which features are live and which are not |
+| Component | URL | Notes |
+|-----------|-----|-------|
+| **Full demo** | _paste tunnel URL_ | All **four** ML models run in-process. Self-hosted — see [HOSTING.md](HOSTING.md) |
+| **Always-on** | _paste Render/Vercel URL_ | Hosted fallback. Everything works except the three TensorFlow models, which do not fit in 512 MB |
+| **Health + configuration** | `<backend>/api/status` | Reports which features are live and which are not, by name |
+
+Two URLs because the trade-off is real and worth being explicit about: a free
+512 MB instance cannot hold TensorFlow alongside the API, so weather, currency
+and stock predictions only exist on a machine with room for them. The hosted
+deployment stays up regardless and says plainly which capabilities it is
+missing rather than showing cards that look broken.
 
 ---
 

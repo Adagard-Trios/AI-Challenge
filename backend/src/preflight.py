@@ -93,6 +93,20 @@ class Preflight:
 def _database_check() -> Check:
     url = (os.getenv("DATABASE_URL") or "").strip()
     if not url:
+        # The SQLite fallback is only dangerous where the disk is disposable.
+        # On a laptop it is an ordinary file that survives reboots, so calling
+        # it data loss would be false -- and a warning that is wrong in your
+        # situation is a warning you learn to ignore.
+        if _flag("PUBLIC_HOSTING"):
+            return Check(
+                "DATABASE_URL",
+                ok=True,
+                consequence=(
+                    "Unset, so accounts live in a local SQLite file. Durable on "
+                    "this machine -- back up backend/data/auth.db, since it is "
+                    "now the only copy."
+                ),
+            )
         return Check(
             "DATABASE_URL",
             ok=False,
@@ -183,15 +197,72 @@ def _secret_check() -> Check:
 def _auth_enforced_check() -> Check:
     if _flag("AUTH_ENFORCED"):
         return Check("AUTH_ENFORCED", ok=True, consequence="API routes require a token.")
+
+    # "Acceptable locally" stops being true the moment localhost is on the
+    # internet. Hosting from a laptop behind a tunnel is a reasonable choice --
+    # it is the only way to run all four ML models -- but it turns this from a
+    # development convenience into an open door on a personal machine.
+    public = _flag("PUBLIC_HOSTING")
     return Check(
         "AUTH_ENFORCED",
         ok=False,
-        severity="warning",
+        severity="error" if public else "warning",
         consequence=(
+            "Every API route is publicly readable AND writable, including the "
+            "connector pairing endpoints -- so anyone with the URL can pair "
+            "their own connector to this instance."
+            if public else
             "Every API route is publicly readable AND writable, including "
             "connector pairing. Acceptable locally; not in production."
         ),
-        detail="Set to 1 once the frontend sends tokens.",
+        detail=(
+            "PUBLIC_HOSTING=1 means this machine is reachable from the "
+            "internet. Set AUTH_ENFORCED=1."
+            if public else
+            "Set to 1 once the frontend sends tokens."
+        ),
+    )
+
+
+def _public_exposure_check() -> Check:
+    """
+    Extra care when the server is a laptop on a tunnel rather than a container.
+
+    Hosting locally is a legitimate trade-off -- a 512 MB free instance cannot
+    hold TensorFlow, so weather, currency and stock predictions only exist on a
+    real machine. The cost is that the machine is someone's own, and the blast
+    radius of a mistake is their filesystem rather than a disposable container.
+    """
+    if not _flag("PUBLIC_HOSTING"):
+        return Check(
+            "PUBLIC_HOSTING",
+            ok=True,
+            consequence="Not marked as publicly exposed.",
+        )
+
+    problems = []
+    if not _flag("AUTH_ENFORCED"):
+        problems.append("AUTH_ENFORCED is off")
+    if not _isset("CORS_ALLOW_ORIGINS"):
+        problems.append("CORS_ALLOW_ORIGINS is unset, so CORS falls back to '*'")
+    if not _isset("AUTH_SECRET"):
+        problems.append("AUTH_SECRET is unset, so sessions die on every restart")
+
+    if problems:
+        return Check(
+            "PUBLIC_HOSTING",
+            ok=False,
+            consequence=(
+                "This machine is exposed to the internet with: "
+                + "; ".join(problems) + "."
+            ),
+            detail="Fix these before sharing the URL.",
+        )
+
+    return Check(
+        "PUBLIC_HOSTING",
+        ok=True,
+        consequence="Exposed publicly, with auth enforced and CORS locked.",
     )
 
 
@@ -299,6 +370,7 @@ CHECKS: List[Callable[[], Check]] = [
     _secret_check,
     _admin_check,
     _auth_enforced_check,
+    _public_exposure_check,
     _groq_check,
     _cors_check,
     _anomaly_check,

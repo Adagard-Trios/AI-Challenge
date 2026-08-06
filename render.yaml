@@ -46,6 +46,45 @@ services:
       - key: GROQ_API_KEY
         sync: false
 
+      # --- Accounts and sessions -------------------------------------------
+      #
+      # Without DATABASE_URL the service silently falls back to a SQLite file on
+      # the container's ephemeral disk, so every account, exposure profile,
+      # story and paired device is destroyed on the next deploy or spin-down.
+      # It looks like it works right up until it doesn't.
+      #
+      # Use the Supabase TRANSACTION POOLER (port 6543), not the direct 5432
+      # connection: Supabase's direct host is IPv6-only on new projects and
+      # Render's outbound is not guaranteed IPv6. auth/db.py detects :6543 and
+      # switches to NullPool with prepared statements disabled, which is what
+      # PgBouncer transaction mode requires.
+      #
+      #   postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:6543/postgres
+      - key: DATABASE_URL
+        sync: false
+
+      # HS256 signing key, >= 32 chars. Render generates and stores it; leaving
+      # it unset makes auth/config.py mint a random key per boot, which
+      # invalidates every session on every restart.
+      - key: AUTH_SECRET
+        generateValue: true
+
+      # 1 = tokens are required. Keep this on in production: with it off, every
+      # API route is publicly readable AND writable, including the connector
+      # pairing endpoints.
+      - key: AUTH_ENFORCED
+        value: "1"
+
+      # There is no self-registration, so the FIRST user can only come from
+      # here. With these unset, _seed_admin() returns early and nobody can ever
+      # log in -- the whole authenticated surface is unreachable.
+      # Seeded once, only into an empty user table; change the password after
+      # the first login.
+      - key: BOOTSTRAP_ADMIN_EMAIL
+        sync: false
+      - key: BOOTSTRAP_ADMIN_PASSWORD
+        sync: false
+
       # --- Deployment safety ---
       # Do NOT train inside the web service: it OOMs even a 2 GB instance (let
       # alone free's 512 MB) and delays the $PORT bind past the health-check
@@ -80,6 +119,24 @@ services:
         value: /app/backend/data/chromadb
       - key: CSV_EXPORT_DIR
         value: /app/backend/data/feeds
+
+      # --- ML inference mode -----------------------------------------------
+      #
+      # {WEATHER,CURRENCY,STOCK,ANOMALY}_SERVICE_URL are deliberately NOT
+      # declared. src/model_gateway.py treats an unset URL as "run this model
+      # in-process", which is what we want on a single free instance:
+      #
+      #   anomaly  -> RUNS HERE. Its artifacts are scikit-learn .joblib
+      #               (isolation forest, DBSCAN, LOF, k-means), and the slim
+      #               requirement set installs scikit-learn for exactly this.
+      #   weather, currency, stock
+      #            -> report "unavailable". They are Keras .h5 and need
+      #               TensorFlow, which does not fit in 512 MB alongside the
+      #               API. Set their *_SERVICE_URL to a dedicated instance to
+      #               enable them; until then the UI says so rather than
+      #               showing a card that looks broken.
+      - key: ML_INFERENCE_NOTE
+        value: "anomaly=in-process; weather/currency/stock=needs TF service"
 
       # --- Optional integrations (leave unset to disable) ---
       - key: NEO4J_ENABLED

@@ -19,7 +19,7 @@ import {
   Plug, RefreshCw, ShieldCheck, Trash2, XCircle,
 } from "lucide-react";
 
-import { api, apiGet } from "@/app/lib/api";
+import { API_BASE, api, apiGet } from "@/app/lib/api";
 
 interface Connection {
   platform: string;
@@ -193,15 +193,50 @@ export default function ConnectedAccounts() {
               </button>
               <span className="text-xs text-slate-500">expires in 10 minutes</span>
             </div>
-            <div className="rounded bg-slate-900/60 p-3 font-mono text-xs text-slate-300">
-              <div className="mb-1 text-slate-500">On your computer:</div>
-              python -m connector pair {pairCode} --server {typeof window !== "undefined" ? window.location.origin.replace(/^https?:\/\/[^/]*$/, "") || "<backend-url>" : "<backend-url>"}
+            {/* The server here is the BACKEND, which on Render is a different
+                host from this page. The previous version built it from
+                window.location.origin with a regex that matched the whole
+                origin and replaced it with "" -- so the `||` fallback always
+                fired and every user was shown the literal placeholder
+                <backend-url>, which is unusable. API_BASE is the value that is
+                actually correct and it is already configured. */}
+            <div className="space-y-2 rounded bg-slate-900/60 p-3 font-mono text-xs text-slate-300">
+              <div>
+                <div className="mb-1 font-sans text-slate-500">
+                  1. Pair this computer:
+                </div>
+                <div className="break-all">
+                  python -m connector pair {pairCode} --server {API_BASE}
+                </div>
+              </div>
+              <div>
+                <div className="mb-1 font-sans text-slate-500">
+                  2. Save a login (stays on your computer, encrypted):
+                </div>
+                <div className="break-all">
+                  python -m connector credentials set linkedin
+                </div>
+              </div>
+              <div>
+                <div className="mb-1 font-sans text-slate-500">
+                  3. Sign in — opens your browser, you complete any 2FA:
+                </div>
+                <div className="break-all">
+                  python -m connector connect linkedin
+                </div>
+              </div>
             </div>
+            <p className="text-xs text-slate-400">
+              Step 2 is optional and only pre-fills the login form. Your password
+              is encrypted on your own machine and is never sent here — this
+              server has no endpoint that accepts one.
+            </p>
           </div>
         ) : (
           <p className="text-xs text-slate-400">
             The connector runs on your computer and does the collecting. Pair it
-            once, then connect your accounts there.
+            once, then connect your accounts there. Passwords and session cookies
+            stay on your machine.
           </p>
         )}
       </div>

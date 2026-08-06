@@ -18,6 +18,7 @@ from src.utils.tool_factory import create_tool_set
 from src.utils.utils import tool_dmc_alerts, tool_weather_nowcast, tool_rivernet_status
 from src.llms.groqllm import GroqLLM
 from pathlib import Path
+from src.intelligence.summaries import build_summary, truncate
 
 
 class MeteorologicalAgentNode:
@@ -735,7 +736,7 @@ Source: Multi-platform aggregation (DMC, MetDept, RiverNet, Twitter, Facebook, L
                 {
                     "source_event_id": str(uuid.uuid4()),
                     "domain": "meteorological",
-                    "summary": f"{detected_district}: {alert_text[:200]}",
+                    "summary": build_summary(detected_district, alert_text),
                     "severity": "high" if change_detected else "medium",
                     "impact_type": "risk",
                     "timestamp": timestamp,
@@ -769,7 +770,7 @@ Source: Multi-platform aggregation (DMC, MetDept, RiverNet, Twitter, Facebook, L
                     {
                         "source_event_id": str(uuid.uuid4()),
                         "domain": "meteorological",
-                        "summary": f"{district.title()}: {post_text[:200]}",
+                        "summary": build_summary(district.title(), post_text),
                         "severity": severity,
                         "impact_type": "risk" if severity != "low" else "opportunity",
                         "timestamp": timestamp,
@@ -786,7 +787,7 @@ Source: Multi-platform aggregation (DMC, MetDept, RiverNet, Twitter, Facebook, L
                 {
                     "source_event_id": str(uuid.uuid4()),
                     "domain": "meteorological",
-                    "summary": f"Sri Lanka Weather: {post_text[:200]}",
+                    "summary": build_summary("Sri Lanka Weather", post_text),
                     "severity": "medium",
                     "impact_type": "risk",
                     "timestamp": timestamp,
@@ -800,7 +801,7 @@ Source: Multi-platform aggregation (DMC, MetDept, RiverNet, Twitter, Facebook, L
                 "structured_data": structured_feeds,
                 "river_data": river_data,  # NEW: Include river data
                 "domain": "meteorological",
-                "summary": f"Sri Lanka Meteorological Summary: {llm_summary[:300]}",
+                "summary": f"Sri Lanka Meteorological Summary: {truncate(llm_summary, 300)}",
                 "severity": "high" if change_detected else "medium",
                 "impact_type": "risk",
             }

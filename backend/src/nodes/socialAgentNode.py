@@ -18,6 +18,7 @@ from datetime import datetime
 from src.states.socialAgentState import SocialAgentState
 from src.utils.tool_factory import create_tool_set
 from src.llms.groqllm import GroqLLM
+from src.intelligence.summaries import build_summary, truncate
 
 
 def load_intel_config() -> dict:
@@ -853,7 +854,7 @@ Source: Multi-platform aggregation (Twitter, Facebook, LinkedIn, Instagram, Redd
                     {
                         "source_event_id": str(uuid.uuid4()),
                         "domain": "social",
-                        "summary": f"{detected_district}: {post_text[:200]}",
+                        "summary": build_summary(detected_district, post_text),
                         "severity": severity,
                         "impact_type": (
                             "risk" if severity in ["high", "medium"] else "opportunity"
@@ -869,7 +870,7 @@ Source: Multi-platform aggregation (Twitter, Facebook, LinkedIn, Instagram, Redd
                 "source_event_id": str(uuid.uuid4()),
                 "structured_data": structured_feeds,
                 "domain": "social",
-                "summary": f"📊 Social Intelligence Summary: {llm_summary[:300]}",
+                "summary": f"📊 Social Intelligence Summary: {truncate(llm_summary, 300)}",
                 "severity": "medium",
                 "impact_type": "risk",
                 "is_llm_generated": True,

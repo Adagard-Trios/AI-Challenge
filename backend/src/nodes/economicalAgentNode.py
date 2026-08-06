@@ -15,6 +15,7 @@ from src.states.economicalAgentState import EconomicalAgentState
 from src.utils.tool_factory import create_tool_set
 from src.llms.groqllm import GroqLLM
 from pathlib import Path
+from src.intelligence.summaries import build_summary, truncate
 
 
 class EconomicalAgentNode:
@@ -558,7 +559,9 @@ Source: Multi-platform aggregation (Twitter, Facebook, LinkedIn, Instagram, Redd
                     {
                         "source_event_id": str(uuid.uuid4()),
                         "domain": "economical",
-                        "summary": f"Sri Lanka Economy ({category.title()}): {post_text[:200]}",
+                        "summary": build_summary(
+                            f"Sri Lanka Economy ({category.title()})", post_text
+                        ),
                         "severity": severity,
                         "impact_type": impact,
                         "timestamp": timestamp,
@@ -571,7 +574,7 @@ Source: Multi-platform aggregation (Twitter, Facebook, LinkedIn, Instagram, Redd
                 "source_event_id": str(uuid.uuid4()),
                 "structured_data": structured_feeds,
                 "domain": "economical",
-                "summary": f"Sri Lanka Economic Summary: {llm_summary[:300]}",
+                "summary": f"Sri Lanka Economic Summary: {truncate(llm_summary, 300)}",
                 "severity": "medium",
                 "impact_type": "risk",
             }

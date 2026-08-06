@@ -25,6 +25,7 @@ from src.utils.db_manager import (
     ChromaDBManager,
     extract_post_data,
 )
+from src.intelligence.summaries import build_summary, truncate
 
 logger = logging.getLogger("Roger.intelligence")
 
@@ -640,7 +641,7 @@ Source: Multi-platform competitive intelligence (Twitter, Facebook, LinkedIn, In
                         {
                             "source_event_id": str(uuid.uuid4()),
                             "domain": "intelligence",
-                            "summary": f"Competitor ({competitor}): {post_text[:200]}",
+                            "summary": build_summary(f"Competitor ({competitor})", post_text),
                             "severity": severity,
                             "impact_type": "risk",
                             "timestamp": timestamp,
@@ -654,7 +655,7 @@ Source: Multi-platform competitive intelligence (Twitter, Facebook, LinkedIn, In
                 "source_event_id": str(uuid.uuid4()),
                 "structured_data": structured_feeds,
                 "domain": "intelligence",
-                "summary": f"📊 Business Intelligence Summary: {llm_summary[:300]}",
+                "summary": f"📊 Business Intelligence Summary: {truncate(llm_summary, 300)}",
                 "severity": "medium",
                 "impact_type": "risk",
                 "is_llm_generated": True,

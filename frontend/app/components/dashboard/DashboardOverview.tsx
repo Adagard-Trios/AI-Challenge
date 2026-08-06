@@ -10,6 +10,7 @@ import EconomicIndicators from "./EconomicIndicators";
 import HealthAlerts from "./HealthAlerts";
 import CommodityPrices from "./CommodityPrices";
 import WaterSupplyStatus from "./WaterSupplyStatus";
+import { formatTime } from "@/app/lib/format";
 
 const DashboardOverview = () => {
   // Get data from hook (fetched via various /api/ endpoints)
@@ -108,7 +109,7 @@ const DashboardOverview = () => {
             </>
           )}
           <Badge className="font-mono text-xs">
-            {new Date(dashboard.last_updated).toLocaleTimeString()}
+            {formatTime(dashboard.last_updated)}
           </Badge>
         </div>
       </Card>

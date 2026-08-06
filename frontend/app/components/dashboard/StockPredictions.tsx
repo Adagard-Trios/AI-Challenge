@@ -8,6 +8,7 @@ import { useRogerData } from "../../hooks/use-roger-data";
 import { useState, useEffect } from "react";
 import ModelStaleness, { type TrainingInfo } from "./ModelStaleness";
 import { API_BASE, apiFetch } from "@/app/lib/api";
+import { formatTime } from "@/app/lib/format";
 
 
 interface StockPrediction {
@@ -202,7 +203,7 @@ const StockPredictions = () => {
         {predictions && (
           <div className="mt-4 text-xs text-muted-foreground flex justify-between">
             <span>Prediction for: {predictions.prediction_date}</span>
-            <span>Generated: {new Date(predictions.generated_at).toLocaleTimeString()}</span>
+            <span>Generated: {formatTime(predictions.generated_at)}</span>
           </div>
         )}
 

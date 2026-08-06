@@ -6,8 +6,11 @@ Two routes, because one of them needs no installer:
 
 1. ``login`` -- opens a REAL, VISIBLE browser at the platform's own login page.
    The user signs in normally: password manager, passkey, 2FA, whatever they
-   already use. Nothing types their password, and this tool never sees it. When
-   they confirm, the resulting session is captured and encrypted locally.
+   already use. If they have saved credentials in the local vault
+   (connector/vault.py) the username and password fields are pre-filled; the
+   form is never submitted automatically and no challenge is ever answered for
+   them. The password lives encrypted on this machine and is never sent to the
+   server. When they confirm, the session is captured and encrypted locally.
 
 2. ``paste`` -- accepts a storage_state JSON exported from DevTools. Uglier, but
    it needs no packaged binary, so the whole pipeline is testable before code
@@ -90,7 +93,11 @@ def _detect_handle(page, platform: str) -> Optional[str]:
     return None
 
 
-def connect_via_login(platform: str, store: Optional[SessionStore] = None) -> dict:
+def connect_via_login(
+    platform: str,
+    store: Optional[SessionStore] = None,
+    prefill: Optional[dict] = None,
+) -> dict:
     """
     Open a visible browser, let the user sign in, capture the session.
 
@@ -122,6 +129,16 @@ def connect_via_login(platform: str, store: Optional[SessionStore] = None) -> di
             page = context.new_page()
             page.goto(LOGIN_URLS[platform], wait_until="domcontentloaded")
 
+            # Pre-fill from the local vault if the user saved credentials.
+            #
+            # This types the username and password into the platform's own
+            # login form and stops. It does NOT submit, and it does not touch
+            # 2FA, captcha or passkey -- the human does those. Automating the
+            # whole login is what turns a device-verification challenge into a
+            # lockout, and the challenge exists to be answered by a person.
+            if prefill:
+                _prefill_login(page, platform, prefill)
+
             input("Press Enter here once you are signed in and can see your feed... ")
 
             raw_state = context.storage_state()
@@ -130,6 +147,59 @@ def connect_via_login(platform: str, store: Optional[SessionStore] = None) -> di
             browser.close()
 
     return _persist(platform, raw_state, handle, store)
+
+
+# Login-form fields, per platform. Only the username and password inputs -- no
+# submit button, deliberately. Best-effort: a miss means the user types it
+# themselves, which is the pre-existing behaviour and not a failure.
+LOGIN_FIELDS = {
+    "twitter": ('input[name="text"]', 'input[name="password"]'),
+    "linkedin": ("#username", "#password"),
+    "facebook": ("#email", "#pass"),
+    "instagram": ('input[name="username"]', 'input[name="password"]'),
+    "reddit": ('input[name="username"]', 'input[name="password"]'),
+}
+
+
+def _prefill_login(page, platform: str, credentials: dict) -> None:
+    """
+    Type the saved username and password into the platform's own login form.
+
+    Stops there. Submitting, 2FA, captcha and passkey are left to the human --
+    partly because automating them is what escalates a routine device
+    verification into a lockout, and partly because a challenge is meant to
+    prove a person is present, and one is.
+
+    X in particular asks for the username first and reveals the password field
+    only after "Next", so the password fill is expected to miss there. That is
+    fine; the field is visible on screen by the time the user needs it.
+    """
+    fields = LOGIN_FIELDS.get(platform)
+    if not fields:
+        return
+
+    username_sel, password_sel = fields
+    filled = []
+
+    for selector, value, label in (
+        (username_sel, credentials.get("username"), "username"),
+        (password_sel, credentials.get("password"), "password"),
+    ):
+        if not value:
+            continue
+        try:
+            field = page.locator(selector).first
+            field.wait_for(state="visible", timeout=5000)
+            field.fill(value)
+            filled.append(label)
+        except Exception:
+            # Layouts change and multi-step flows hide fields. Not an error.
+            continue
+
+    if filled:
+        print(f"  Pre-filled: {', '.join(filled)}. Complete any 2FA in the window.")
+    else:
+        print("  Could not pre-fill the form -- sign in as usual.")
 
 
 def connect_via_paste(platform: str, state_json: str,

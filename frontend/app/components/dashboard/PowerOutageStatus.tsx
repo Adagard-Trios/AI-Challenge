@@ -4,6 +4,7 @@ import { Card } from "../ui/card";
 import { Badge } from "../ui/badge";
 import { Zap, AlertTriangle, CheckCircle } from "lucide-react";
 import DataProvenance from "./DataProvenance";
+import { formatTime } from "@/app/lib/format";
 
 interface PowerStatusProps {
     powerData?: Record<string, unknown> | null;
@@ -77,7 +78,7 @@ const PowerOutageStatus = ({ powerData }: PowerStatusProps) => {
 
             {fetchedAt && (
                 <p className="text-xs text-muted-foreground mt-2">
-                    Updated: {new Date(fetchedAt).toLocaleTimeString()}
+                    Updated: {formatTime(fetchedAt as string)}
                 </p>
             )}
         </Card>

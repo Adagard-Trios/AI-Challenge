@@ -5,6 +5,7 @@ import { Badge } from "../ui/badge";
 import { Waves, AlertTriangle, CheckCircle, TrendingUp, Clock } from "lucide-react";
 import { motion } from "framer-motion";
 import DataProvenance from "./DataProvenance";
+import { formatMeasure, formatTime } from "@/app/lib/format";
 
 // Mirrors what GET /api/rivernet actually returns (fetch_rivernet_levels in
 // backend/src/utils/utils.py). The previous shape -- location_key, status,
@@ -206,7 +207,7 @@ const RiverNetStatus = ({ riverData, compact = false }: RiverNetStatusProps) => 
                         />
                     </div>
                     <p className="text-xs text-muted-foreground mt-1">
-                        {new Date(fetched_at).toLocaleTimeString()}
+                        {formatTime(fetched_at)}
                     </p>
                 </div>
             </div>
@@ -272,8 +273,8 @@ const RiverNetStatus = ({ riverData, compact = false }: RiverNetStatusProps) => 
                                         <p className="text-xs text-muted-foreground">{river.region}</p>
                                         {river.reporting && river.level_m !== null && (
                                             <p className={`text-xs font-mono ${config.textColor} mt-1`}>
-                                                Level: {river.level_m}m
-                                                {river.max_level_m ? ` / ${river.max_level_m}m` : ""}
+                                                Level: {formatMeasure(river.level_m, "m")}
+                                                {river.max_level_m ? ` / ${formatMeasure(river.max_level_m, "m")}` : ""}
                                                 {river.trend && river.trend !== "unknown"
                                                     ? ` (${river.trend})`
                                                     : ""}

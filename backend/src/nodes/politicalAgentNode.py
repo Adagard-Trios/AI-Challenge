@@ -15,6 +15,7 @@ from src.states.politicalAgentState import PoliticalAgentState
 from src.utils.tool_factory import create_tool_set
 from src.llms.groqllm import GroqLLM
 from pathlib import Path
+from src.intelligence.summaries import build_summary, truncate
 
 
 class PoliticalAgentNode:
@@ -622,7 +623,7 @@ Source: Multi-platform aggregation (Twitter, Facebook, LinkedIn, Instagram, Redd
                     {
                         "source_event_id": str(uuid.uuid4()),
                         "domain": "political",
-                        "summary": f"{detected_district} Political: {post_text[:200]}",
+                        "summary": build_summary(f"{detected_district} Political", post_text),
                         "severity": severity,
                         "impact_type": impact,
                         "timestamp": timestamp,
@@ -635,7 +636,7 @@ Source: Multi-platform aggregation (Twitter, Facebook, LinkedIn, Instagram, Redd
                 "source_event_id": str(uuid.uuid4()),
                 "structured_data": structured_feeds,
                 "domain": "political",
-                "summary": f"Sri Lanka Political Summary: {llm_summary[:300]}",
+                "summary": f"Sri Lanka Political Summary: {truncate(llm_summary, 300)}",
                 "severity": "medium",
                 "impact_type": "risk",
             }

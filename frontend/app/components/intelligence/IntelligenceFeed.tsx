@@ -9,6 +9,7 @@ import { useState } from "react";
 import IntelligenceSettings from "./IntelligenceSettings";
 import RelevanceBadge from "./RelevanceBadge";
 import WhyThisEvent from "./WhyThisEvent";
+import { formatExact, formatWhen } from "@/app/lib/format";
 
 const IntelligenceFeed = () => {
   const { events, isConnected } = useRogerData();
@@ -130,8 +131,8 @@ const IntelligenceFeed = () => {
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <span>Confidence: {Math.round((item.confidence ?? 0) * 100)}%</span>
                 <span>•</span>
-                <span className="font-mono">
-                  {item.timestamp ? new Date(item.timestamp).toLocaleTimeString() : ""}
+                <span className="font-mono" title={formatExact(item.timestamp)}>
+                  {formatWhen(item.timestamp)}
                 </span>
               </div>
 

@@ -111,12 +111,30 @@ def annotate(
     # reorder the global feed to suit whoever asked last.
     events = [dict(event) for event in events]
 
+    # Hydrate entities before anything else, and for everyone.
+    #
+    # Two reasons this is not inside the exposure branch. First, the entity
+    # chips are "what is this event about", which is worth showing whether or
+    # not a profile exists. Second, /api/feeds rebuilds events from the database
+    # through a field whitelist that cannot carry entities -- they live in the
+    # entity store, not in the SQLite row -- so without this the same event
+    # showed chips when it arrived over the websocket and none after a page
+    # reload. That is the same inconsistency the whitelist comment in main.py
+    # already describes for region and fake_news_score, one field later.
+    entities_by_event = _entities_for(events)
+
+    for event in events:
+        if not event.get("entities"):
+            hydrated = entities_by_event.get(event.get("event_id"))
+            if hydrated:
+                event["entities"] = hydrated
+                # The model did run -- these came from it, via the store.
+                event.setdefault("entities_extracted", True)
+
     if exposure is None:
         for event in events:
             event["relevance"] = None
         return events
-
-    entities_by_event = _entities_for(events)
 
     for event in events:
         scored = score_event(

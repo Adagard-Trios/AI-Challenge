@@ -383,3 +383,105 @@ def test_the_postgres_store_imports_the_real_session_factory():
     import auth.db
 
     assert hasattr(auth.db, "session_factory")
+
+
+# --- entity chips survive a page reload -------------------------------------
+
+def test_entities_are_hydrated_even_without_an_exposure_profile():
+    """
+    REGRESSION. /api/feeds rebuilds events from the database through a field
+    whitelist, and entities do not live in that row -- they are in the entity
+    store. So the same event showed entity chips when it arrived over the
+    websocket and none after a page reload, which is exactly the inconsistency
+    the whitelist comment in main.py already describes for region and
+    fake_news_score.
+
+    Hydration deliberately runs before the exposure check: chips are "what is
+    this event about", which is worth showing whether or not a profile exists.
+    """
+    from src.intelligence import feed_relevance
+
+    class FakeStore:
+        def entities_for(self, ids):
+            return {"e2": [{"type": "PLACE", "name": "Port of Colombo",
+                            "role": "affected"}]}
+
+    # _entities_for imports get_entity_store inside the function, so the patch
+    # has to land on the source module rather than on feed_relevance.
+    from src.intelligence import entity_store as entity_store_module
+
+    original = entity_store_module.get_entity_store
+    entity_store_module.get_entity_store = lambda: FakeStore()
+    try:
+        events = [
+            {"event_id": "e1", "summary": "has them inline",
+             "entities": [{"type": "PLACE", "name": "Kandy", "role": "affected"}]},
+            {"event_id": "e2", "summary": "only in the store"},
+            {"event_id": "e3", "summary": "genuinely names nothing"},
+        ]
+        out = feed_relevance.annotate(events, None)   # no profile at all
+    finally:
+        entity_store_module.get_entity_store = original
+
+    by_id = {e["event_id"]: e for e in out}
+    assert [x["name"] for x in by_id["e1"]["entities"]] == ["Kandy"]
+    assert [x["name"] for x in by_id["e2"]["entities"]] == ["Port of Colombo"]
+    assert by_id["e2"]["entities_extracted"] is True
+    assert not by_id["e3"].get("entities")
+
+    # And the shared feed dicts must still not be written through.
+    assert "entities" not in events[1], "annotate mutated the caller's event"
+
+
+def test_the_feeds_endpoint_carries_entities_through_its_whitelist():
+    """
+    The whitelist is explicit, so a new field is dropped unless someone adds
+    it. That has now happened twice; this is the guard.
+    """
+    import ast
+    from pathlib import Path
+
+    source = (Path(__file__).parent.parent.parent / "main.py").read_text(
+        encoding="utf-8")
+    tree = ast.parse(source)
+
+    fn = next(
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef) and n.name == "get_feeds_from_db"
+    )
+    body = ast.get_source_segment(source, fn) or ""
+
+    for field in ("entities", "entities_extracted", "region",
+                  "fake_news_score", "llm_filtered"):
+        assert f'"{field}"' in body, (
+            f"the /api/feeds whitelist drops {field!r}, so it is present on the "
+            "live websocket feed and absent after a page reload"
+        )
+
+
+def test_events_are_stored_with_their_entities():
+    """
+    store_event() accepts entities and links them for relevance scoring. The
+    graph-streaming call site did not pass them, so events stored on that path
+    were invisible to a user's exposure profile.
+    """
+    import ast
+    from pathlib import Path
+
+    source = (Path(__file__).parent.parent.parent / "main.py").read_text(
+        encoding="utf-8")
+
+    calls = [
+        node for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "store_event"
+    ]
+    assert calls, "no store_event call found in main.py"
+
+    for call in calls:
+        keywords = {kw.arg for kw in call.keywords}
+        assert "entities" in keywords, (
+            "a store_event call omits entities, so relevance scoring has "
+            "nothing to join a user's exposure against"
+        )

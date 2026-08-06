@@ -627,7 +627,13 @@ def run_graph_loop():
                                         domain=domain,
                                         severity=severity,
                                         impact_type=impact_type,
-                                        confidence_score=confidence
+                                        confidence_score=confidence,
+                                        # Without this the entity store never
+                                        # learns about events stored on this
+                                        # path, so relevance scoring has nothing
+                                        # to join a user's exposure against and
+                                        # falls back to keyword matching alone.
+                                        entities=event_data.get("entities"),
                                     )
                                     logger.info(f"[GRAPH] Stored new feed: {summary[:60]}...")
                                 except Exception as storage_error:
@@ -867,6 +873,14 @@ def get_feeds_from_db(
                 "region": feed.get("region", "sri_lanka"),
                 "fake_news_score": feed.get("fake_news_score"),
                 "llm_filtered": feed.get("llm_filtered", False),
+                # Carried explicitly for the same reason as the three above.
+                # These rarely survive the round trip -- entities live in the
+                # entity store rather than the SQLite row -- so
+                # feed_relevance.annotate() hydrates them below. Passing them
+                # through here means an event that DOES have them inline is not
+                # stripped on the way out.
+                "entities": feed.get("entities", []),
+                "entities_extracted": feed.get("entities_extracted", False),
                 "timestamp": feed.get("timestamp"),
                 "district": categorize_feed_by_district(feed)
             }

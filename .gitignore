@@ -9,6 +9,14 @@ wheels/
 # Virtual environments
 .venv
 
+# Node dependencies.
+#
+# frontend/.gitignore covers frontend/node_modules, but the repo ROOT also has a
+# stray package.json (a leftover `npm i @svg-maps/sri-lanka`; the package is a
+# real dependency of frontend/ already). That made root node_modules/ untracked
+# rather than ignored, so `git add -A` would have committed it.
+node_modules/
+
 # Environment files
 .env
 

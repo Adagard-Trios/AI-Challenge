@@ -20,7 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from auth.db import get_db
+from auth.db import session_scope
 from auth.dependencies import require_user
 from auth.models import User
 
@@ -196,13 +196,20 @@ def resume(payload: PlatformIn, user: Optional[User] = Depends(require_user)):
 
 @router.post("/collect")
 def collect_now(payload: PlatformIn,
-                user: Optional[User] = Depends(require_user),
-                db: Session = Depends(get_db)):
+                user: Optional[User] = Depends(require_user)):
     """
     Collect once from a connected account and store the posts.
 
     Runs in FastAPI's threadpool -- the scrapers are synchronous and do real
     network I/O, so this must not touch the event loop.
+
+    Deliberately does NOT take Depends(get_db). FastAPI resolves dependencies
+    before the body runs, so a request-scoped session would be held for the
+    whole call -- and this call drives a Playwright browser, which is minutes.
+    That is the same mistake that exhausted the pool via require_user and made
+    every other route return 500 while naming the pool rather than the culprit.
+    The session is opened below, after the scrape, only if there is anything to
+    write.
     """
     _require(user)
     platform = _check_platform(payload.platform)
@@ -213,7 +220,8 @@ def collect_now(payload: PlatformIn,
     stored = 0
     if posts:
         try:
-            stored = _store(db, user, posts)
+            with session_scope() as db:
+                stored = _store(db, user, posts)
         except Exception:  # noqa: BLE001
             # Never lose the collection result to a storage failure.
             logger.exception("[social] could not store collected posts")

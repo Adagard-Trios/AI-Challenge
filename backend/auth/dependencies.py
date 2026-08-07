@@ -14,14 +14,14 @@ import logging
 from typing import Optional
 
 from fastapi import Depends, Header, HTTPException, status
-from sqlalchemy.orm import Session
 
 from .config import settings
-from .db import get_db
+from .db import session_scope
 from .models import ConnectorDevice, User, utcnow
 from .tokens import TokenError, TokenExpired, decode_access_token, hash_secret
 
 logger = logging.getLogger("Roger.auth.deps")
+
 
 UNAUTHENTICATED = HTTPException(
     status_code=status.HTTP_401_UNAUTHORIZED,
@@ -39,9 +39,43 @@ def _bearer(authorization: Optional[str]) -> Optional[str]:
     return token.strip()
 
 
+def _lookup_user(user_id, expected_version):
+    """
+    Resolve the token's user on a SHORT-LIVED session.
+
+    This used to take `db: Session = Depends(get_db)`, which pins a pooled
+    connection for the ENTIRE request -- FastAPI resolves dependencies before
+    the endpoint body runs, and the session is only released when the response
+    is finished.
+
+    That is fine for a fast handler and ruinous for the 37 routes that carry
+    this dependency and then do a slow network scrape. /api/commodities fetches
+    from data.humdata.org while holding a connection; the frontend polls it;
+    the pool is 15; and once those are held every other route fails with
+    "QueuePool limit of size 5 overflow 10 reached" -- an error naming the pool
+    rather than the endpoint that exhausted it, on requests that are themselves
+    innocent.
+
+    The lookup needs a connection for microseconds. Taking and returning it
+    immediately means a slow endpoint holds nothing while it waits on I/O.
+    """
+    try:
+        with session_scope() as session:
+            user = session.get(User, user_id)
+            if user is None or not user.is_active:
+                return None
+            if expected_version != user.token_version:
+                return None
+            # Detached after the session closes, so read what callers need now.
+            session.expunge(user)
+            return user
+    except Exception:  # noqa: BLE001
+        logger.exception("[auth] user lookup failed")
+        return None
+
+
 def optional_user(
     authorization: Optional[str] = Header(None),
-    db: Session = Depends(get_db),
 ) -> Optional[User]:
     """Resolve a user if a valid token is present; never raise."""
     token = _bearer(authorization)
@@ -52,18 +86,13 @@ def optional_user(
     except (TokenError, TokenExpired):
         return None
 
-    user = db.get(User, claims.get("sub"))
-    if user is None or not user.is_active:
-        return None
-    # A token issued before a forced logout carries a stale version.
-    if claims.get("ver") != user.token_version:
-        return None
-    return user
+    # A token issued before a forced logout carries a stale version, which
+    # _lookup_user rejects.
+    return _lookup_user(claims.get("sub"), claims.get("ver"))
 
 
 def require_user(
     authorization: Optional[str] = Header(None),
-    db: Session = Depends(get_db),
 ) -> Optional[User]:
     """
     Require a user when AUTH_ENFORCED=1.
@@ -95,8 +124,8 @@ def require_user(
             raise UNAUTHENTICATED
         return None
 
-    user = db.get(User, claims.get("sub"))
-    if user is None or not user.is_active or claims.get("ver") != user.token_version:
+    user = _lookup_user(claims.get("sub"), claims.get("ver"))
+    if user is None:
         if enforced:
             raise UNAUTHENTICATED
         return None
@@ -117,28 +146,43 @@ def require_admin(user: Optional[User] = Depends(require_user)) -> Optional[User
 
 def require_device(
     authorization: Optional[str] = Header(None),
-    db: Session = Depends(get_db),
 ) -> ConnectorDevice:
     """
     Authenticate a connector by its device token.
 
     Always enforced, regardless of AUTH_ENFORCED: /api/ingest writes to the feed,
     so an unauthenticated version of it would be an open write endpoint.
+
+    Short-lived session for the same reason as _lookup_user: a dependency is
+    resolved before the endpoint body runs, so a request-scoped one would pin a
+    pooled connection for the whole request.
     """
     token = _bearer(authorization)
     if not token:
         raise UNAUTHENTICATED
 
-    device = db.query(ConnectorDevice).filter(
-        ConnectorDevice.token_hash == hash_secret(token),
-        ConnectorDevice.revoked_at.is_(None),
-    ).first()
+    try:
+        with session_scope() as session:
+            device = session.query(ConnectorDevice).filter(
+                ConnectorDevice.token_hash == hash_secret(token),
+                ConnectorDevice.revoked_at.is_(None),
+            ).first()
+
+            if device is not None:
+                device.last_seen_at = utcnow()
+                session.flush()
+                # Read the attributes callers need while still attached, then
+                # detach -- expire_on_commit is off, so these stay readable.
+                session.expunge(device)
+    except HTTPException:
+        raise
+    except Exception:  # noqa: BLE001
+        logger.exception("[auth] device lookup failed")
+        raise UNAUTHENTICATED
 
     if device is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Unknown or revoked device token"
         )
 
-    device.last_seen_at = utcnow()
-    db.commit()
     return device

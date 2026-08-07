@@ -253,3 +253,84 @@ def test_the_dashboard_does_not_block_forever_on_the_first_cycle():
     assert "first collection cycle" in source.lower(), (
         "an empty dashboard does not distinguish itself from a broken one"
     )
+
+
+# --- the connection pool is not pinned by authentication --------------------
+
+def test_auth_does_not_hold_a_pooled_connection(tmp_path, monkeypatch):
+    """
+    REGRESSION. require_user took `db: Session = Depends(get_db)`, and FastAPI
+    resolves dependencies BEFORE the endpoint body runs -- so the connection
+    was held for the ENTIRE request, not just the one lookup it needs.
+
+    37 routes carry this dependency, and several of them then do a slow network
+    scrape: /api/commodities fetches from data.humdata.org while holding a
+    connection. The frontend polls it, the pool is 15, and once those are held
+    every other route fails with "QueuePool limit of size 5 overflow 10
+    reached" -- an error that names the pool rather than the endpoint that
+    exhausted it, on requests that are themselves innocent.
+    """
+    import threading
+    import time
+
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'a.db').as_posix()}")
+    monkeypatch.setenv("AUTH_SECRET", "e" * 48)
+
+    from auth import config, db as auth_db, dependencies as deps
+    from auth.models import User
+    from auth.passwords import hash_password
+    from auth.tokens import create_access_token
+
+    config.reset_settings()
+    auth_db.reset_engine()
+    auth_db.init_db()
+
+    with auth_db.session_scope() as session:
+        user = User(id="u1", email="a@b.c", role="admin", token_version=0,
+                    password_hash=hash_password("correct-horse-staple"))
+        session.add(user)
+        session.flush()
+        token = create_access_token(user)
+
+    pool = auth_db.engine().pool
+    ceiling = pool.size() + pool._max_overflow
+
+    resolved, errors = [], []
+
+    def resolve():
+        try:
+            resolved.append(deps.require_user(authorization=f"Bearer {token}") is not None)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(type(exc).__name__)
+
+    # Comfortably more concurrent callers than the pool can hold at once.
+    threads = [threading.Thread(target=resolve) for _ in range(ceiling * 2 + 10)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    time.sleep(0.3)
+
+    assert not errors, f"auth failed under concurrency: {errors[:3]}"
+    assert all(resolved) and len(resolved) == len(threads)
+    assert pool.checkedout() == 0, (
+        f"{pool.checkedout()} connection(s) still checked out after auth -- "
+        "the dependency is pinning the pool again"
+    )
+
+    config.reset_settings()
+    auth_db.reset_engine()
+
+
+def test_require_user_does_not_take_a_request_scoped_session():
+    """The shape that caused it, asserted directly."""
+    import inspect
+
+    from auth import dependencies as deps
+
+    for fn in (deps.require_user, deps.optional_user):
+        params = inspect.signature(fn).parameters
+        assert "db" not in params, (
+            f"{fn.__name__} takes a request-scoped session again; it holds a "
+            "pooled connection for the whole request"
+        )

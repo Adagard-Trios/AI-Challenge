@@ -256,3 +256,110 @@ def test_image_search_is_readable_by_any_signed_in_user():
     body = ast.get_source_segment(source, fn) or ""
     assert "require_user" in body
     assert "require_admin" not in body
+
+
+# --- both collection paths read images, not just one -------------------------
+
+def test_the_agent_path_reads_images_too():
+    """
+    REGRESSION, and the same shape as every gap before it: a feature that works
+    on one path and silently does not on the other.
+
+    Images were read in _store() -- the "Collect now" button -- and nowhere
+    else. The agent loop reaches scraping through scraper_registry.run(), so
+    automatic collection captured image URLs and threw them away. An image-only
+    flood notice collected by the agent would have arrived with no text at all.
+    """
+    source = (PROJECT_ROOT / "src" / "scrapers" / "registry.py").read_text(
+        encoding="utf-8")
+    assert "_read_images(" in source, (
+        "registry.run does not read images, so the agent loop discards them"
+    )
+
+    fn = _function(PROJECT_ROOT / "src" / "scrapers" / "registry.py", "_read_images")
+    assert "process_image" in fn
+    assert "[text in image]" in fn, "extracted text is not labelled"
+
+
+def test_the_hook_is_on_the_shared_seam():
+    """
+    run() is where the agent tools, Collect now and the selftest all arrive.
+    Enriching in a caller instead is exactly how the gap happened.
+    """
+    fn = _function(PROJECT_ROOT / "src" / "scrapers" / "registry.py", "run")
+    assert "_read_images(" in fn
+
+
+def test_reading_images_never_costs_the_posts():
+    fn = _function(PROJECT_ROOT / "src" / "scrapers" / "registry.py", "_read_images")
+    assert "except Exception" in fn
+    assert "return" in fn
+
+
+def test_posts_without_images_are_left_alone():
+    """A no-op path must not touch the text or pay for an import."""
+    from src.scrapers.registry import _read_images
+
+    payload = {"posts": [{"text": "plain post", "images": []}]}
+    _read_images(payload)
+    assert payload["posts"][0]["text"] == "plain post"
+
+
+# --- the extracted text is visible, not just stored --------------------------
+
+def test_collected_posts_api_returns_the_extracted_text():
+    """
+    Stored since the image pipeline landed and exposed nowhere, so the panel
+    could not explain why an apparently empty post had been kept -- which on an
+    image-only post is the entire content.
+    """
+    import ast
+
+    source = (PROJECT_ROOT / "auth" / "routes.py").read_text(encoding="utf-8")
+    fn = next(
+        n for n in ast.walk(ast.parse(source))
+        if isinstance(n, ast.FunctionDef) and n.name == "recent_ingested"
+    )
+    body = ast.get_source_segment(source, fn) or ""
+
+    assert '"images"' in body
+    assert '"ocr_text"' in body
+    assert '"ocr_confidence"' in body, (
+        "confidence is not exposed, so a weak read cannot be marked as one"
+    )
+
+
+def test_the_ui_marks_a_low_confidence_read():
+    panel = (
+        PROJECT_ROOT.parent / "frontend" / "app" / "components" / "settings"
+        / "CollectedPosts.tsx"
+    )
+    if not panel.exists():
+        pytest.skip("frontend not present")
+
+    text = panel.read_text(encoding="utf-8")
+    assert "Text in image" in text
+    assert "uncertain" in text.lower(), (
+        "a weak extraction is presented as if it were certainly there"
+    )
+
+
+# --- the dependencies are recorded -------------------------------------------
+
+def test_the_image_dependencies_are_declared():
+    """
+    Installed with `uv pip install`, which updates the venv and nothing else --
+    so a fresh checkout would import-error at runtime rather than fail to
+    install.
+    """
+    pyproject = (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    for package in ("imagehash", "rapidocr-onnxruntime"):
+        assert package in pyproject, f"{package} is not in pyproject.toml"
+
+    lock = (PROJECT_ROOT / "uv.lock").read_text(encoding="utf-8")
+    for package in ("imagehash", "rapidocr-onnxruntime"):
+        assert f'name = "{package}"' in lock, f"{package} is not in uv.lock"
+
+    for requirements in ("requirements.txt", "requirements-service.txt"):
+        text = (PROJECT_ROOT / requirements).read_text(encoding="utf-8")
+        assert "rapidocr" in text, f"{requirements} omits the OCR engine"

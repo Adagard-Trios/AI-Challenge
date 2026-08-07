@@ -659,5 +659,20 @@ def recent_ingested(limit: int = 50,
             "shares": p.shares,
             "comments": p.comments,
             "collected_at": p.collected_at.isoformat() if p.collected_at else None,
+            # The pictures, and anything read out of them. Stored since the
+            # image pipeline landed and exposed nowhere, so the panel could not
+            # show why an apparently empty post had been kept -- which on an
+            # image-only post is the entire content.
+            "images": [{
+                "url": i.url,
+                "ocr_text": i.ocr_text,
+                "ocr_lang": i.ocr_lang,
+                # Surfaced rather than hidden: these are natural-scene
+                # photographs, not scans, and a weak read should be marked as
+                # one instead of presented as text that was definitely there.
+                "ocr_confidence": (
+                    round(i.ocr_confidence, 3) if i.ocr_confidence is not None else None
+                ),
+            } for i in (p.images or [])],
         } for p in rows],
     }

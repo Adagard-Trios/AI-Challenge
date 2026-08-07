@@ -106,7 +106,65 @@ def run(name: str, value: str, max_items: int = 20) -> dict:
         )
 
     result: ScrapeResult = run_scrape(credential, spec.fn, value, max_items=max_items)
-    return result.as_dict()
+    payload = result.as_dict()
+    _read_images(payload)
+    return payload
+
+
+def _read_images(payload: dict) -> None:
+    """
+    Fold the text inside each post's images into that post's text.
+
+    Placed here rather than in a caller because this is the one seam every
+    scrape passes through -- the agent's LangChain tools, the dashboard's
+    "Collect now", and the selftest all arrive via run(). Enriching in a caller
+    is how the previous gap happened: images were read on the Collect-now path
+    and silently discarded on the agent loop, so automatic collection captured
+    image URLs and threw them away.
+
+    The agent then reasons over the post text with the image text already in
+    it, which is what makes an image-only flood notice classifiable at all.
+
+    Best-effort throughout: OCR is an enrichment, and losing it must never cost
+    the posts.
+    """
+    posts = payload.get("posts")
+    if not posts:
+        return
+
+    if not any(p.get("images") for p in posts if isinstance(p, dict)):
+        return
+
+    try:
+        from src.images.pipeline import process_image
+    except Exception:  # noqa: BLE001
+        return
+
+    for post in posts:
+        if not isinstance(post, dict):
+            continue
+        urls = post.get("images") or []
+        if not urls:
+            continue
+
+        extracted = []
+        for url in urls[:4]:
+            try:
+                image = process_image(url)
+            except Exception:  # noqa: BLE001
+                continue
+            if image.has_text:
+                extracted.append(image.ocr_text.strip())
+            # Carried so a caller that persists the post can record the hash
+            # without fetching the image a second time.
+            post.setdefault("image_hashes", []).append(image.phash)
+
+        if extracted:
+            # Labelled, so a reader can tell a typed caption from a machine
+            # reading a photograph -- they warrant different trust.
+            joined = "\n[text in image] ".join(extracted)
+            post["text"] = f"{post.get('text', '')}\n\n[text in image] {joined}".strip()
+            post["ocr_text"] = "\n".join(extracted)
 
 
 def session_dependent_names() -> list:

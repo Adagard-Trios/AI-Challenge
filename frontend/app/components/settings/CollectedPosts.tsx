@@ -18,10 +18,22 @@
  */
 
 import React, { useCallback, useEffect, useState } from "react";
-import { Inbox, MessageSquare, RefreshCw, Repeat2, ThumbsUp } from "lucide-react";
+import {
+  Inbox, MessageSquare, RefreshCw, Repeat2, ScanText, ThumbsUp,
+} from "lucide-react";
 
 import { apiGet } from "@/app/lib/api";
 import { formatCount, formatExact, formatWhen } from "@/app/lib/format";
+
+interface PostImage {
+  url: string;
+  ocr_text: string | null;
+  ocr_lang: string | null;
+  /** 0-1. Low values are marked rather than hidden — these are photographs,
+   *  not scans, so a weak read should not read as text that was certainly
+   *  there. Sinhala in particular is poorly served by every general engine. */
+  ocr_confidence: number | null;
+}
 
 interface Post {
   platform: string;
@@ -33,6 +45,7 @@ interface Post {
   shares: number;
   comments: number;
   collected_at: string | null;
+  images: PostImage[];
 }
 
 const PLATFORM_TONE: Record<string, string> = {
@@ -144,9 +157,53 @@ const CollectedPosts = () => {
               </span>
             </div>
 
-            <p className="whitespace-pre-wrap text-sm leading-snug text-slate-200">
-              {post.text.length > 400 ? `${post.text.slice(0, 400)}…` : post.text}
-            </p>
+            {post.text ? (
+              <p className="whitespace-pre-wrap text-sm leading-snug text-slate-200">
+                {post.text.length > 400 ? `${post.text.slice(0, 400)}…` : post.text}
+              </p>
+            ) : (
+              <p className="text-sm italic text-slate-500">
+                No caption — this post is the image.
+              </p>
+            )}
+
+            {/* What was read out of the pictures. Shown separately from the
+                caption because a machine reading a photograph and a human
+                typing a sentence deserve different trust. */}
+            {(post.images ?? []).filter((i) => i.ocr_text).map((image, i) => (
+              <div
+                key={`${image.url}-${i}`}
+                className="mt-2 rounded border border-slate-700/50 bg-slate-900/40 p-2"
+              >
+                <div className="mb-1 flex items-center gap-2 text-xs text-slate-400">
+                  <ScanText className="h-3 w-3" />
+                  <span>Text in image</span>
+                  {image.ocr_lang && image.ocr_lang !== "unknown" && (
+                    <span className="rounded bg-slate-700 px-1 py-0.5">
+                      {image.ocr_lang}
+                    </span>
+                  )}
+                  {image.ocr_confidence !== null && (
+                    <span
+                      className={
+                        image.ocr_confidence < 0.6 ? "text-amber-400" : "text-slate-500"
+                      }
+                      title={
+                        image.ocr_confidence < 0.6
+                          ? "Low confidence — treat this as uncertain."
+                          : "Extraction confidence"
+                      }
+                    >
+                      {Math.round(image.ocr_confidence * 100)}% confident
+                      {image.ocr_confidence < 0.6 && " — uncertain"}
+                    </span>
+                  )}
+                </div>
+                <p className="whitespace-pre-wrap text-xs text-slate-300">
+                  {image.ocr_text}
+                </p>
+              </div>
+            ))}
 
             <div className="mt-2 flex items-center gap-4 text-xs text-slate-500">
               <span className="flex items-center gap-1">

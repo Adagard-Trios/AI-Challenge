@@ -48,8 +48,8 @@ def _up(url: str) -> bool:
 
 
 @pytest.fixture(scope="module")
-def page():
-    """One browser for the module; each test navigates fresh."""
+def browser():
+    """One browser process for the module -- launching is the expensive part."""
     if not _up(FRONTEND):
         pytest.skip(f"frontend not running at {FRONTEND}")
     if not _up(f"{BACKEND}/api/status"):
@@ -58,18 +58,39 @@ def page():
     playwright = pytest.importorskip("playwright.sync_api")
 
     with playwright.sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        ctx = browser.new_context(viewport={"width": 1400, "height": 1000})
-        pg = ctx.new_page()
+        instance = p.chromium.launch(headless=True)
+        yield instance
+        instance.close()
 
-        # Console errors are the cheapest signal there is and catch most
-        # "it renders but is broken" cases.
-        pg.errors = []          # type: ignore[attr-defined]
-        pg.on("console", lambda m: m.type == "error" and pg.errors.append(m.text))
-        pg.on("pageerror", lambda e: pg.errors.append(f"uncaught: {e}"))
 
-        yield pg
-        browser.close()
+@pytest.fixture
+def page(browser):
+    """
+    A fresh page and context PER TEST.
+
+    Deliberately not module-scoped. Sharing one page made two separate failures
+    that passed in isolation and failed in the suite: console errors from an
+    earlier test's navigation landed in a later test's list, and the
+    registration test found no "Sign in" button because a sign-in test had
+    already authenticated. Clearing state at the top of each helper patched
+    both symptoms and left the cause -- a request that rejects after the clear
+    still lands in the next test's bucket.
+
+    A new context also means a new localStorage, so auth state cannot leak
+    between tests either. The cost is a context per test; the browser itself
+    is still launched once.
+    """
+    ctx = browser.new_context(viewport={"width": 1400, "height": 1000})
+    pg = ctx.new_page()
+
+    # Console errors are the cheapest signal there is and catch most
+    # "it renders but is broken" cases.
+    pg.errors = []          # type: ignore[attr-defined]
+    pg.on("console", lambda m: m.type == "error" and pg.errors.append(m.text))
+    pg.on("pageerror", lambda e: pg.errors.append(f"uncaught: {e}"))
+
+    yield pg
+    ctx.close()
 
 
 def _load(page, tab: str | None = None) -> str:

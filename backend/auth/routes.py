@@ -11,6 +11,7 @@ duplicate-registration bugs.
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
@@ -76,6 +77,12 @@ class RefreshRequest(BaseModel):
 
 class AcceptInviteRequest(BaseModel):
     token: str
+    password: str
+    display_name: Optional[str] = None
+
+
+class RegisterRequest(_EmailModel):
+    email: str
     password: str
     display_name: Optional[str] = None
 
@@ -191,6 +198,74 @@ def ws_ticket(user: Optional[User] = Depends(require_user)):
             raise HTTPException(status_code=401, detail="Not authenticated")
         return {"ticket": None, "auth_enforced": False}
     return {"ticket": ws_tickets.issue(user.id), "expires_in": ws_tickets.TICKET_TTL_SECONDS}
+
+
+def self_registration_open() -> bool:
+    """
+    Whether anyone may create their own account.
+
+    On by default because it was asked for, but read at request time rather
+    than import time so it can be turned off without a redeploy -- which is the
+    thing you want available if signups are ever abused.
+    """
+    return os.getenv("ALLOW_SELF_REGISTRATION", "1").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
+@router.get("/auth/registration")
+def registration_status():
+    """Lets the login page show or hide the Register form. Public by necessity."""
+    return {"open": self_registration_open()}
+
+
+@router.post("/auth/register")
+def register(payload: RegisterRequest, db: Session = Depends(get_db)):
+    """
+    Create an account, unprivileged.
+
+    The role matters more than it looks. The social vault and session store are
+    machine-global -- one CredentialVault for the whole install, no user_id
+    anywhere -- so any account that can reach /api/social/* can list the
+    owner's connected accounts and collect using their session.
+
+    Open registration would therefore have handed a stranger the owner's
+    Instagram. That is why every social route now requires an ADMIN, and why
+    accounts made here are never one. See src/social/routes.py.
+    """
+    if not self_registration_open():
+        raise HTTPException(
+            status_code=403,
+            detail="Self-registration is disabled on this instance.",
+        )
+
+    email = payload.email.lower()
+    if db.scalar(select(User).where(User.email == email)):
+        # Deliberately explicit. Account enumeration matters on a login form,
+        # where a silent failure protects the existing user; on a signup form
+        # the alternative is someone retyping a password they already have.
+        raise HTTPException(
+            status_code=409, detail="An account already exists for that email"
+        )
+
+    try:
+        pw_hash = hash_password(payload.password, rounds=settings().bcrypt_rounds)
+    except WeakPassword as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    user = User(
+        email=email,
+        password_hash=pw_hash,
+        display_name=payload.display_name,
+        role="viewer",
+    )
+    db.add(user)
+    db.flush()
+
+    pair = issue_pair(db, user)
+    db.commit()
+    logger.info("[auth] self-registered %s as viewer", email)
+    return {**pair.as_dict(), "user": _user_out(user)}
 
 
 @router.post("/auth/accept-invite")

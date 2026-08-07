@@ -8,28 +8,56 @@
  * cutover.
  */
 
-import React, { useState } from "react";
-import { AlertCircle, Loader2, LogIn } from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { AlertCircle, Loader2, LogIn, UserPlus } from "lucide-react";
 
 import { useAuth } from "@/app/lib/auth-context";
+import { registrationOpen } from "@/app/lib/api";
 
 export default function Login() {
-  const { login } = useAuth();
+  const { login, register } = useAuth();
+  const [mode, setMode] = useState<"signin" | "register">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [displayName, setDisplayName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [canRegister, setCanRegister] = useState(false);
+
+  // Ask the server rather than assuming. An instance can disable sign-ups, and
+  // offering a form that always 403s is worse than not offering one.
+  useEffect(() => {
+    let cancelled = false;
+    void registrationOpen().then((open) => {
+      if (!cancelled) setCanRegister(open);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const registering = mode === "register";
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setBusy(true);
     try {
-      await login(email.trim(), password);
+      if (registering) {
+        await register(email.trim(), password, displayName.trim() || undefined);
+      } else {
+        await login(email.trim(), password);
+      }
     } catch (err) {
-      // The server returns the same message for an unknown email and a wrong
-      // password, so this cannot be used to enumerate accounts.
-      setError(err instanceof Error ? err.message : "Sign in failed");
+      // Sign-in returns the same message for an unknown email and a wrong
+      // password, so it cannot be used to enumerate accounts. Registration
+      // deliberately does say "already exists" -- there, the alternative is
+      // someone retyping a password they already have.
+      setError(
+        err instanceof Error
+          ? err.message
+          : registering ? "Could not create the account" : "Sign in failed",
+      );
     } finally {
       setBusy(false);
     }
@@ -43,7 +71,9 @@ export default function Login() {
             Sri Lanka AI Challenge 2026
           </h1>
           <p className="text-sm text-muted-foreground">
-            Sign in to view the intelligence dashboard
+            {registering
+              ? "Create an account to view the intelligence dashboard"
+              : "Sign in to view the intelligence dashboard"}
           </p>
         </div>
 
@@ -63,6 +93,22 @@ export default function Login() {
             />
           </div>
 
+          {registering && (
+            <div className="space-y-1.5">
+              <label htmlFor="displayName" className="text-sm font-medium text-foreground">
+                Name <span className="text-muted-foreground">(optional)</span>
+              </label>
+              <input
+                id="displayName"
+                type="text"
+                autoComplete="name"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
+              />
+            </div>
+          )}
+
           <div className="space-y-1.5">
             <label htmlFor="password" className="text-sm font-medium text-foreground">
               Password
@@ -71,7 +117,7 @@ export default function Login() {
               id="password"
               type="password"
               required
-              autoComplete="current-password"
+              autoComplete={registering ? "new-password" : "current-password"}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
@@ -93,14 +139,48 @@ export default function Login() {
             disabled={busy || !email || !password}
             className="flex w-full items-center justify-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
           >
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}
-            {busy ? "Signing in…" : "Sign in"}
+            {busy ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : registering ? (
+              <UserPlus className="h-4 w-4" />
+            ) : (
+              <LogIn className="h-4 w-4" />
+            )}
+            {busy
+              ? registering ? "Creating account…" : "Signing in…"
+              : registering ? "Create account" : "Sign in"}
           </button>
         </form>
 
-        <p className="text-center text-xs text-muted-foreground">
-          Accounts are invite-only. Ask an administrator for an invite link.
-        </p>
+        {canRegister ? (
+          <div className="space-y-2 text-center">
+            <button
+              type="button"
+              onClick={() => {
+                setMode(registering ? "signin" : "register");
+                setError(null);
+              }}
+              className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+            >
+              {registering
+                ? "Already have an account? Sign in"
+                : "No account? Create one"}
+            </button>
+            {registering && (
+              /* Said before signing up, not discovered afterwards: connecting a
+                 social account is owner-only, because the credential vault is
+                 shared by the whole install rather than per-user. */
+              <p className="text-xs text-muted-foreground">
+                New accounts can read the intelligence dashboard. Connecting
+                social accounts is restricted to the person running this server.
+              </p>
+            )}
+          </div>
+        ) : (
+          <p className="text-center text-xs text-muted-foreground">
+            Accounts are invite-only. Ask an administrator for an invite link.
+          </p>
+        )}
       </div>
     </div>
   );

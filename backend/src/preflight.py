@@ -331,6 +331,48 @@ def _groq_check() -> Check:
     )
 
 
+def _groq_model_check() -> Check:
+    """
+    Are the models we ask for actually reachable with this key?
+
+    Added because the chatbot spent an unknown period returning 404 for a model
+    Groq had deprecated. The RAG layer caught it, logged it, and handed the user
+    a generic failure -- so the symptom was "the chatbot never answers", which
+    reads as slowness or a bad key rather than a model that no longer exists.
+
+    Groq deprecated six models in 2026 alone, so this is a recurring class of
+    failure rather than a one-off.
+    """
+    from src.llms.models import available_models, configured_models
+
+    wanted = configured_models()
+    have = available_models()
+
+    if have is None:
+        # Could not check -- no key, no network, SDK missing. Not an error in
+        # itself; GROQ_API_KEY has its own check.
+        return Check(
+            "GROQ_MODEL",
+            ok=True,
+            consequence=f"Configured: {', '.join(wanted)} (not verified).",
+        )
+
+    missing = [m for m in wanted if m not in have]
+    if missing:
+        return Check(
+            "GROQ_MODEL",
+            ok=False,
+            consequence=(
+                f"{', '.join(missing)} is not available to this key, so every "
+                f"call using it returns 404. Groq deprecates models regularly."
+            ),
+            detail=f"Available: {', '.join(have[:6])}{' ...' if len(have) > 6 else ''}",
+        )
+
+    return Check("GROQ_MODEL", ok=True,
+                 consequence=f"{', '.join(wanted)} reachable.")
+
+
 def _cors_check() -> Check:
     if _isset("CORS_ALLOW_ORIGINS"):
         return Check("CORS_ALLOW_ORIGINS", ok=True, consequence="CORS locked to the frontend origin.")
@@ -423,6 +465,7 @@ CHECKS: List[Callable[[], Check]] = [
     _auth_enforced_check,
     _public_exposure_check,
     _groq_check,
+    _groq_model_check,
     _cors_check,
     _anomaly_check,
 ]

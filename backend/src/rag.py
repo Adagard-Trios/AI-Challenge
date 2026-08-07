@@ -226,15 +226,22 @@ class RogerRAG:
                 logger.error("[RAG] GROQ_API_KEY not set")
                 return
 
-            # Using Llama 4 Maverick 17B for fast, high-quality responses
+            # This was pinned to meta-llama/llama-4-maverick-17b-128e-instruct,
+            # which Groq deprecated on 20 Feb 2026. Every chatbot message had
+            # been returning 404 -- caught below, logged, and surfaced to the
+            # user as a generic failure, so it looked like slowness rather than
+            # a model that no longer exists.
+            from src.llms.models import chat_model
+
+            model = chat_model()
             self.llm = ChatGroq(
                 api_key=api_key,
-                model="meta-llama/llama-4-maverick-17b-128e-instruct",
+                model=model,
                 temperature=0.3,
                 max_tokens=1024,
                 request_timeout=30,  # 30 second timeout
             )
-            logger.info("[RAG] Groq LLM initialized with Llama 4 Maverick 17B")
+            logger.info("[RAG] Groq LLM initialized with %s", model)
 
         except Exception as e:
             logger.error(f"[RAG] LLM initialization error: {e}")

@@ -16,6 +16,7 @@ import React, {
 
 import {
   AuthUser, fetchMe, login as apiLogin, logout as apiLogout,
+  register as apiRegister,
   onAuthChange, restoreSession,
 } from "./api";
 
@@ -25,6 +26,7 @@ interface AuthState {
   /** True when the backend requires auth. False => open mode, render anyway. */
   enforced: boolean;
   login: (email: string, password: string) => Promise<void>;
+  register: (email: string, password: string, displayName?: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -73,14 +75,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(await apiLogin(email, password));
   }, []);
 
+  const register = useCallback(
+    async (email: string, password: string, displayName?: string) => {
+      setUser(await apiRegister(email, password, displayName));
+    },
+    [],
+  );
+
   const logout = useCallback(async () => {
     await apiLogout();
     setUser(null);
   }, []);
 
   const value = useMemo(
-    () => ({ user, loading, enforced, login, logout }),
-    [user, loading, enforced, login, logout],
+    () => ({ user, loading, enforced, login, register, logout }),
+    [user, loading, enforced, login, register, logout],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from auth.db import session_scope
-from auth.dependencies import require_user
+from auth.dependencies import require_admin
 from auth.models import User
 
 from . import service as social_service
@@ -60,13 +60,40 @@ def _check_platform(platform: str) -> str:
 
 
 def _require(user: Optional[User]) -> User:
+    """
+    Admin, always -- not merely "logged in", and not conditional on
+    AUTH_ENFORCED.
+
+    require_admin returns early when enforcement is off:
+
+        if not settings().enforced:
+            return user          # <- no is_admin check at all
+
+    That is right for ordinary routes, which stay open while the frontend
+    migrates. It is wrong here. The credential vault and session store are
+    machine-global -- one per install, no user_id anywhere -- so reaching these
+    routes means reaching the OWNER'S connected accounts: listing them,
+    triggering a browser login, and collecting with their session.
+
+    Self-registration makes that concrete: anyone can now create an account.
+    Without this check, on a laptop running with AUTH_ENFORCED=0, they would
+    have arrived with the owner's Instagram.
+    """
     if user is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
+    if not user.is_admin:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Administrator access required. Social accounts belong to the "
+                "person running this server."
+            ),
+        )
     return user
 
 
 @router.get("/accounts")
-def list_accounts(user: Optional[User] = Depends(require_user)):
+def list_accounts(user: Optional[User] = Depends(require_admin)):
     """Connection state, saved usernames, in-flight jobs and today's budget."""
     _require(user)
 
@@ -86,7 +113,7 @@ def list_accounts(user: Optional[User] = Depends(require_user)):
 
 @router.post("/credentials")
 def save_credentials(payload: CredentialsIn,
-                     user: Optional[User] = Depends(require_user)):
+                     user: Optional[User] = Depends(require_admin)):
     """
     Save a social login so the browser form can be pre-filled.
 
@@ -121,7 +148,7 @@ def save_credentials(payload: CredentialsIn,
 
 
 @router.delete("/credentials/{platform}")
-def forget_credentials(platform: str, user: Optional[User] = Depends(require_user)):
+def forget_credentials(platform: str, user: Optional[User] = Depends(require_admin)):
     _require(user)
     platform = _check_platform(platform)
     removed = social_service.get_service().forget_credentials(platform)
@@ -129,7 +156,7 @@ def forget_credentials(platform: str, user: Optional[User] = Depends(require_use
 
 
 @router.post("/connect")
-def connect(payload: PlatformIn, user: Optional[User] = Depends(require_user)):
+def connect(payload: PlatformIn, user: Optional[User] = Depends(require_admin)):
     """
     Open a browser on the host machine and start a login.
 
@@ -148,7 +175,7 @@ def connect(payload: PlatformIn, user: Optional[User] = Depends(require_user)):
 
 
 @router.get("/job/{platform}")
-def job_status(platform: str, user: Optional[User] = Depends(require_user)):
+def job_status(platform: str, user: Optional[User] = Depends(require_admin)):
     _require(user)
     platform = _check_platform(platform)
 
@@ -157,7 +184,7 @@ def job_status(platform: str, user: Optional[User] = Depends(require_user)):
 
 
 @router.post("/disconnect")
-def disconnect(payload: PlatformIn, user: Optional[User] = Depends(require_user)):
+def disconnect(payload: PlatformIn, user: Optional[User] = Depends(require_admin)):
     _require(user)
     platform = _check_platform(payload.platform)
 
@@ -175,7 +202,7 @@ def disconnect(payload: PlatformIn, user: Optional[User] = Depends(require_user)
 
 
 @router.post("/resume")
-def resume(payload: PlatformIn, user: Optional[User] = Depends(require_user)):
+def resume(payload: PlatformIn, user: Optional[User] = Depends(require_admin)):
     """
     Lift a challenge cooldown, on the user's word that they have checked.
 
@@ -196,7 +223,7 @@ def resume(payload: PlatformIn, user: Optional[User] = Depends(require_user)):
 
 @router.post("/collect")
 def collect_now(payload: PlatformIn,
-                user: Optional[User] = Depends(require_user)):
+                user: Optional[User] = Depends(require_admin)):
     """
     Collect once from a connected account and store the posts.
 

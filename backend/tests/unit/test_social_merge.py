@@ -211,6 +211,11 @@ def test_every_social_route_requires_authentication():
     These endpoints store a password, open a browser on the host machine, and
     read a session cookie. On a tunnelled laptop an unauthenticated version
     would hand all three to anyone with the URL.
+
+    Tightened when self-registration landed: the bar is now ADMIN, not merely
+    logged in. The vault is machine-global, so any account reaching these
+    routes reaches the owner's connected Instagram -- and anyone can now create
+    an account.
     """
     source = ROUTES.read_text(encoding="utf-8")
     tree = ast.parse(source)
@@ -231,10 +236,10 @@ def test_every_social_route_requires_authentication():
 
     for node in routed:
         body = ast.get_source_segment(source, node) or ""
-        assert "require_user" in body, f"{node.name} does not depend on require_user"
+        assert "require_admin" in body, f"{node.name} does not depend on require_admin"
         assert "_require(user)" in body, (
             f"{node.name} takes a user but never rejects None -- with "
-            "AUTH_ENFORCED off, require_user returns None instead of raising"
+            "AUTH_ENFORCED off, require_admin returns None instead of raising"
         )
 
 

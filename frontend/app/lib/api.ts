@@ -215,6 +215,37 @@ export async function login(email: string, password: string): Promise<AuthUser> 
   return data.user;
 }
 
+/**
+ * Create an account and sign straight in.
+ *
+ * Self-registered accounts are always `viewer`, never admin. That is not a
+ * detail: the social credential vault is machine-global, so an admin account
+ * reaches the owner's connected Instagram. The server enforces it; this is
+ * only the client half.
+ */
+export async function register(
+  email: string,
+  password: string,
+  displayName?: string,
+): Promise<AuthUser> {
+  const data = await api<{ access_token: string; refresh_token: string; user: AuthUser }>(
+    "/api/auth/register",
+    {
+      method: "POST",
+      body: JSON.stringify({ email, password, display_name: displayName || null }),
+      noRetry: true,
+    },
+  );
+  setTokens(data.access_token, data.refresh_token);
+  return data.user;
+}
+
+/** Whether this instance accepts sign-ups, so the form can be hidden if not. */
+export async function registrationOpen(): Promise<boolean> {
+  const data = await apiGet<{ open: boolean }>("/api/auth/registration", { open: false });
+  return Boolean(data.open);
+}
+
 export async function logout(): Promise<void> {
   const refresh = getRefreshToken();
   try {

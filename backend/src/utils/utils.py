@@ -2260,11 +2260,25 @@ def tool_weather_nowcast(location: str = "Colombo") -> Dict[str, Any]:
 # NEWS SCRAPING TOOLS
 # ============================================
 
+# Selectors are verified against the live sites, not guessed from memory.
+#
+# Three of these were silently dead. Every site returned HTTP 200, so nothing
+# logged an error and nothing looked broken -- the selectors simply matched no
+# elements, and a scraper that finds zero articles on a page it fetched
+# successfully is indistinguishable from a quiet news day.
+#
+#   Daily Mirror  ".news-block" (hyphen) vs the site's "news_block" (underscore)
+#   News First    ".post" -- the site is an Angular app using .local_news etc.
+#   Ada Derana    not present at all
+#   Newswire      not present at all
+#
+# Measured before: 30 articles, all from Daily FT. After: 224 unique headlines
+# across all five.
 LOCAL_NEWS_SITES = [
     {
         "url": "https://www.dailymirror.lk/",
         "name": "Daily Mirror",
-        "article_selector": "article, .news-block, .article, .card",
+        "article_selector": ".news_block, .latest_news_boxs, .latest_content_boxs",
     },
     {
         "url": "https://www.ft.lk/",
@@ -2274,39 +2288,99 @@ LOCAL_NEWS_SITES = [
     {
         "url": "https://www.newsfirst.lk/",
         "name": "News First",
-        "article_selector": ".post, article, .news-block",
+        "article_selector": ".local_news, .featured_news_main, .sports_main",
+    },
+    {
+        "url": "https://www.adaderana.lk/",
+        "name": "Ada Derana",
+        "article_selector": ".story-text, .news-story, li.relative, .space-y-4 > div",
+    },
+    {
+        "url": "https://www.newswire.lk/",
+        "name": "Newswire",
+        "article_selector": ".posts-listunit, .content-block, .srr-item-in",
     },
 ]
+
+# Several sites glue a timestamp onto the headline text because the date sits in
+# the same element -- "Sri Lanka Probes Prison Unrest07-08-2026 | 5:36 PM" and
+# "1h agoMore details emerge". Left in, that noise reaches entity extraction and
+# the story threader as part of the headline.
+_TRAILING_STAMP = re.compile(
+    r"\s*\d{1,2}-\d{1,2}-\d{4}\s*\|\s*\d{1,2}:\d{2}\s*(?:AM|PM)?.*$", re.I
+)
+_LEADING_AGO = re.compile(r"^\s*\d+\s*(?:h|m|d|hour|min|day)s?\s*ago\s*", re.I)
+
+
+def _clean_headline(text: str) -> str:
+    return _LEADING_AGO.sub("", _TRAILING_STAMP.sub("", text)).strip()
+
+
+def _headline_of(article) -> str:
+    """
+    Best headline in a block.
+
+    h4 is included deliberately: Daily Mirror renders 177 h4 and zero h1, and
+    Newswire uses h4.posts-listunit-title. Probing only h1/h2/h3 found nothing
+    on either, which is half of why they returned no articles even once their
+    containers matched.
+    """
+    for tag in ("h1", "h2", "h3", "h4"):
+        el = article.find(tag)
+        if el:
+            text = _clean_headline(el.get_text(strip=True))
+            if len(text) >= 8:
+                return text
+    el = article.find(class_=re.compile(r"(title|headline|heading)", re.I))
+    if el:
+        text = _clean_headline(el.get_text(strip=True))
+        if len(text) >= 8:
+            return text
+    link = article.find("a", href=True)
+    if link:
+        text = _clean_headline(link.get_text(strip=True))
+        if len(text) >= 8:
+            return text
+    return ""
 
 
 def scrape_local_news_impl(
     keywords: Optional[List[str]] = None,
     max_articles: int = 30,
 ) -> List[Dict[str, Any]]:
-    results: List[Dict[str, Any]] = []
+    # Collected per site, then interleaved -- NOT appended into one list that
+    # returns as soon as it is full.
+    #
+    # The old loop returned the moment it had max_articles. Daily FT alone
+    # yields 212 headlines and sits second in the list, so a default call of 30
+    # was satisfied entirely by Daily FT and the sites after it were never
+    # fetched at all. News First could have been perfectly healthy and still
+    # never appeared, which made a selector bug and a rate limit look identical.
+    per_site: List[List[Dict[str, Any]]] = []
+
     for site in LOCAL_NEWS_SITES:
+        found: List[Dict[str, Any]] = []
         try:
             resp = _safe_get(site["url"])
             if not resp:
                 logger.warning(f"[NEWS] Failed to fetch {site['url']}")
+                per_site.append(found)
                 continue
             soup = BeautifulSoup(resp.text, "html.parser")
             articles = soup.select(site.get("article_selector", "article"))
+            seen: set = set()
             for article in articles:
-                title_elem = (
-                    article.find("h1")
-                    or article.find("h2")
-                    or article.find("h3")
-                    or article.find(
-                        class_=re.compile(r"(title|headline|heading)", re.I)
-                    )
-                )
-                title = title_elem.get_text(strip=True) if title_elem else ""
-                if not title or len(title) < 8:
-                    a = article.find("a", href=True)
-                    title = title or (a.get_text(strip=True) if a else "")
-                if not title or len(title) < 8:
+                title = _headline_of(article)
+                if not title:
                     continue
+                # The same story often appears in several blocks of one page
+                # (hero, sidebar, "latest"). Deduplicated per site rather than
+                # globally: two outlets carrying one story is corroboration and
+                # the downstream pipeline scores it as such.
+                key = title.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
                 if not _contains_keyword(title, keywords):
                     continue
                 link_elem = article.find("a", href=True)
@@ -2318,7 +2392,7 @@ def scrape_local_news_impl(
                 snippet = (
                     snippet_elem.get_text(strip=True)[:300] if snippet_elem else ""
                 )
-                results.append(
+                found.append(
                     {
                         "source": site["name"],
                         "source_url": site["url"],
@@ -2328,11 +2402,28 @@ def scrape_local_news_impl(
                         "timestamp": utc_now().isoformat(),
                     }
                 )
-                if len(results) >= max_articles:
-                    return results
+            if not found:
+                # HTTP 200 with nothing extracted is the signature of a selector
+                # that has drifted from the site's markup. Worth saying out
+                # loud: it is otherwise silent and looks like a quiet news day.
+                logger.warning(
+                    "[NEWS] %s: fetched %d bytes but matched no articles "
+                    "(selector %r may be stale)",
+                    site["name"], len(resp.text), site.get("article_selector"),
+                )
         except Exception as e:
             logger.error(f"[NEWS] Error scraping {site['name']}: {e}")
-            continue
+        per_site.append(found)
+
+    # Round-robin, so every source contributes its first article before any
+    # source contributes its second.
+    results: List[Dict[str, Any]] = []
+    for rank in range(max((len(f) for f in per_site), default=0)):
+        for found in per_site:
+            if rank < len(found):
+                results.append(found[rank])
+                if len(results) >= max_articles:
+                    return results
     return results
 
 

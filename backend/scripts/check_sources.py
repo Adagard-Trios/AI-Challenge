@@ -39,6 +39,8 @@ SOURCES = [
     ("dailymirror.lk",           "https://www.dailymirror.lk/",              "News"),
     ("newsfirst.lk",             "https://www.newsfirst.lk/",                "News"),
     ("ft.lk",                    "https://www.ft.lk/",                       "News (financial)"),
+    ("adaderana.lk",             "https://www.adaderana.lk/",                "News"),
+    ("newswire.lk",              "https://www.newswire.lk/",                 "News"),
     ("news.lk",                  "https://www.news.lk/",                     "Government news portal"),
     ("eservices.railway.gov.lk", "https://eservices.railway.gov.lk/",        "Rail schedules"),
     ("reddit.com",               "https://www.reddit.com/r/srilanka.json",   "r/srilanka"),

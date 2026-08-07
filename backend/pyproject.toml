@@ -65,3 +65,11 @@ dependencies = [
     "websockets>=15.0.1",
     "yfinance>=0.2.0",
 ]
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: imports main and carries the full startup cost",
+    # Needs the backend on :8000 and the frontend on :3000. Skips itself when
+    # either is down, so `pytest tests/` stays green without them.
+    "e2e: drives a real browser against a running frontend",
+]

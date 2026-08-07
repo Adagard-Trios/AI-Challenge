@@ -19,10 +19,14 @@ import SocialAccounts from "../components/settings/SocialAccounts";
 import CollectedPosts from "../components/settings/CollectedPosts";
 import { Activity, Map, Radio, BarChart3, Zap, Brain, Cloud, DollarSign, Satellite, Link2, Layers } from "lucide-react";
 import { useRogerData } from "../hooks/use-roger-data";
+import { useAuth } from "../lib/auth-context";
+import { useNavigate } from "react-router-dom";
 import { Badge } from "../components/ui/badge";
 
 const Index = () => {
   const { status, run_count, isConnected, first_run_complete, events } = useRogerData();
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
 
   // Show loading screen until:
   // 1. first_run_complete is true, OR
@@ -72,6 +76,28 @@ const Index = () => {
                 <Zap className="w-3 h-3" />
                 Run #{run_count}
               </Badge>
+
+              {/* Sign in / out.
+                  Without this there was no way to authenticate when
+                  AUTH_ENFORCED is off, and the social account fields require a
+                  user -- so they were unreachable by design with no way to fix
+                  it from the UI. */}
+              {user ? (
+                <button
+                  onClick={() => { void logout(); }}
+                  title={user.email}
+                  className="rounded border border-border px-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Sign out
+                </button>
+              ) : (
+                <button
+                  onClick={() => navigate("/login")}
+                  className="rounded bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:opacity-90 transition-opacity"
+                >
+                  Sign in
+                </button>
+              )}
 
               {/* Time - hidden on mobile */}
               <div className="text-xs font-mono text-muted-foreground hidden md:block">

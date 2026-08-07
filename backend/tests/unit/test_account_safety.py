@@ -219,3 +219,90 @@ def test_the_scope_is_stated_in_the_code():
     hygiene = (PROJECT_ROOT / "src" / "scrapers" / "hygiene.py").read_text(
         encoding="utf-8").lower()
     assert "not detection evasion" in hygiene or "not an attempt to defeat" in hygiene
+
+
+# --- paced is not the same as not connected ---------------------------------
+
+def test_a_paced_account_is_not_reported_as_disconnected():
+    """
+    REGRESSION, and the reason Instagram appeared to produce no feeds.
+
+    The 15-minute gate returns None from get_credential(), and registry.run
+    read every None as "No account connected. Connect one in Settings". On a
+    60-second agent loop that was the answer fourteen times out of fifteen --
+    telling the user to fix something that was not broken, and telling the
+    agent there was nothing to collect from.
+    """
+    from src.scrapers import registry
+    from src.social.credential_bridge import SessionStoreCredentialStore
+
+    class Connected(SessionStoreCredentialStore):
+        class _Store:
+            @staticmethod
+            def load(platform):
+                return {"storage_state": {"cookies": [{"name": "sessionid", "value": "x"}]},
+                        "handle": "@me"}
+
+            @staticmethod
+            def available():
+                return ["instagram"]
+
+        @property
+        def store(self):
+            return self._Store()
+
+    from src.scrapers.credentials import set_credential_store
+
+    store = Connected()
+    set_credential_store(store)
+    try:
+        assert store.get("instagram") is not None, "first call should serve"
+        assert store.get("instagram") is None, "second call should be paced"
+
+        result = registry.run("scrape_instagram", "srilanka", max_items=1)
+        assert result["status"] == "paced", (
+            f"a paced account reports {result['status']!r}: {result['reason'][:80]}"
+        )
+        assert "connected and working" in result["reason"]
+        assert result.get("retry_after_seconds", 0) > 0
+    finally:
+        set_credential_store(None)
+
+
+def test_pacing_is_not_charged_to_an_account_that_does_not_exist():
+    """
+    Consuming the slot before loading the session marked a platform that had
+    never been connected as "collected recently". Pacing protects a session;
+    there is nothing to protect when there is none.
+    """
+    from src.social.credential_bridge import SessionStoreCredentialStore
+
+    class Empty(SessionStoreCredentialStore):
+        class _Store:
+            @staticmethod
+            def load(platform):
+                return None
+
+            @staticmethod
+            def available():
+                return []
+
+        @property
+        def store(self):
+            return self._Store()
+
+    store = Empty()
+    assert store.get("twitter") is None
+    assert store.is_paced("twitter") is False, (
+        "a platform with no session was charged a pacing slot"
+    )
+
+
+def test_asking_whether_an_account_is_paced_does_not_consume_it():
+    """is_paced() is a read; _too_soon() is the one that charges."""
+    from src.social.credential_bridge import SessionStoreCredentialStore
+
+    store = SessionStoreCredentialStore(store=object())
+    for _ in range(5):
+        assert store.is_paced("linkedin") is False
+    assert store.seconds_until_ready("linkedin") == 0

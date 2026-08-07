@@ -80,6 +80,32 @@ class SessionStoreCredentialStore:
         self._last_served: Dict[str, float] = {}
         self._gate = threading.Lock()
 
+    def is_paced(self, platform: str) -> bool:
+        """
+        Whether this account is inside its cooling-off window, WITHOUT
+        consuming it.
+
+        Exists so callers can tell "paced" from "not connected". Both used to
+        surface as a None credential, and registry.run reported every None as
+        "No account connected. Connect one in Settings" -- which is false when
+        an account is connected and merely waiting, tells the user to fix
+        something that is not broken, and tells the agent there is no account
+        to collect from. On a 60-second loop against a 15-minute gate that was
+        the answer 14 times out of 15.
+        """
+        if MIN_COLLECTION_INTERVAL <= 0:
+            return False
+        with self._gate:
+            due = self._last_served.get(platform)
+            return due is not None and time.monotonic() < due
+
+    def seconds_until_ready(self, platform: str) -> int:
+        with self._gate:
+            due = self._last_served.get(platform)
+            if due is None:
+                return 0
+            return max(0, int(due - time.monotonic()))
+
     def _too_soon(self, platform: str) -> bool:
         """
         True when this account was collected too recently.
@@ -88,6 +114,9 @@ class SessionStoreCredentialStore:
         place every scraper passes through -- the loop, the dashboard's
         "Collect now", and the selftest all call get_credential(). A gate in
         the loop would leave the other two unpaced.
+
+        Consumes the slot when it allows one through, which is why is_paced()
+        exists separately for callers that only want to ask.
         """
         if MIN_COLLECTION_INTERVAL <= 0:
             return False
@@ -111,7 +140,14 @@ class SessionStoreCredentialStore:
     def get(self, platform: str):
         from src.scrapers.credentials import SocialCredential, derive_expiry
 
-        if self._too_soon(platform):
+        # Pacing is checked WITHOUT consuming first, then the session is
+        # loaded, and only a real credential consumes the slot.
+        #
+        # The obvious order -- consume, then load -- marked an account as
+        # "collected recently" when there was no account at all, so a platform
+        # that had never been connected reported itself as cooling off. Pacing
+        # protects a session; there is nothing to protect when there is none.
+        if self.is_paced(platform):
             # DEBUG rather than WARNING: on a 60s loop this is the normal case
             # roughly fourteen times out of fifteen, and a warning that fires
             # constantly is one nobody reads.
@@ -134,6 +170,11 @@ class SessionStoreCredentialStore:
         state = record.get("storage_state") or {}
         if not state:
             return None
+
+        # A real credential is about to be served, so start the clock now.
+        # Doing this earlier charged platforms that turned out to have no
+        # session at all.
+        self._too_soon(platform)
 
         return SocialCredential(
             platform=platform,

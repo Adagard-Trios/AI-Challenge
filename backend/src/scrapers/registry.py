@@ -94,10 +94,32 @@ def run(name: str, value: str, max_items: int = 20) -> dict:
 
     credential = get_credential(spec.platform)
     if credential is None:
+        # "Paced" and "not connected" are different facts and used to produce
+        # the same message. On a 60-second agent loop against a 15-minute
+        # cooling-off window, a connected account reported "No account
+        # connected. Connect one in Settings" fourteen times out of fifteen --
+        # telling the user to fix something that was not broken, and telling
+        # the agent there was nothing to collect from.
+        paced, wait = _pacing_state(spec.platform)
+        if paced:
+            return {
+                "status": "paced",
+                "platform": spec.platform,
+                "reason": (
+                    f"{spec.platform} was collected recently and is inside its "
+                    f"cooling-off window; about {wait}s left. The account is "
+                    f"connected and working -- this pacing is what keeps it "
+                    f"that way."
+                ),
+                "retry_after_seconds": wait,
+                "count": 0,
+                "results": [],
+            }
+
         return unavailable(
             spec.platform,
             f"No {spec.platform} account connected. Connect one in Settings -> "
-            "Accounts; collection runs in the connector on your own machine.",
+            "Accounts.",
         )
     if credential.is_expired:
         return unavailable(
@@ -109,6 +131,28 @@ def run(name: str, value: str, max_items: int = 20) -> dict:
     payload = result.as_dict()
     _read_images(payload)
     return payload
+
+
+def _pacing_state(platform: str) -> tuple:
+    """
+    (is_paced, seconds_remaining) for a platform, asked of whichever credential
+    store is installed.
+
+    Duck-typed rather than importing the bridge: a store that does not pace
+    simply lacks these methods, and the answer is "not paced" -- which is
+    correct for NullCredentialStore and the file-backed one.
+    """
+    try:
+        from src.scrapers.credentials import get_credential_store
+
+        store = get_credential_store()
+        if not hasattr(store, "is_paced"):
+            return False, 0
+        if not store.is_paced(platform):
+            return False, 0
+        return True, getattr(store, "seconds_until_ready", lambda _: 0)(platform)
+    except Exception:  # noqa: BLE001
+        return False, 0
 
 
 def _read_images(payload: dict) -> None:

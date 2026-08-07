@@ -115,26 +115,32 @@ def _database_check() -> Check:
         # The SQLite fallback is only dangerous where the disk is disposable.
         # On a laptop it is an ordinary file that survives reboots, so calling
         # it data loss would be false -- and a warning that is wrong in your
-        # situation is a warning you learn to ignore.
-        if _flag("PUBLIC_HOSTING"):
+        # situation is a warning you learn to ignore, along with the next one.
+        #
+        # AUTH_ENFORCED is the signal for "this is meant to be production", and
+        # it is a better one than PUBLIC_HOSTING because it is already set on
+        # every deployment path. Locally this is an informational note.
+        if _flag("AUTH_ENFORCED"):
             return Check(
                 "DATABASE_URL",
-                ok=True,
+                ok=False,
                 consequence=(
-                    "Unset, so accounts live in a local SQLite file. Durable on "
-                    "this machine -- back up backend/data/auth.db, since it is "
-                    "now the only copy."
+                    "Auth is enforced but accounts live in a SQLite file. On a "
+                    "container that disk is disposable, so every account, "
+                    "exposure profile and story is destroyed on the next deploy "
+                    "or restart."
                 ),
+                detail="Set the Supabase transaction-pooler URL (port 6543).",
             )
+
         return Check(
             "DATABASE_URL",
-            ok=False,
+            ok=True,
             consequence=(
-                "Falling back to SQLite on the container's ephemeral disk. Every "
-                "account, exposure profile, story and paired device is destroyed "
-                "on the next deploy, restart or spin-down."
+                "Unset, so accounts live in a local SQLite file. That is durable "
+                "on a normal machine -- back up backend/data/auth.db, since it "
+                "is the only copy. It is NOT durable in a container."
             ),
-            detail="Set the Supabase transaction-pooler URL (port 6543).",
         )
 
     # Right database, wrong port is the failure that looks like success: it

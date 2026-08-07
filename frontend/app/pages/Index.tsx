@@ -22,19 +22,37 @@ import { useRogerData } from "../hooks/use-roger-data";
 import { useAuth } from "../lib/auth-context";
 import { useNavigate } from "react-router-dom";
 import { Badge } from "../components/ui/badge";
+import { useEffect, useState } from "react";
 
 const Index = () => {
   const { status, run_count, isConnected, first_run_complete, events } = useRogerData();
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
-  // Show loading screen until:
-  // 1. first_run_complete is true, OR
-  // 2. We have existing events from REST API (faster initial load)
-  // This ensures the loading screen disappears once ANY data is available
-  const isLoading = status === 'initializing' && !first_run_complete && (!events || events.length === 0);
+  // Wait for the first agent cycle, but never indefinitely.
+  //
+  // This used to block on `status === 'initializing' && no events`, with no
+  // upper bound. A cycle fans out to five scraping agents and takes minutes on
+  // a good run -- and if scraping stalls or the LLM is rate limited it never
+  // completes at all. So a user who had just signed in successfully sat on a
+  // spinner with no way forward, which reads exactly like a failed login.
+  //
+  // Waiting was never necessary. Every panel already handles having no data:
+  // stories says "No stories yet", collected posts says "Nothing collected
+  // yet", the cards carry provenance badges. And the Accounts tab -- where you
+  // go to connect an account so that there IS data -- does not depend on the
+  // feed at all, so blocking it is precisely backwards.
+  const [waitedLongEnough, setWaitedLongEnough] = useState(false);
 
-  if (isLoading) {
+  useEffect(() => {
+    const timer = setTimeout(() => setWaitedLongEnough(true), 8000);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const noDataYet =
+    status === 'initializing' && !first_run_complete && (!events || events.length === 0);
+
+  if (noDataYet && !waitedLongEnough) {
     return <LoadingScreen />;
   }
 
@@ -114,6 +132,21 @@ const Index = () => {
 
       {/* Main Content */}
       <main className="container mx-auto px-3 sm:px-6 py-4 sm:py-6">
+        {/* An empty dashboard is indistinguishable from a broken one unless it
+            says which it is. The first cycle takes minutes; the Accounts tab
+            works immediately and is where you go to make there be data. */}
+        {noDataYet && (
+          <div className="mb-4 flex items-start gap-2 rounded-lg border border-border bg-card p-3 text-xs text-muted-foreground">
+            <Zap className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+            <span>
+              The first collection cycle has not finished yet, so panels below
+              are empty rather than broken. It fans out to five agents and takes
+              a few minutes. Everything still works meanwhile &mdash; the{" "}
+              <strong className="text-foreground">ACCOUNTS</strong> tab does not
+              depend on the feed.
+            </span>
+          </div>
+        )}
         <Tabs defaultValue="overview" className="w-full">
           <div className="overflow-x-auto hide-scrollbar -mx-3 px-3 sm:mx-0 sm:px-0">
             <TabsList className="inline-flex w-max sm:grid sm:w-full sm:grid-cols-9 mb-4 sm:mb-6 bg-card border border-border min-w-full sm:min-w-0">

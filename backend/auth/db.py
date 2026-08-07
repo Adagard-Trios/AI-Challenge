@@ -103,6 +103,15 @@ def init_db() -> None:
     from src.intelligence import models as _intelligence_models  # noqa: F401
 
     Base.metadata.create_all(bind=engine())
+
+    # create_all creates missing TABLES and ignores existing ones entirely, so
+    # a model that grew a column leaves every older database with the old
+    # shape -- and then fails at runtime on a query that looks unrelated.
+    # Additive only; anything destructive is reported and left alone.
+    from .schema_sync import sync
+
+    sync(engine())
+
     logger.info("[auth.db] schema ready (%d tables)", len(Base.metadata.tables))
 
 

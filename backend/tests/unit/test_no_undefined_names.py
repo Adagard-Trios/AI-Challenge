@@ -24,7 +24,11 @@ import pytest
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 
-TARGETS = ["src", "main.py", "app.py", "auth", "connector"]
+# Existing paths only. `app.py` and `connector` were both listed here and
+# neither exists -- pyflakes printed "No such file or directory" for each and
+# carried on, so the list looked broader than the coverage actually was.
+# scripts/ is new here and was never linted at all.
+TARGETS = ["src", "main.py", "auth", "scripts"]
 
 
 @pytest.fixture(scope="module")

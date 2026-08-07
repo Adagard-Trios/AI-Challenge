@@ -73,6 +73,11 @@ def page():
 
 
 def _load(page, tab: str | None = None) -> str:
+    # Each test judges its own page load. The browser is module-scoped for
+    # speed, so without this the error list accumulates and a later test fails
+    # on something an earlier one caused -- which passes in isolation and fails
+    # in the suite, the most confusing shape a test failure can take.
+    page.errors.clear()
     page.goto(FRONTEND, wait_until="domcontentloaded")
     page.wait_for_timeout(3000)
     if tab:
@@ -209,11 +214,37 @@ def test_collected_posts_panel_exists(page):
 
 # --- signing in, and the credential fields behind it ------------------------
 
-ADMIN = {"email": "demo@roger.lk", "password": "correct-horse-battery-staple"}
+def _admin_credentials() -> dict | None:
+    """
+    Read the admin login from .env rather than hardcoding one.
+
+    An earlier version used a fixed demo account, which meant the suite either
+    depended on a throwaway admin existing on every machine, or -- worse --
+    documented a working password in the repo for an instance that may be
+    publicly tunnelled.
+    """
+    import re
+
+    env_file = PROJECT_ROOT.parent / ".env"
+    if not env_file.exists():
+        return None
+
+    env = dict(re.findall(
+        r"^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*)$",
+        env_file.read_text(encoding="utf-8"), re.M,
+    ))
+    email = (env.get("BOOTSTRAP_ADMIN_EMAIL") or "").strip()
+    password = (env.get("BOOTSTRAP_ADMIN_PASSWORD") or "").strip()
+    return {"email": email, "password": password} if email and password else None
 
 
 def _sign_in(page) -> bool:
     """Click Sign in and submit the form. False if the account does not exist."""
+    admin = _admin_credentials()
+    if admin is None:
+        return False
+
+    page.errors.clear()
     page.goto(FRONTEND, wait_until="domcontentloaded")
     page.wait_for_timeout(2500)
 
@@ -227,8 +258,8 @@ def _sign_in(page) -> bool:
     form = page.locator("form")
     if not form.count():
         return False
-    form.locator("input[type=email]").fill(ADMIN["email"])
-    form.locator("input[type=password]").fill(ADMIN["password"])
+    form.locator("input[type=email]").fill(admin["email"])
+    form.locator("input[type=password]").fill(admin["password"])
     form.locator("button[type=submit]").click()
     page.wait_for_timeout(4500)
 
@@ -256,7 +287,7 @@ def test_signing_in_actually_lands_back_on_the_dashboard(page):
     returned 200 and left the user staring at the same form.
     """
     if not _sign_in(page):
-        pytest.skip("no demo admin; run scripts/create_admin.py")
+        pytest.skip("no usable admin in .env; run scripts/create_admin.py")
 
     assert page.get_by_role("tab").count() > 0, (
         "signed in but the dashboard did not render"
@@ -266,7 +297,7 @@ def test_signing_in_actually_lands_back_on_the_dashboard(page):
 def test_the_credential_fields_render_for_every_platform(page):
     """The thing that was actually asked for: username + password, per platform."""
     if not _sign_in(page):
-        pytest.skip("no demo admin; run scripts/create_admin.py")
+        pytest.skip("no usable admin in .env; run scripts/create_admin.py")
 
     page.get_by_role("tab", name="ACCOUNTS").first.click()
     page.wait_for_timeout(2500)
@@ -284,7 +315,7 @@ def test_the_credential_fields_render_for_every_platform(page):
 def test_each_platform_shows_its_daily_budget(page):
     """The caps that stand between a personal account and a restriction."""
     if not _sign_in(page):
-        pytest.skip("no demo admin; run scripts/create_admin.py")
+        pytest.skip("no usable admin in .env; run scripts/create_admin.py")
 
     page.get_by_role("tab", name="ACCOUNTS").first.click()
     page.wait_for_timeout(2500)

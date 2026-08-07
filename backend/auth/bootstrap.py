@@ -29,16 +29,42 @@ def _seed_admin() -> None:
     password = os.getenv("BOOTSTRAP_ADMIN_PASSWORD") or ""
 
     if not email or not password:
+        # Only worth saying when neither exists yet; otherwise it is noise on
+        # every boot of a working install.
         return
 
     with session_scope() as db:
         if db.scalar(select(User.id).limit(1)) is not None:
-            return  # already bootstrapped
+            # Not an error, but worth stating: this is why editing
+            # BOOTSTRAP_ADMIN_PASSWORD and restarting appears to do nothing.
+            # The seed guards on an EMPTY table so a later edit cannot quietly
+            # mint a second admin -- which also means it cannot change the
+            # first one's password.
+            logger.info(
+                "[auth] users already exist; BOOTSTRAP_ADMIN_* is ignored. "
+                "To change a password: python scripts/create_admin.py "
+                "--email %s --force", email,
+            )
+            return
 
         try:
             pw_hash = hash_password(password, rounds=settings().bcrypt_rounds)
         except WeakPassword as exc:
-            logger.error("[auth] BOOTSTRAP_ADMIN_PASSWORD rejected: %s", exc)
+            # This used to log once and return, leaving an empty user table, a
+            # correctly-set pair of env vars, and no way to log in. Someone
+            # then edits .env, restarts, and nothing changes -- with the only
+            # clue a single line lost in startup output.
+            logger.error(
+                "[auth] ================================================\n"
+                "[auth] NO ADMIN WAS CREATED. BOOTSTRAP_ADMIN_PASSWORD is "
+                "rejected: %s\n"
+                "[auth] The user table is empty, so NOBODY CAN LOG IN and "
+                "every authenticated route will return 401.\n"
+                "[auth] Fix the password in .env and restart, or run:\n"
+                "[auth]     python scripts/create_admin.py\n"
+                "[auth] ================================================",
+                exc,
+            )
             return
 
         db.add(User(email=email, password_hash=pw_hash, role="admin", display_name="Owner"))

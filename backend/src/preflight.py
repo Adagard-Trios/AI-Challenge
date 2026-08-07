@@ -166,6 +166,32 @@ def _admin_check() -> Check:
     have_password = _isset("BOOTSTRAP_ADMIN_PASSWORD")
 
     if have_email and have_password:
+        # Present is not the same as usable. _seed_admin() hashes the password,
+        # and hash_password rejects anything under the minimum -- it logs at
+        # ERROR and returns, so the account is silently never created and the
+        # variables look correctly set. Someone then edits .env, restarts, and
+        # still cannot log in, with nothing anywhere saying why.
+        password = os.getenv("BOOTSTRAP_ADMIN_PASSWORD") or ""
+        try:
+            from auth.passwords import MIN_PASSWORD_LENGTH
+        except Exception:  # noqa: BLE001
+            MIN_PASSWORD_LENGTH = 10
+
+        if len(password) < MIN_PASSWORD_LENGTH:
+            return Check(
+                "BOOTSTRAP_ADMIN_PASSWORD",
+                ok=False,
+                consequence=(
+                    "Too short to be accepted, so no admin is created and "
+                    "nobody can log in. The seeder rejects it and returns "
+                    "without saying so."
+                ),
+                detail=(
+                    f"{len(password)} characters; needs at least "
+                    f"{MIN_PASSWORD_LENGTH}."
+                ),
+            )
+
         return Check(
             "BOOTSTRAP_ADMIN_EMAIL",
             ok=True,

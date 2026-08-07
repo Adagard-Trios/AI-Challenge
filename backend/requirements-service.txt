@@ -142,3 +142,10 @@ tqdm
 #   pytest, black, flake8, deepeval, ragas      -> dev/test only
 #   pymongo                                     -> unused by the backend
 # ---------------------------------------------------------
+
+# --- Image OCR and hashing ---
+# ~40 MB together; onnxruntime is already present via chromadb, so this adds an
+# ONNX model rather than a framework. Comfortably inside the 512 MB budget, and
+# it is what lets an image-only post carry any text at all into the pipeline.
+rapidocr_onnxruntime
+imagehash

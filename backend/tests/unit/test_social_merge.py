@@ -421,3 +421,48 @@ def test_the_ui_says_where_the_browser_opens():
 
     text = card.read_text(encoding="utf-8")
     assert "machine running this server" in text
+
+
+# --- collected posts reach the agents, not just a table ---------------------
+
+def test_collected_posts_are_handed_to_the_intelligence_pipeline():
+    """
+    REGRESSION. "Collect now" wrote to IngestedPost, whose only reader is
+    /api/ingest/recent -- the COLLECTED POSTS panel. Searching src/nodes for
+    IngestedPost returns nothing, so those posts were displayed and then never
+    classified, never given entities, never threaded into a story, and never
+    reached the intelligence feed.
+
+    Meanwhile the agent loop's own social scraping always went through
+    storage_manager. Two paths, same scraper, different outcomes.
+    """
+    store = _function(ROUTES, "_store")
+    assert "_to_intelligence_pipeline(" in store, (
+        "collected posts stop at the database table"
+    )
+
+    handoff = _function(ROUTES, "_to_intelligence_pipeline")
+    assert "storage_manager" in handoff
+    assert "store_event(" in handoff
+
+
+def test_the_handoff_checks_for_duplicates_first():
+    """storage_manager owns semantic dedup; skipping it fills the vector store."""
+    handoff = _function(ROUTES, "_to_intelligence_pipeline")
+    assert "is_duplicate(" in handoff
+
+
+def test_the_handoff_does_not_invent_a_severity():
+    """
+    The aggregator assigns severity from the LLM. Guessing one here would put a
+    confident-looking value next to model output, which is the provenance
+    problem this codebase keeps having to undo.
+    """
+    handoff = _function(ROUTES, "_to_intelligence_pipeline")
+    assert "Unclassified on purpose" in handoff or "unclassified" in handoff.lower()
+
+
+def test_a_pipeline_failure_does_not_lose_the_collected_posts():
+    """The posts are what the user pressed the button for."""
+    handoff = _function(ROUTES, "_to_intelligence_pipeline")
+    assert "except Exception" in handoff

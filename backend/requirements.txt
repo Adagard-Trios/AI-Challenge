@@ -150,3 +150,20 @@ tensorflow
 streamlit
 plotly
 tf_keras
+# --- Images: OCR, perceptual hashing, similarity search ---
+#
+# RapidOCR runs the PP-OCR models on onnxruntime, which chromadb already pulls
+# in. PaddleOCR-VL tops the current document benchmarks and these are the same
+# models -- but paddlepaddle's Windows install is large and routinely breaks,
+# and an OCR engine that will not install is worth nothing. Same models, a
+# fraction of the risk, and no torch on the critical path.
+#
+# Verified reading a rendered notice at 0.989 confidence.
+rapidocr_onnxruntime
+imagehash
+
+# CLIP ("similar scene") rides on the transformers already in requirements.txt
+# and is OFF by default -- ENABLE_CLIP_SEARCH=1. It is ~600 MB and downloads on
+# first use, which would turn the first image search into a multi-minute wait.
+# The layer that answers the real question -- has this photograph been posted
+# before? -- is the perceptual hash, which is instant and needs neither.

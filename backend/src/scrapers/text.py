@@ -11,7 +11,7 @@ comparison rather than assumption.
 from __future__ import annotations
 
 import re
-from typing import Optional
+from typing import List, Optional
 
 from .hygiene import INSTAGRAM_APP_ID, INSTAGRAM_APP_UA
 
@@ -163,3 +163,147 @@ def fetch_caption_via_private_api(page, media_id: Optional[str]) -> Optional[str
         return None
 
     return None
+
+
+def fetch_media_via_private_api(page, media_id: Optional[str]) -> dict:
+    """
+    Caption AND image URLs, from one call to the same endpoint.
+
+    The response already contained the images; only the caption was being read
+    and the rest discarded. Since every request against a logged-in account
+    spends daily budget, fetching them separately would double the cost of the
+    single most expensive thing we do.
+
+    Returns {"caption": str|None, "images": [url, ...]} and never raises --
+    Instagram reshapes this endpoint often, and a media fetch that fails must
+    degrade to "no images", not abort a scrape.
+    """
+    out: dict = {"caption": None, "images": []}
+    if not media_id:
+        return out
+
+    try:
+        response = page.request.get(
+            f"https://i.instagram.com/api/v1/media/{media_id}/info/",
+            headers={
+                "User-Agent": INSTAGRAM_APP_UA,
+                "X-IG-App-ID": INSTAGRAM_APP_ID,
+            },
+            timeout=20000,
+        )
+        if response.status != 200:
+            return out
+
+        items = (response.json().get("items") or [])
+        if not items:
+            return out
+
+        item = items[0]
+        out["caption"] = (item.get("caption") or {}).get("text")
+
+        # A carousel nests its images; a single post carries them at the top
+        # level. Handle both rather than assuming, since a carousel silently
+        # returning nothing is the kind of gap nobody notices.
+        nodes = item.get("carousel_media") or [item]
+        for node in nodes:
+            url = _best_image_url(node)
+            if url and url not in out["images"]:
+                out["images"].append(url)
+
+    except Exception:
+        return out
+
+    return out
+
+
+# Where each platform puts the post's own photographs, as opposed to avatars,
+# reaction icons and tracking pixels. Kept together so a rotted selector is
+# fixed in one place -- the same reasoning as hygiene.py holding the launch
+# profiles.
+POST_IMAGE_SELECTORS = {
+    "twitter": '[data-testid="tweetPhoto"] img, img[src*="/media/"]',
+    "facebook": 'img[src*="scontent"]',
+    "linkedin": (
+        "img.update-components-image__image, "
+        'img[src*="media.licdn.com/dms/image"]'
+    ),
+}
+
+# Avatars and UI chrome share the same <img> tag as content. Filtering by URL
+# is more durable than by CSS class, which these platforms rotate constantly.
+_IMAGE_URL_REJECT = (
+    "profile_images", "profile_pic", "/emoji/", "/sticker",
+    "spacer", "transparent", "1x1", "rsrc.php",
+)
+
+# Below this the image is an icon or a thumbnail; OCR on it reads nothing and
+# a perceptual hash of it collides with every other icon.
+MIN_IMAGE_DIMENSION = 200
+
+
+def extract_image_urls(container, platform: str, limit: int = 4) -> List[str]:
+    """
+    Photographs attached to one post.
+
+    Best-effort by design: a missed image costs an OCR opportunity, while a
+    raised exception costs the whole post. Every failure path here returns what
+    has been found so far.
+    """
+    selector = POST_IMAGE_SELECTORS.get(platform.lower())
+    if not selector:
+        return []
+
+    urls: List[str] = []
+    try:
+        images = container.locator(selector)
+        for i in range(min(images.count(), limit * 3)):
+            if len(urls) >= limit:
+                break
+            try:
+                node = images.nth(i)
+                url = node.get_attribute("src") or ""
+                if not url.startswith("http"):
+                    continue
+                if any(bad in url for bad in _IMAGE_URL_REJECT):
+                    continue
+
+                # naturalWidth reflects the decoded image, not the CSS box, so
+                # it rejects a large photo scaled down as well as a real icon.
+                try:
+                    width = node.evaluate("el => el.naturalWidth || 0")
+                    height = node.evaluate("el => el.naturalHeight || 0")
+                    if width and width < MIN_IMAGE_DIMENSION:
+                        continue
+                    if height and height < MIN_IMAGE_DIMENSION:
+                        continue
+                except Exception:
+                    pass       # unmeasurable is not a reason to drop it
+
+                if url not in urls:
+                    urls.append(url)
+            except Exception:
+                continue
+    except Exception:
+        return urls
+
+    return urls
+
+
+def _best_image_url(node: dict) -> Optional[str]:
+    """
+    Highest-resolution candidate for one media node.
+
+    Instagram orders `candidates` largest-first, but ordering is a convention
+    rather than a guarantee, so pick by area. OCR on a thumbnail reads nothing
+    useful, which makes this worth the few lines.
+    """
+    versions = (node.get("image_versions2") or {}).get("candidates") or []
+    best, best_area = None, -1
+    for candidate in versions:
+        url = candidate.get("url")
+        if not url:
+            continue
+        area = int(candidate.get("width") or 0) * int(candidate.get("height") or 0)
+        if area > best_area:
+            best, best_area = url, area
+    return best

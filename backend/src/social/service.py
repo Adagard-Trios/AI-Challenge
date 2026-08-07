@@ -469,6 +469,11 @@ class SocialService:
                 "likes": int(post.get("likes") or 0),
                 "shares": int(post.get("retweets") or post.get("shares") or 0),
                 "comments": int(post.get("replies") or post.get("comments") or 0),
+                # Carried through so the caller can fetch and read them. A post
+                # can now arrive with no text at all -- an image-only post used
+                # to be discarded by the scraper, which threw away exactly the
+                # ones whose content lives in the picture.
+                "images": post.get("images") or [],
             } for post in result.posts],
         }
 

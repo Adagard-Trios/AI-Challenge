@@ -16,7 +16,8 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import (
-    Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint,
+    Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -222,3 +223,53 @@ class IngestedPost(Base):
     comments: Mapped[int] = mapped_column(Integer, default=0)
 
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+    images: Mapped[list["PostImage"]] = relationship(
+        back_populates="post", cascade="all, delete-orphan"
+    )
+
+
+class PostImage(Base):
+    """
+    One image attached to a collected post.
+
+    A separate table rather than columns on IngestedPost because a post can
+    carry several images -- an Instagram carousel routinely has ten -- and
+    because the interesting fields (perceptual hash, extracted text, embedding)
+    belong to the image, not the post.
+
+    `phash` is the near-duplicate key. It is indexed and deliberately not
+    unique: the same photograph legitimately appears in several posts, and that
+    recurrence is the signal image search exists to surface -- a flood
+    photograph from 2017 being reposted as today's news.
+    """
+
+    __tablename__ = "post_images"
+    __table_args__ = (
+        Index("ix_post_images_phash", "phash"),
+        Index("ix_post_images_post", "post_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    post_id: Mapped[str] = mapped_column(
+        ForeignKey("ingested_posts.id", ondelete="CASCADE"), index=True
+    )
+
+    url: Mapped[str] = mapped_column(Text)
+    # Absent until the download succeeds. Nullable so a post is never blocked
+    # on fetching its pictures.
+    local_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    phash: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    ocr_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ocr_lang: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # 0-1. Stored so the UI can mark a weak read rather than presenting it as
+    # text that was definitely there -- these are natural-scene photographs,
+    # not scanned documents, and Sinhala accuracy in particular is poor.
+    ocr_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow
+    )
+
+    post: Mapped["IngestedPost"] = relationship(back_populates="images")

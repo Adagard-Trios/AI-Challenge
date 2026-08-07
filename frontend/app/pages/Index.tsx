@@ -5,6 +5,7 @@ import DashboardOverview from "../components/dashboard/DashboardOverview";
 import MapView from "../components/map/MapView";
 import IntelligenceFeed from "../components/intelligence/IntelligenceFeed";
 import StoryFeed from "../components/intelligence/StoryFeed";
+import ImageSearch from "../components/intelligence/ImageSearch";
 import RiskIndices from "../components/dashboard/RiskIndices";
 import StockPredictions from "../components/dashboard/StockPredictions";
 import AnomalyDetection from "../components/dashboard/AnomalyDetection";
@@ -205,7 +206,10 @@ const Index = () => {
             <MapView />
           </TabsContent>
 
-          <TabsContent value="intelligence" className="animate-fade-in">
+          <TabsContent value="intelligence" className="animate-fade-in space-y-8">
+            {/* Search the collected corpus by picture. Answers "has this photo
+                been posted before", which text search cannot. */}
+            <ImageSearch />
             <IntelligenceFeed />
           </TabsContent>
 

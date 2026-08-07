@@ -20,7 +20,7 @@ from typing import List
 from urllib.parse import quote
 
 from .base import ScrapeContext, ScrapeResult
-from .text import clean_fb_text
+from .text import clean_fb_text, extract_image_urls
 
 logger = logging.getLogger("Roger.scrapers.facebook")
 
@@ -147,6 +147,7 @@ def _harvest(ctx: ScrapeContext, max_items: int, source_url: str) -> List[dict]:
                     "poster": _poster_for(ctx, message),
                     "text": text,
                     "url": source_url,
+                    "images": extract_image_urls(message, "facebook"),
                 })
                 found += 1
             except Exception:

@@ -23,7 +23,7 @@ from typing import List, Optional
 from urllib.parse import quote
 
 from .base import ScrapeContext, ScrapeResult
-from .text import clean_linkedin_text
+from .text import clean_linkedin_text, extract_image_urls
 
 logger = logging.getLogger("Roger.scrapers.linkedin")
 
@@ -118,6 +118,7 @@ def _harvest(ctx: ScrapeContext, max_items: int, fallback_url: str) -> List[dict
                     "poster": poster,
                     "text": text,
                     "url": _permalink(post) or fallback_url,
+                    "images": extract_image_urls(post, "linkedin"),
                 })
                 found += 1
             except Exception:

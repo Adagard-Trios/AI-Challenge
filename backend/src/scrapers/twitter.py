@@ -24,6 +24,7 @@ from typing import List, Optional
 from .base import ScrapeContext, ScrapeResult
 from .text import (
     clean_twitter_text,
+    extract_image_urls,
     extract_twitter_timestamp,
     parse_engagement,
 )
@@ -154,6 +155,7 @@ def _harvest(ctx: ScrapeContext, max_items: int, *, poster_override: Optional[st
                     "text": text,
                     "timestamp": timestamp,
                     "url": _post_url(tweet, url_fallback),
+                    "images": extract_image_urls(tweet, "twitter"),
                     **_engagement(tweet),
                 })
                 found_this_pass += 1

@@ -14,14 +14,15 @@ and is never returned, never logged, and never included in any response model.
 from __future__ import annotations
 
 import logging
+import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from auth.db import session_scope
-from auth.dependencies import require_admin
+from auth.dependencies import require_admin, require_user
 from auth.models import User
 
 from . import service as social_service
@@ -271,11 +272,17 @@ def _store(db: Session, user: User, posts: list) -> int:
     stored = 0
     for post in posts:
         text = (post.get("text") or "").strip()
-        if not text:
+        images = post.get("images") or []
+
+        # A post with no caption but an image is now kept -- the scrapers used
+        # to discard those, which threw away exactly the ones whose content
+        # lives in the picture. The hash falls back to the image URLs so two
+        # different image-only posts do not collide on an empty string.
+        if not text and not images:
             continue
 
         content_hash = hashlib.sha256(
-            f"{post.get('poster') or ''}|{text}".encode("utf-8")
+            f"{post.get('poster') or ''}|{text or '|'.join(images)}".encode("utf-8")
         ).hexdigest()
 
         exists = db.query(IngestedPost.id).filter_by(
@@ -284,7 +291,7 @@ def _store(db: Session, user: User, posts: list) -> int:
         if exists:
             continue
 
-        db.add(IngestedPost(
+        row = IngestedPost(
             user_id=user.id,
             platform=post["platform"],
             poster=post.get("poster"),
@@ -295,8 +302,121 @@ def _store(db: Session, user: User, posts: list) -> int:
             shares=post.get("shares", 0),
             comments=post.get("comments", 0),
             content_hash=content_hash,
-        ))
+        )
+        db.add(row)
+        db.flush()          # assigns row.id, which PostImage rows reference
         stored += 1
+
+        # Read the pictures BEFORE handing the post on, so the extracted text
+        # reaches classification with everything else. Doing it afterwards
+        # would mean severity, entities and stories were all decided without
+        # the contents of the image -- which on an image-only post is the
+        # entire post.
+        enriched = text
+        if images:
+            try:
+                from src.images import ingest_post_images
+                from src.images.pipeline import text_from
+
+                results = ingest_post_images(row.id, images, db)
+                enriched = (text + text_from(results)).strip()
+            except Exception:  # noqa: BLE001
+                # An unreadable image costs its text, never the post.
+                logger.exception("[social] image processing failed for a post")
+
+        if enriched:
+            _to_intelligence_pipeline(post, enriched)
 
     db.commit()
     return stored
+
+
+def _to_intelligence_pipeline(post: dict, text: str) -> None:
+    """
+    Hand a collected post to the same ingestion the agents feed.
+
+    Without this, "Collect now" was a dead end. Posts went into IngestedPost,
+    whose only reader is /api/ingest/recent -- the COLLECTED POSTS panel. They
+    were displayed and then never classified, never given entities, never
+    threaded into a story, and never reached the intelligence feed. Searching
+    src/nodes for IngestedPost returns nothing.
+
+    The agent loop's own social scraping (via get_credential) always went
+    through storage_manager, so the two paths were producing different
+    outcomes from the same scraper. This converges them.
+
+    Deliberately best-effort: a storage failure must not lose the posts already
+    written above, which are what the user asked for by pressing the button.
+    """
+    try:
+        from main import storage_manager
+    except Exception:  # noqa: BLE001
+        return
+
+    try:
+        # storage_manager owns semantic dedup; asking first keeps the vector
+        # store from filling with near-identical events.
+        is_dup, _, _ = storage_manager.is_duplicate(text)
+        if is_dup:
+            return
+
+        storage_manager.store_event(
+            event_id=str(uuid.uuid4()),
+            summary=text,
+            domain="social",
+            # Unclassified on purpose. The aggregator assigns severity and
+            # impact_type from the LLM; inventing them here would put a
+            # confident-looking guess next to model output, which is the
+            # provenance problem this codebase keeps having to undo.
+            severity="low",
+            impact_type="risk",
+            confidence_score=0.5,
+            metadata={
+                "platform": post.get("platform"),
+                "poster": post.get("poster"),
+                "url": post.get("url"),
+                "source_tool": "social_collect_now",
+            },
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("[social] could not hand post to the intelligence pipeline")
+
+
+# --- search by picture -------------------------------------------------------
+
+@router.post("/images/search")
+async def search_images(
+    file: UploadFile = File(...),
+    limit: int = 20,
+    user: Optional[User] = Depends(require_user),
+):
+    """
+    Find collected posts containing this image, or one like it.
+
+    Available to any signed-in user rather than admins only: unlike the
+    credential routes, this reads already-collected intelligence and touches no
+    session. Checking whether a photograph has been posted before is exactly
+    the sort of verification a viewer should be able to do.
+
+    Two kinds of answer, and the response says which: `same_image` means the
+    perceptual hashes match, so this photograph has appeared before -- the
+    recycled-disaster-photo case. `similar_scene` means CLIP thinks they look
+    alike, which is context, not proof.
+    """
+    if user is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty upload")
+    if len(data) > 12 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Image is too large (max 12 MB)")
+
+    from src.images.search import search_by_image
+
+    with session_scope() as db:
+        result = search_by_image(data, db, limit=min(limit, 50))
+
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result

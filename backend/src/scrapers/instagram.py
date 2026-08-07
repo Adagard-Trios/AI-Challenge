@@ -21,7 +21,7 @@ import logging
 from typing import List
 
 from .base import ScrapeContext, ScrapeResult
-from .text import extract_media_id_instagram, fetch_caption_via_private_api
+from .text import extract_media_id_instagram, fetch_media_via_private_api
 
 logger = logging.getLogger("Roger.scrapers.instagram")
 
@@ -58,22 +58,30 @@ def _collect_links(ctx: ScrapeContext, max_items: int) -> List[str]:
     return links[:max_items]
 
 
-def _caption_for(ctx: ScrapeContext, url: str) -> str:
-    """Visit a post and return its caption, preferring the untruncated form."""
+def _content_for(ctx: ScrapeContext, url: str) -> tuple:
+    """
+    Visit a post and return (caption, image_urls).
+
+    One request to the media endpoint yields both. Fetching them separately
+    would double the daily budget spent on the most expensive call we make.
+    """
     ctx.goto(url)
 
-    media_id = extract_media_id_instagram(ctx.page)
-    caption = fetch_caption_via_private_api(ctx.page, media_id)
-    if caption:
-        return caption.strip()
+    media = fetch_media_via_private_api(ctx.page, extract_media_id_instagram(ctx.page))
+    caption = (media.get("caption") or "").strip()
+    images = media.get("images") or []
 
-    try:
-        loc = ctx.page.locator(CAPTION_FALLBACK).first
-        if loc.count():
-            return (loc.inner_text() or "").strip()
-    except Exception:
-        pass
-    return ""
+    if not caption:
+        # The DOM truncates long captions, which is why the API is preferred --
+        # but a truncated caption beats none.
+        try:
+            loc = ctx.page.locator(CAPTION_FALLBACK).first
+            if loc.count():
+                caption = (loc.inner_text() or "").strip()
+        except Exception:
+            pass
+
+    return caption, images
 
 
 def _harvest(ctx: ScrapeContext, links: List[str], poster: str) -> List[dict]:
@@ -88,14 +96,21 @@ def _harvest(ctx: ScrapeContext, links: List[str], poster: str) -> List[dict]:
             logger.info("[instagram] daily post budget reached; stopping early")
             break
         try:
-            text = _caption_for(ctx, url)
-            if not text or len(text) < MIN_TEXT_LEN:
+            text, images = _content_for(ctx, url)
+
+            # Previously: `if not text or len(text) < MIN_TEXT_LEN: continue`,
+            # which discarded every image-only post -- on Instagram, a large
+            # share of them, and precisely the ones OCR exists to read. Keep a
+            # post when it has usable text OR an image.
+            if len(text) < MIN_TEXT_LEN and not images:
                 continue
+
             results.append({
                 "source": "Instagram",
                 "poster": poster,
                 "text": text,
                 "url": url,
+                "images": images,
             })
         except Exception as exc:
             from .challenge import ChallengeDetected, SessionExpired

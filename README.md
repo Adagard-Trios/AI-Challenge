@@ -122,8 +122,8 @@ held-out data. See [backend/src/embeddings.py](backend/src/embeddings.py).
 
 ### 📡 Data sources — the actual count
 
-**23 sources are integrated: 19 public web sources plus 4 social platforms.
-12 of the 19 were verified reachable on 6 Aug 2026.**
+**25 sources are integrated: 21 public web sources plus 4 social platforms.
+14 of the 21 were verified reachable on 8 Aug 2026.**
 
 An earlier version of this README claimed "50+ data sources". That was not
 accurate and has been corrected. Every number here is reproducible — run
@@ -145,6 +145,8 @@ this README should state.
 | dailymirror.lk | News | ✅ live |
 | newsfirst.lk | News | ✅ live |
 | ft.lk | News (financial) | ⚠️ intermittent timeouts |
+| adaderana.lk | News | ✅ live |
+| newswire.lk | News | ✅ live |
 | news.lk | Government news portal | ⚠️ 307 redirect loop |
 | eservices.railway.gov.lk | Rail schedules | ⚠️ TLS handshake fails |
 | reddit.com | r/srilanka | ⚠️ 403 from datacenter IPs |

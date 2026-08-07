@@ -79,7 +79,17 @@ def _load(page, tab: str | None = None) -> str:
     # in the suite, the most confusing shape a test failure can take.
     page.errors.clear()
     page.goto(FRONTEND, wait_until="domcontentloaded")
-    page.wait_for_timeout(3000)
+
+    # Wait for content, not for a clock. A fixed sleep passes on a warm server
+    # and fails on a cold one -- Next compiles the route on first request --
+    # so the suite failed intermittently right after a restart and passed on a
+    # re-run, which is the worst signal a test can give.
+    try:
+        page.wait_for_selector('[role="tab"]', timeout=30000)
+    except Exception:
+        pass        # let the assertions report what is actually on the page
+    page.wait_for_timeout(800)     # let the panels settle after mount
+
     if tab:
         el = page.get_by_role("tab", name=tab)
         if el.count():
@@ -100,9 +110,15 @@ def test_no_uncaught_errors_on_load(page):
     _load(page)
     # Filter noise the app cannot control: a backend that is mid-cycle returns
     # 404s for endpoints with no data yet, and those surface as console errors.
+    # Filter noise the app cannot control. 404s come from endpoints with no
+    # data yet on a mid-cycle backend; 401s come from the social panel, which
+    # requires an admin BY DESIGN and renders an explanation rather than
+    # failing. Both are the app working, and neither is an uncaught error.
     real = [
         e for e in page.errors
-        if "favicon" not in e.lower() and "404" not in e
+        if "favicon" not in e.lower()
+        and "404" not in e
+        and "401" not in e
     ]
     assert not real, f"console errors on load: {real[:3]}"
 
@@ -246,7 +262,11 @@ def _sign_in(page) -> bool:
 
     page.errors.clear()
     page.goto(FRONTEND, wait_until="domcontentloaded")
-    page.wait_for_timeout(2500)
+    try:
+        page.wait_for_selector("button", timeout=30000)
+    except Exception:
+        pass
+    page.wait_for_timeout(800)
 
     button = page.get_by_role("button", name="Sign in")
     if not button.count():
@@ -341,3 +361,72 @@ def test_unavailable_models_explain_themselves(page):
         assert "512 MB" in body or "TensorFlow" in body, (
             "the unavailable card does not say why"
         )
+
+
+# --- the features added after the first pass --------------------------------
+
+def test_the_login_page_offers_registration(page):
+    """
+    Self-registration is only real if it is reachable. The form is hidden when
+    the server reports sign-ups closed, so this asserts against what the server
+    actually says rather than assuming.
+    """
+    import requests
+
+    try:
+        opened = requests.get(f"{BACKEND}/api/auth/registration", timeout=5).json()
+    except Exception:  # noqa: BLE001
+        pytest.skip("registration status endpoint unreachable")
+
+    # Start signed out. The browser is module-scoped and the sign-in tests run
+    # before this one, so without clearing the session there is no "Sign in"
+    # button to click and the assertion fails on a page that is working fine.
+    page.errors.clear()
+    page.goto(FRONTEND, wait_until="domcontentloaded")
+    page.evaluate("() => { try { localStorage.clear() } catch (e) {} }")
+    page.goto(FRONTEND, wait_until="domcontentloaded")
+    try:
+        page.wait_for_selector("button", timeout=30000)
+    except Exception:
+        pass
+    page.wait_for_timeout(800)
+
+    button = page.get_by_role("button", name="Sign in")
+    if button.count():
+        button.first.click()
+        page.wait_for_timeout(1200)
+
+    body = " ".join(page.inner_text("body").split())
+    if opened.get("open"):
+        assert "Create one" in body or "Create account" in body, (
+            "sign-ups are open but the login page offers no way to register"
+        )
+    else:
+        assert "invite-only" in body
+
+
+def test_image_search_is_on_the_intel_feed(page):
+    """
+    The panel that answers "has this photograph been posted before" -- the
+    recycled-disaster-photo check text search cannot do.
+    """
+    body = _load(page, "INTEL FEED")
+    assert "SEARCH BY IMAGE" in body.upper(), (
+        "the image search panel is not on screen"
+    )
+
+
+def test_image_search_distinguishes_reuse_from_resemblance(page):
+    """
+    "Same photograph" is evidence; "looks similar" is context. The UI must not
+    let the second read as the first.
+    """
+    source = (
+        PROJECT_ROOT.parent / "frontend" / "app" / "components"
+        / "intelligence" / "ImageSearch.tsx"
+    )
+    if not source.exists():
+        pytest.skip("frontend not present")
+
+    text = source.read_text(encoding="utf-8")
+    assert "SAME IMAGE" in text and "SIMILAR SCENE" in text

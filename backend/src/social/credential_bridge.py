@@ -35,9 +35,34 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import List, Optional
+import threading
+import time
+from typing import Dict, List, Optional
 
 logger = logging.getLogger("Roger.social.credentials")
+
+# Minimum gap between two collections of the SAME account, in seconds.
+#
+# The agent loop runs every 60 seconds. That cadence was chosen for public
+# sources with no account attached, and it is far too fast for a logged-in one:
+# the connector deliberately used 15 minutes and said why -- "hitting a
+# logged-in account that often is the behaviour that earns a challenge".
+#
+# Folding collection into the backend silently inherited the 60s loop, which
+# would have meant touching a personal account 60 times an hour in a perfectly
+# periodic pattern. The daily budget would eventually stop it, but only after
+# roughly two hours of behaviour no human produces -- and exhausting a cap is a
+# worse signal than never approaching one.
+#
+# Jittered, because a request exactly every 900 seconds is its own tell.
+MIN_COLLECTION_INTERVAL = float(os.getenv("SOCIAL_MIN_INTERVAL_SECONDS", "900"))
+INTERVAL_JITTER = 0.25
+
+
+def _next_allowed(base: float) -> float:
+    import random
+
+    return base * random.uniform(1.0, 1.0 + INTERVAL_JITTER)
 
 
 class SessionStoreCredentialStore:
@@ -52,6 +77,28 @@ class SessionStoreCredentialStore:
 
     def __init__(self, store=None):
         self._store = store
+        self._last_served: Dict[str, float] = {}
+        self._gate = threading.Lock()
+
+    def _too_soon(self, platform: str) -> bool:
+        """
+        True when this account was collected too recently.
+
+        Enforced here rather than in the agent loop because this is the one
+        place every scraper passes through -- the loop, the dashboard's
+        "Collect now", and the selftest all call get_credential(). A gate in
+        the loop would leave the other two unpaced.
+        """
+        if MIN_COLLECTION_INTERVAL <= 0:
+            return False
+
+        now = time.monotonic()
+        with self._gate:
+            due = self._last_served.get(platform)
+            if due is not None and now < due:
+                return True
+            self._last_served[platform] = now + _next_allowed(MIN_COLLECTION_INTERVAL)
+            return False
 
     @property
     def store(self):
@@ -63,6 +110,16 @@ class SessionStoreCredentialStore:
 
     def get(self, platform: str):
         from src.scrapers.credentials import SocialCredential, derive_expiry
+
+        if self._too_soon(platform):
+            # DEBUG rather than WARNING: on a 60s loop this is the normal case
+            # roughly fourteen times out of fifteen, and a warning that fires
+            # constantly is one nobody reads.
+            logger.debug(
+                "[credentials] %s collected recently; skipping this cycle "
+                "(minimum gap %.0fs)", platform, MIN_COLLECTION_INTERVAL,
+            )
+            return None
 
         try:
             record = self.store.load(platform)

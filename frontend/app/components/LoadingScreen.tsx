@@ -5,107 +5,93 @@ import { motion } from "framer-motion";
 import { Card } from "./ui/card";
 import { Loader2, Zap } from "lucide-react";
 
+/**
+ * Shown while the first collection cycle is still running.
+ *
+ * Two things this used to do that a platform selling "the reasoning attached"
+ * cannot:
+ *
+ *   1. A progress bar that measured nothing. It advanced 5% every 200ms and
+ *      stopped at 95% -- so it always looked nearly finished, whatever was
+ *      actually happening, and it reached "95%" in under four seconds on a
+ *      cycle that takes minutes. Replaced with elapsed time, which is a real
+ *      number, plus an indeterminate spinner.
+ *
+ *   2. A rotating list of invented status lines -- "Loading Social Media
+ *      Monitor...", "Syncing with Database..." -- none of which were tied to
+ *      any state. They are gone; the one honest thing to say here is what is
+ *      being waited on.
+ *
+ * The figures at the bottom are the ones the README states consistently.
+ * "47+ Data Sources" was here, which is the claim the README explicitly
+ * retracts ("An earlier version of this README claimed '50+ data sources'.
+ * That was not accurate and has been corrected."). Source counts are also the
+ * one figure the README still contradicts itself on -- 19 in one place, 21 in
+ * another -- so this deliberately quotes the three numbers that are
+ * unambiguous everywhere: agents, gauges, districts.
+ */
 export default function LoadingScreen() {
-  const [progress, setProgress] = useState(0);
-  const [loadingText, setLoadingText] = useState("Initializing Roger Platform...");
+  const [seconds, setSeconds] = useState(0);
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      setProgress((prev) => {
-        if (prev >= 95) {
-          return prev;
-        }
-        return prev + 5;
-      });
-    }, 200);
-
-    const textInterval = setInterval(() => {
-      setLoadingText((prev) => {
-        const texts = [
-          "Initializing Roger Platform...",
-          "Connecting to Intelligence Agents...",
-          "Loading Social Media Monitor...",
-          "Loading Political Intelligence...",
-          "Loading Economic Analysis...",
-          "Loading Meteorological Data...",
-          "Establishing WebSocket Connection...",
-          "Syncing with Database...",
-          "Preparing Real-Time Dashboard..."
-        ];
-        const currentIndex = texts.indexOf(prev);
-        return texts[(currentIndex + 1) % texts.length];
-      });
-    }, 1500);
-
-    return () => {
-      clearInterval(interval);
-      clearInterval(textInterval);
-    };
+    const id = setInterval(() => setSeconds((s) => s + 1), 1000);
+    return () => clearInterval(id);
   }, []);
 
   return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-gradient-to-br from-background via-background/95 to-primary/5">
-      <Card className="p-12 bg-card/95 backdrop-blur border-border max-w-lg w-full mx-4">
+    <div className="min-h-screen w-full flex items-center justify-center bg-background">
+      <Card className="p-8 sm:p-12 bg-card border-border max-w-lg w-full mx-4">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}
           className="space-y-8"
         >
-          {/* Logo/Icon */}
+          {/* Logo */}
           <div className="flex items-center justify-center gap-3">
-            <motion.div
-              animate={{ rotate: 360 }}
-              transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
-            >
-              <Zap className="w-12 h-12 text-primary" />
-            </motion.div>
-            <h1 className="text-3xl font-bold bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">
-              ROGER
-            </h1>
+            <Zap className="w-10 h-10 text-primary" />
+            <h1 className="text-3xl font-bold tracking-tight text-foreground">ROGER</h1>
           </div>
 
-          {/* Progress Bar */}
+          {/* An indeterminate bar, because the duration genuinely is not known:
+              a cycle fans out to five agents and finishes when the slowest
+              source answers. */}
           <div className="space-y-3">
-            <div className="h-2 bg-muted rounded-full overflow-hidden">
+            <div
+              className="h-1.5 bg-muted rounded-full overflow-hidden"
+              role="progressbar"
+              aria-label="Collecting intelligence"
+            >
               <motion.div
-                className="h-full bg-gradient-to-r from-primary via-primary/80 to-primary/60"
-                initial={{ width: 0 }}
-                animate={{ width: `${progress}%` }}
-                transition={{ duration: 0.3 }}
+                className="h-full w-1/3 bg-primary rounded-full"
+                animate={{ x: ["-100%", "300%"] }}
+                transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
               />
             </div>
             <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>{progress}%</span>
-              <span>Loading Intelligence Platform</span>
+              <span className="font-mono">{seconds}s elapsed</span>
+              <span>Waiting for the first collection cycle</span>
             </div>
           </div>
 
-          {/* Loading Text */}
-          <motion.div
-            key={loadingText}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.5 }}
-            className="text-center"
-          >
-            <div className="flex items-center justify-center gap-2 text-muted-foreground">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              <p className="text-sm font-mono">{loadingText}</p>
-            </div>
-          </motion.div>
+          <div className="flex items-center justify-center gap-2 text-muted-foreground">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            <p className="text-sm">
+              Five agents are collecting in parallel. This usually takes a few
+              minutes.
+            </p>
+          </div>
 
-          {/* Info */}
           <div className="text-center space-y-2 pt-4 border-t border-border">
-            <p className="text-xs text-muted-foreground">
-              Real-Time Situational Awareness for Sri Lanka
+            <p className="text-sm text-muted-foreground">
+              Early warning for Sri Lanka
             </p>
             <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
-              <span>6 Domain Agents</span>
-              <span>•</span>
-              <span>47+ Data Sources</span>
-              <span>•</span>
-              <span>Live Updates</span>
+              <span>5 domain agents</span>
+              <span aria-hidden="true">•</span>
+              <span>30 river gauges</span>
+              <span aria-hidden="true">•</span>
+              <span>25 districts</span>
             </div>
           </div>
         </motion.div>

@@ -13,9 +13,39 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+/**
+ * Was title "Roger-Intelligence" / description "Crafted by Team Adagard" --
+ * which describes who built it rather than what it does, so a shared link
+ * previewed as nothing useful. These are the strings that show up in a browser
+ * tab, a search result and a WhatsApp preview, which is how this actually gets
+ * passed around.
+ */
 export const metadata: Metadata = {
-  title: "Roger-Intelligence",
-  description: "Crafted by Team Adagard",
+  title: {
+    default: "Roger — early warning for Sri Lanka",
+    template: "%s · Roger",
+  },
+  description:
+    "Continuous monitoring of Sri Lankan flood, power, water, health and economic sources, turned into district-level alerts with the reasoning attached.",
+  applicationName: "Roger",
+  openGraph: {
+    title: "Roger — early warning for Sri Lanka",
+    description:
+      "District-level flood, outage and disruption alerts built from Sri Lanka's own public instrumentation.",
+    siteName: "Roger",
+    locale: "en_LK",
+    type: "website",
+  },
+  twitter: {
+    card: "summary",
+    title: "Roger — early warning for Sri Lanka",
+    description:
+      "District-level flood, outage and disruption alerts built from Sri Lanka's own public instrumentation.",
+  },
+  // A situational-awareness console behind a login has nothing to gain from
+  // being indexed, and the login page showing up in search results is worse
+  // than neutral.
+  robots: { index: false, follow: false },
 };
 
 export default function RootLayout({

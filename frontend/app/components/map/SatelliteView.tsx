@@ -167,13 +167,21 @@ export default function SatelliteView() {
             {/* Map Container */}
             <Card className={`overflow-hidden bg-card border-border ${isFullscreen ? 'flex-1' : ''}`}>
                 <div className={`relative ${isFullscreen ? 'h-[calc(100vh-200px)]' : 'h-[500px] sm:h-[600px]'}`}>
+                    {/* Third-party embed, so it runs sandboxed.
+                        allow-same-origin refers to windy.com's OWN origin --
+                        the embed needs its own storage to render tiles -- and
+                        does not grant it any access to this document.
+                        referrerPolicy keeps our path, which can carry district
+                        context, out of Windy's logs. */}
                     <iframe
                         key={key}
                         src={iframeSrc}
                         className="w-full h-full border-0"
-                        title="Windy Weather Map - Sri Lanka"
+                        title="Windy weather map — Sri Lanka"
                         loading="lazy"
                         allowFullScreen
+                        sandbox="allow-scripts allow-same-origin allow-popups"
+                        referrerPolicy="no-referrer"
                     />
                 </div>
             </Card>

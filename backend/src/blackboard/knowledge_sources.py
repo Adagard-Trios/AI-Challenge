@@ -97,6 +97,17 @@ class KnowledgeSource:
     trigger: Callable[[BoardDigest], Optional[Activation]]
     description: str = ""
 
+    # What actually runs when the controller is active. None means "planned
+    # but not yet executable" -- the source appears on the agenda and is
+    # recorded, which is still useful in shadow, but the controller will never
+    # claim to have run it. A source that silently does nothing while
+    # reporting success is the failure this whole project keeps producing.
+    run: Optional[Callable[[Dict[str, Any]], Any]] = None
+
+    @property
+    def executable(self) -> bool:
+        return callable(self.run)
+
 
 # --- priority ---------------------------------------------------------------
 #
@@ -111,6 +122,22 @@ W_STARVATION = 0.25
 W_COST = 0.15
 
 
+# Starvation is allowed past 1.0 but not without limit.
+#
+# The original had no ceiling, on the reasoning that a source three times
+# overdue must outrank a permanently hot focus. That reasoning is right and the
+# implementation was wrong: a source that has NEVER run reports an age of ~1e9
+# seconds, so every priority came out in the tens of thousands and the ordering
+# between sources became pure noise. Observed on a first run:
+#
+#     econ.cse 69444.52   met.district_social 34722.42   pol.gazette 11574.15
+#
+# Ten times overdue contributes 2.5, still far above the most a focus and a
+# maximal severity can produce together (0.60), so the guarantee survives and
+# the ranking means something again.
+MAX_STARVATION = 10.0
+
+
 def priority(
     *,
     focus_urgency: float = 0.0,
@@ -119,16 +146,11 @@ def priority(
     starvation: float = 0.0,
     cost: float = 0.0,
 ) -> float:
-    """
-    `starvation` is deliberately NOT clamped to 1. A source at three times its
-    max_interval must be able to outrank a permanently hot focus, or a flood
-    that runs for a week starves everything else indefinitely.
-    """
     return (
         W_FOCUS * max(0.0, min(1.0, focus_urgency))
         + W_SEVERITY * max(0.0, min(1.0, domain_severity))
         + W_YIELD * (1.0 - max(0.0, min(1.0, recent_yield)))
-        + W_STARVATION * max(0.0, starvation)
+        + W_STARVATION * max(0.0, min(MAX_STARVATION, starvation))
         - W_COST * max(0.0, min(1.0, cost))
     )
 
@@ -153,8 +175,63 @@ def is_starving(digest: BoardDigest, source: KnowledgeSource) -> bool:
 # --- the registry -----------------------------------------------------------
 
 
+# --- what the collectors actually do ----------------------------------------
+#
+# Each delegates to code that already exists and is already exercised. The
+# point of B5 is WHEN things run, not reimplementing WHAT they do -- rewriting
+# the collectors at the same time as changing the scheduling would make a
+# regression impossible to attribute.
+
+
+def _run_rivernet(_params):
+    from src.utils.utils import tool_rivernet_status
+
+    status = tool_rivernet_status()
+    return {"alerts": len((status or {}).get("alerts", []) or []),
+            "rivers": len((status or {}).get("rivers", []) or [])}
+
+
+def _run_gazette(_params):
+    from src.utils.utils import scrape_government_gazette_impl
+
+    # Deliberately small: the gazette scraper downloads PDFs, and its own
+    # summariser already limits itself to one uncached edition per run to stay
+    # inside the model rate limit.
+    rows = scrape_government_gazette_impl(max_items=3)
+    return {"gazettes": len(rows or [])}
+
+
+def _run_local_news(_params):
+    from src.utils.utils import scrape_local_news_impl
+
+    rows = scrape_local_news_impl(keywords=None, max_articles=30)
+    return {"articles": len(rows or [])}
+
+
+def _run_cse(_params):
+    from src.utils.utils import scrape_cse_stock_impl
+
+    return {"cse": bool(scrape_cse_stock_impl())}
+
+
+def _run_social(params):
+    """
+    Social collection through the registry, so it passes the pacing gate, the
+    daily budget and the challenge backoff exactly as the agent tools do.
+    Bypassing that to "just scrape" is how an account gets banned.
+    """
+    from src.scrapers import registry
+
+    queries = params.get("topic") or params.get("district") or ["sri lanka"]
+    results = {}
+    for query in list(queries)[:2]:
+        outcome = registry.run("scrape_twitter", str(query), max_items=10)
+        results[str(query)] = outcome.get("status")
+    return results
+
+
 def _collector(name, domain, *, max_minutes, focus_kinds=(), tokens=0,
-               min_minutes=1, description=""):
+               min_minutes=1, description="", run=None):
     """
     A source that scrapes. est_tokens is 0 -- scraping costs network and time,
     not model budget, and conflating the two would make the token gate refuse
@@ -185,7 +262,7 @@ def _collector(name, domain, *, max_minutes, focus_kinds=(), tokens=0,
         name=name, domain=domain, est_tokens=tokens,
         min_interval=timedelta(minutes=min_minutes),
         max_interval=timedelta(minutes=max_minutes),
-        trigger=trigger, description=description,
+        trigger=trigger, description=description, run=run,
     )
 
 
@@ -236,27 +313,33 @@ def _register(source: KnowledgeSource) -> None:
 # Collectors. max_interval is the floor that guarantees they still run when
 # nothing is asking for them.
 _register(_collector(
-    "met.rivernet", "meteorological", max_minutes=10,
+    "met.rivernet", "meteorological", max_minutes=10, run=_run_rivernet,
     description="River gauges. Cheapest, highest-signal input; always runs."))
 _register(_collector(
     "met.district_social", "meteorological", max_minutes=120,
-    focus_kinds=("district",),
+    focus_kinds=("district",), run=_run_social,
     description="Social posts for districts a flood focus names, not five "
                 "hardcoded ones."))
 _register(_collector(
     "pol.official_gazette", "political", max_minutes=360,
-    focus_kinds=("district",),
+    focus_kinds=("district",), run=_run_gazette,
     description="Gazettes publish daily; emergency orders follow floods."))
 _register(_collector(
-    "econ.cse", "economical", max_minutes=60,
+    "econ.cse", "economical", max_minutes=60, run=_run_cse,
     description="Colombo Stock Exchange."))
 _register(_collector(
+    "econ.local_news", "economical", max_minutes=45, run=_run_local_news,
+    description="Five Sri Lankan outlets, round-robin."))
+_register(_collector(
     "social.trends", "social", max_minutes=30, focus_kinds=("topic",),
+    run=_run_social,
     description="Follows spiking topics rather than a fixed keyword list."))
 _register(_collector(
     "intel.competitor_mentions", "intelligence", max_minutes=120,
     focus_kinds=("entity",),
-    description="Gated on a non-empty watchlist; today it runs regardless."))
+    description="Gated on a non-empty watchlist; today it runs regardless. "
+                "No run() yet -- it stays on the agenda and is recorded, but "
+                "the controller will never claim to have run it."))
 
 # Summarisers. These are the spend.
 for _domain in ("social", "political", "economical", "meteorological",

@@ -14,12 +14,21 @@ from pydantic import BaseModel, Field
 # =============================================================================
 def reduce_insights(existing: List[Dict], new: Union[List[Dict], str]) -> List[Dict]:
     """
-    Custom reducer for domain_insights.
-    1. If new value is "RESET", clears the list (for continuous loops).
-    2. If new value is a list, appends it to existing list (for parallel agents).
+    Custom reducer for domain_insights: appends, so five agents writing the
+    same key in one superstep merge instead of raising InvalidUpdateError.
+
+    There was a "RESET" string sentinel here that cleared the list, sent by
+    GraphInitiator at the top of every cycle. It cleared nothing: main.py
+    builds a fresh CombinedAgentState per cycle, so the list is already empty
+    when that node runs. What it did do was make a field DECLARED as
+    List[Dict] sometimes hold a str, which every reader then had to defend
+    against.
+
+    The str in the signature stays deliberately. This is a reducer -- it
+    receives whatever a node returns -- and silently keeping the existing list
+    on an unexpected type is better than a TypeError inside a superstep, where
+    the traceback names LangGraph rather than the node at fault.
     """
-    if isinstance(new, str) and new == "RESET":
-        return []
 
     # Ensure existing is a list (handles initialization)
     current = existing if isinstance(existing, list) else []
@@ -119,9 +128,13 @@ class CombinedAgentState(BaseModel):
     # ===== ROUTING CONTROL =====
     # CRITICAL: Used by DataRefreshRouter for conditional edges
     # Must be Optional[str] - None means END, "GraphInitiator" means loop
-    route: Optional[str] = Field(
-        default=None, description="Router decision: None=END, 'GraphInitiator'=loop"
-    )
+    # No `route` field.
+    #
+    # It held a router decision -- None=END, 'GraphInitiator'=loop -- for a
+    # conditional edge that was removed because the "loop" branch could never
+    # be selected, and would have re-entered the graph into LangGraph's
+    # recursion limit if it had been. The 60-second cadence is driven by
+    # main.py's run_graph_loop, outside the graph entirely.
 
     class Config:
         arbitrary_types_allowed = True

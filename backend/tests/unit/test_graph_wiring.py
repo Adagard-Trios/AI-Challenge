@@ -168,16 +168,41 @@ def test_the_dead_orchestrator_is_gone():
 
 def test_no_unreachable_loop_branch():
     """
-    data_refresh_router returns {"route": "END"} unconditionally, so the
-    "GraphInitiator" branch of the conditional edge could never be selected --
+    There was a conditional edge whose "GraphInitiator" branch could never be
+    selected -- data_refresh_router returned {"route": "END"} unconditionally --
     and if it ever had been, the graph would have re-entered itself and hit
     LangGraph's recursion limit rather than looping.
+
+    The router node has since been deleted outright: a node whose entire body
+    returns one constant is not a decision. The assertion stays, because the
+    cadence is still driven by main.py's run_graph_loop and a conditional edge
+    reappearing here would mean someone had tried to loop inside the graph
+    again.
     """
     for name in ("combinedAgentGraph.py",):
         src = (GRAPHS / name).read_text(encoding="utf-8")
         assert "add_conditional_edges" not in src, (
-            f"{name} still routes DataRefreshRouter conditionally"
+            f"{name} loops inside the graph; the 60s cadence belongs to "
+            f"main.py's run_graph_loop"
         )
+
+
+def test_the_no_op_router_is_gone():
+    """
+    REGRESSION. DataRefreshRouter was a node, an edge and a state field whose
+    only job was to return the same answer every time.
+    """
+    src = (GRAPHS / "combinedAgentGraph.py").read_text(encoding="utf-8")
+    node = (PROJECT_ROOT / "src" / "nodes" / "combinedAgentNode.py").read_text(
+        encoding="utf-8")
+    state = (PROJECT_ROOT / "src" / "states" / "combinedAgentState.py").read_text(
+        encoding="utf-8")
+
+    assert 'add_node("DataRefreshRouter"' not in src
+    assert "def data_refresh_router" not in node
+    assert "route: Optional[str] = Field" not in state, (
+        "the route field outlived the router that wrote it"
+    )
 
 
 # --- storage separation ----------------------------------------------------

@@ -85,15 +85,44 @@ def test_an_overdue_source_outranks_a_permanently_hot_focus():
     assert is_starving(digest, REGISTRY["econ.cse"])
 
 
-def test_starvation_is_not_clamped():
+def test_starvation_outranks_any_focus_but_stays_a_number():
     """
-    Clamping it to 1.0 would let a maximal focus tie with a source three times
-    overdue, and ties are decided arbitrarily.
+    Two properties that pull against each other.
+
+    It must exceed 1.0 -- clamping to 1.0 would let a maximal focus tie with a
+    source three times overdue, and ties are decided arbitrarily.
+
+    But it must also be BOUNDED. The first version had no ceiling, and a source
+    that has never run reports an age of ~1e9 seconds, so priorities came out
+    in the tens of thousands and the ordering between sources became noise:
+
+        econ.cse 69444.52   met.district_social 34722.42   pol.gazette 11574.15
+
+    Every source was maximally starving, which is the same as none of them
+    being ranked at all.
     """
-    from src.blackboard.knowledge_sources import priority
+    from src.blackboard.knowledge_sources import MAX_STARVATION, priority
 
     assert priority(starvation=3.0) > priority(focus_urgency=1.0,
                                                domain_severity=1.0)
+    assert priority(starvation=1e6) == priority(starvation=MAX_STARVATION)
+    assert priority(starvation=1e6) < 3.0, "priorities are not human-readable"
+
+
+def test_sources_overdue_by_different_amounts_still_order(monkeypatch):
+    """
+    The specific regression: with an unbounded term and a 1e9 "never ran"
+    default, everything ranked identically-ish and the agenda order was
+    arbitrary.
+    """
+    from src.blackboard.knowledge_sources import REGISTRY, build_agenda
+
+    digest = _digest(last_run={name: 1e9 for name in REGISTRY})
+    agenda = build_agenda(digest)
+
+    assert all(a.priority < 5.0 for a in agenda), (
+        f"priorities are unbounded: {[round(a.priority, 1) for a in agenda[:3]]}"
+    )
 
 
 # --- the budget gate ---------------------------------------------------------

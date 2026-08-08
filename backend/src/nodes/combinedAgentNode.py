@@ -1,7 +1,7 @@
 """
 src/nodes/combinedAgentNode.py
 COMPLETE IMPLEMENTATION - Orchestration nodes for Roger Mother Graph
-Implements: GraphInitiator, FeedAggregator, DataRefresher, DataRefreshRouter
+Implements: GraphInitiator, FeedAggregator, DataRefresher
 UPDATED: Supports 'Opportunity' tracking and new Scoring Logic
 """
 
@@ -690,7 +690,6 @@ JSON array only:"""
         Responsibilities:
         - Increment run counter
         - Timestamp the execution
-        - CRITICAL: Send "RESET" signal to clear domain_insights from previous loop
 
         Returns:
             Dict updating run_count, last_run_ts, and clearing data lists
@@ -706,9 +705,13 @@ JSON array only:"""
         return {
             "run_count": new_run_count,
             "last_run_ts": datetime.utcnow(),
-            # CRITICAL FIX: Send "RESET" string to trigger the custom reducer
-            # in CombinedAgentState. This wipes the list clean for the new loop.
-            "domain_insights": "RESET",
+            # No "domain_insights" key at all.
+            #
+            # This used to send the string "RESET" to trigger a sentinel branch
+            # in the reducer. main.py builds a fresh CombinedAgentState every
+            # cycle, so the list is already empty when this node runs and the
+            # sentinel cleared nothing -- while forcing every reader of
+            # domain_insights to defend against a str where a list is declared.
             "final_ranked_feed": [],
         }
 
@@ -735,7 +738,10 @@ JSON array only:"""
         # Note: In the new state model, this will be a List[Dict] gathered from parallel agents
         incoming = getattr(state, "domain_insights", [])
 
-        # Handle case where incoming might be the "RESET" string (edge case protection)
+        # Defensive, and kept even though the "RESET" sentinel that produced a
+        # str here is gone: domain_insights is reduced, and a reducer that ever
+        # receives the wrong type would otherwise fail deep inside the flatten
+        # below rather than here.
         if isinstance(incoming, str):
             incoming = []
 
@@ -1339,19 +1345,3 @@ JSON array only:"""
     # 4. DATA REFRESH ROUTER
     # =========================================================================
 
-    def data_refresh_router(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Routing decision after dashboard refresh.
-
-        UPDATED: Returns END immediately (non-blocking). The 60-second interval
-        is now managed externally by the caller (main.py run_graph_loop).
-        This makes the graph execution non-blocking.
-
-        Returns:
-            {"route": "END"} to complete this cycle
-        """
-        logger.info("[DataRefreshRouter] Cycle complete. Returning END (non-blocking).")
-
-        # Return END to complete this graph cycle
-        # The 60-second scheduling is handled by the caller in main.py
-        return {"route": "END"}

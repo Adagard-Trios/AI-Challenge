@@ -52,6 +52,29 @@ class CombinedAgentGraph:
     def __init__(self, llm):
         self.llm = llm
 
+    @staticmethod
+    def _controller_is_collecting() -> bool:
+        """
+        Whether the blackboard controller has taken over collection.
+
+        When it has, the five closures below must stand down or everything is
+        collected TWICE -- twice the scraping against one social account,
+        twice the LLM spend against a per-minute limit this project already
+        hits. The two cannot both run.
+
+        Read per cycle rather than captured at build time, so switching back to
+        the fan-out is an env var and a restart rather than a redeploy. Shadow
+        is the default; see src/blackboard/controller.py for why.
+        """
+        try:
+            from src.blackboard.controller import mode
+
+            return mode() == "active"
+        except Exception:  # noqa: BLE001
+            # Cannot tell -- keep collecting. An unreadable flag must not stop
+            # the pipeline that works today.
+            return False
+
     def build_graph(self):
         social_graph = SocialGraphBuilder(self.llm).build_graph()
         intelligence_graph = IntelligenceGraphBuilder(self.llm).build_graph()
@@ -60,6 +83,12 @@ class CombinedAgentGraph:
         meteorological_graph = MeteorologicalGraphBuilder(self.llm).build_graph()
 
         def run_social_agent(state: CombinedAgentState) -> Dict[str, Any]:
+            if self._controller_is_collecting():
+                logger.info(
+                    "[CombinedGraph] SocialAgent standing down; the blackboard "
+                    "controller is collecting"
+                )
+                return {"domain_insights": []}
             logger.info("[CombinedGraph] Invoking SocialAgent...")
             try:
                 result = social_graph.invoke({})
@@ -73,6 +102,12 @@ class CombinedAgentGraph:
                 return {"domain_insights": []}
 
         def run_intelligence_agent(state: CombinedAgentState) -> Dict[str, Any]:
+            if self._controller_is_collecting():
+                logger.info(
+                    "[CombinedGraph] IntelligenceAgent standing down; the blackboard "
+                    "controller is collecting"
+                )
+                return {"domain_insights": []}
             logger.info("[CombinedGraph] Invoking IntelligenceAgent...")
             try:
                 result = intelligence_graph.invoke({})
@@ -86,6 +121,12 @@ class CombinedAgentGraph:
                 return {"domain_insights": []}
 
         def run_economical_agent(state: CombinedAgentState) -> Dict[str, Any]:
+            if self._controller_is_collecting():
+                logger.info(
+                    "[CombinedGraph] EconomicalAgent standing down; the blackboard "
+                    "controller is collecting"
+                )
+                return {"domain_insights": []}
             logger.info("[CombinedGraph] Invoking EconomicalAgent...")
             try:
                 result = economical_graph.invoke({})
@@ -99,6 +140,12 @@ class CombinedAgentGraph:
                 return {"domain_insights": []}
 
         def run_political_agent(state: CombinedAgentState) -> Dict[str, Any]:
+            if self._controller_is_collecting():
+                logger.info(
+                    "[CombinedGraph] PoliticalAgent standing down; the blackboard "
+                    "controller is collecting"
+                )
+                return {"domain_insights": []}
             logger.info("[CombinedGraph] Invoking PoliticalAgent...")
             try:
                 result = political_graph.invoke({})
@@ -112,6 +159,12 @@ class CombinedAgentGraph:
                 return {"domain_insights": []}
 
         def run_meteorological_agent(state: CombinedAgentState) -> Dict[str, Any]:
+            if self._controller_is_collecting():
+                logger.info(
+                    "[CombinedGraph] MeteorologicalAgent standing down; the blackboard "
+                    "controller is collecting"
+                )
+                return {"domain_insights": []}
             logger.info("[CombinedGraph] Invoking MeteorologicalAgent...")
             try:
                 result = meteorological_graph.invoke({})
@@ -136,7 +189,6 @@ class CombinedAgentGraph:
         workflow.add_node("GraphInitiator", orchestrator.graph_initiator)
         workflow.add_node("FeedAggregatorAgent", orchestrator.feed_aggregator_agent)
         workflow.add_node("DataRefresherAgent", orchestrator.data_refresher_agent)
-        workflow.add_node("DataRefreshRouter", orchestrator.data_refresh_router)
 
         workflow.add_edge(START, "GraphInitiator")
 
@@ -152,15 +204,21 @@ class CombinedAgentGraph:
             workflow.add_edge(agent, "FeedAggregatorAgent")
 
         workflow.add_edge("FeedAggregatorAgent", "DataRefresherAgent")
-        workflow.add_edge("DataRefresherAgent", "DataRefreshRouter")
 
-        # data_refresh_router returns {"route": "END"} unconditionally -- the
-        # 60s cadence is driven externally by main.py's run_graph_loop, not by
-        # looping inside the graph. The old conditional edge kept a
-        # "GraphInitiator" branch that nothing could select; had anything ever
-        # selected it, the graph would have re-entered itself and died on
-        # LangGraph's recursion limit rather than looping usefully.
-        workflow.add_edge("DataRefreshRouter", END)
+        # Straight to END.
+        #
+        # There was a DataRefreshRouter node here whose entire body returned
+        # {"route": "END"} unconditionally and whose only edge went to END. It
+        # was the remains of a conditional edge with a "GraphInitiator" branch
+        # that nothing could select -- and had anything selected it, the graph
+        # would have re-entered itself and died on LangGraph's recursion limit
+        # rather than looping usefully.
+        #
+        # The 60-second cadence is driven externally by main.py's
+        # run_graph_loop, so nothing inside the graph needs to decide whether
+        # to continue. A node that always returns the same answer is not a
+        # decision; it is a comment with a scheduling cost.
+        workflow.add_edge("DataRefresherAgent", END)
 
         return workflow.compile()
 

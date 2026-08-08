@@ -229,15 +229,35 @@ def tick() -> Dict[str, Any]:
             if not claim(activation.ks_name, interval_seconds=interval):
                 skipped = "claimed_elsewhere"
 
+        executed = False
+        duration_ms = None
+        if skipped is None and mode() == "active":
+            source = REGISTRY.get(activation.ks_name)
+            if source is not None and source.executable:
+                executed, duration_ms = _execute(source, activation)
+                if executed:
+                    result["executed"] += 1
+                    if activation.est_tokens:
+                        charge_tokens(activation.est_tokens)
+                else:
+                    skipped = "failed"
+            else:
+                # Recorded, not pretended. A source with no run() is still
+                # worth having on the agenda in shadow, but reporting it as
+                # executed would make the ledger lie -- and the ledger is the
+                # only evidence the scheduler's judgement can be checked
+                # against.
+                skipped = "not_executable"
+
         if skipped:
             result["deferred"] += 1
-        records.append((activation, skipped))
+        records.append((activation, skipped, executed, duration_ms))
 
     _record(tick_id, records)
 
     if agenda:
         top = ", ".join(
-            f"{a.ks_name}({a.priority:.2f})" for a, _ in records[:5]
+            f"{r[0].ks_name}({r[0].priority:.2f})" for r in records[:5]
         )
         logger.info(
             "[controller] %s: would run %d, defer %d -- %s",
@@ -298,13 +318,36 @@ def claim(ks_name: str, *, interval_seconds: float) -> bool:
         return True
 
 
+def _execute(source, activation) -> tuple:
+    """
+    Run one knowledge source. Returns (succeeded, duration_ms).
+
+    A failure here is contained to the source: the rest of the agenda still
+    runs. One broken collector must not silence a cycle, which is the failure
+    the fan-out already guards against by catching per agent.
+    """
+    started = time.monotonic()
+    try:
+        source.run(dict(activation.params or {}))
+        duration = int((time.monotonic() - started) * 1000)
+        logger.info("[controller] ran %s in %dms (%s)",
+                    source.name, duration, activation.reason)
+        return True, duration
+    except Exception as exc:  # noqa: BLE001
+        duration = int((time.monotonic() - started) * 1000)
+        logger.warning("[controller] %s failed after %dms: %s",
+                       source.name, duration, exc)
+        return False, duration
+
+
 def _record(tick_id: str, records) -> None:
     """
     Write the agenda to the ledger.
 
-    executed=False throughout in shadow mode, which is what makes this a record
-    of intent rather than of action -- and what lets the comparison be made
-    honestly later.
+    In shadow every row is executed=False, which is what makes this a record of
+    INTENT rather than of action -- and what lets the comparison be made
+    honestly later. In active mode it records what actually ran, so the same
+    table answers both "what would it have done" and "what did it do".
     """
     try:
         from auth.db import session_scope
@@ -312,18 +355,21 @@ def _record(tick_id: str, records) -> None:
         from .models import KSActivation
 
         with session_scope() as session:
-            for activation, skipped in records:
+            for activation, skipped, executed, duration_ms in records:
                 session.add(KSActivation(
                     id=uuid.uuid4().hex,
                     ks_name=activation.ks_name,
                     tick_id=tick_id,
                     decided_at=utcnow(),
-                    executed=False,
+                    executed=bool(executed),
                     skipped_reason=skipped or ("shadow" if mode() == "shadow"
                                                else None),
                     priority=activation.priority,
                     trigger_reason=activation.reason,
                     est_tokens=activation.est_tokens or 0,
+                    duration_ms=duration_ms,
+                    claimed_by=replica_id() if executed else None,
+                    claimed_at=utcnow() if executed else None,
                 ))
     except Exception as exc:  # noqa: BLE001
         logger.warning("[controller] could not record the agenda: %s", exc)

@@ -608,12 +608,13 @@ def run_graph_loop():
         
         logger.info(f"[GRAPH THREAD] Starting cycle #{cycle_count}")
         
+        # A fresh state per cycle. This is why the graph needed no "RESET"
+        # sentinel to clear domain_insights -- it starts empty here.
         initial_state = CombinedAgentState(
             domain_insights=[],
             final_ranked_feed=[],
             run_count=cycle_count,
             max_runs=1,  # Single cycle mode
-            route=None
         )
 
         try:

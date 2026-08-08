@@ -1,0 +1,25 @@
+# home — the Windows PC, exposed through a Cloudflare Tunnel.
+#
+# Versus forwarding a port on the router: the home IP never enters public DNS,
+# it works behind CGNAT (which may make forwarding impossible regardless), TLS
+# is free rather than a cert-manager chicken-and-egg, there is no inbound hole
+# into the LAN, and abuse is absorbed at Cloudflare's edge instead of by the
+# household's uplink.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: roger
+
+resources:
+  - ../../base
+  - cloudflared-deployment.yaml
+
+patches:
+  - path: patch-resources.yaml
+    target:
+      kind: Deployment
+      name: api
+  - path: patch-resources.yaml
+    target:
+      kind: Deployment
+      name: worker

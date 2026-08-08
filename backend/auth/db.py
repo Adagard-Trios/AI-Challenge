@@ -115,6 +115,11 @@ def init_db() -> None:
     # never made.
     from src.blackboard import models as _blackboard_models  # noqa: F401
 
+    # Runtime-editable configuration. It lived in a JSON file inside the source
+    # tree -- and therefore inside the image -- so every edit was lost on the
+    # next restart and each replica kept its own copy.
+    from src.storage import app_config_model as _app_config  # noqa: F401
+
     Base.metadata.create_all(bind=engine())
 
     # create_all creates missing TABLES and ignores existing ones entirely, so

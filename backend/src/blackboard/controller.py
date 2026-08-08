@@ -183,6 +183,61 @@ def _last_run_ages() -> Dict[str, float]:
         return {}
 
 
+def _controller_lock():
+    """
+    A cluster-wide lock around one planning tick, or None when unavailable.
+
+    Distinct from the per-source claim. The claim stops two replicas RUNNING
+    the same source; this stops two replicas PLANNING at once and both writing
+    a full agenda to the ledger — which would not double-collect, but would
+    double the ledger and skew the shadow comparison the ledger exists for.
+
+    pg_advisory_lock is used because it is held by the SESSION and released the
+    moment that session closes, including when the process dies. A lock table
+    would need its own expiry and its own cleanup, and a crashed holder would
+    block every replica until someone noticed.
+
+    Postgres only. SQLite is single-writer anyway, so on a laptop there is
+    nothing to coordinate.
+    """
+    try:
+        from sqlalchemy import text
+
+        from auth.db import engine, session_scope
+
+        if engine().dialect.name != "postgresql":
+            return None
+
+        class _Lock:
+            def __enter__(self):
+                self._scope = session_scope()
+                self._session = self._scope.__enter__()
+                # try_advisory_lock, not advisory_lock: blocking would queue
+                # ticks behind each other and turn a 60-second loop into a
+                # backlog. A replica that cannot get it simply skips this tick.
+                got = self._session.execute(
+                    text("SELECT pg_try_advisory_lock(:k)"),
+                    {"k": 0x1207B0A2},   # arbitrary, constant, this app's
+                ).scalar()
+                self.acquired = bool(got)
+                return self
+
+            def __exit__(self, *exc):
+                try:
+                    self._session.execute(
+                        text("SELECT pg_advisory_unlock(:k)"),
+                        {"k": 0x1207B0A2},
+                    )
+                finally:
+                    self._scope.__exit__(*exc)
+                return False
+
+        return _Lock()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[controller] advisory lock unavailable: %s", exc)
+        return None
+
+
 def tick() -> Dict[str, Any]:
     """
     One planning pass. In shadow mode it records the agenda and runs nothing.
@@ -193,6 +248,21 @@ def tick() -> Dict[str, Any]:
     """
     result = {"mode": mode(), "planned": 0, "deferred": 0, "executed": 0}
 
+    lock = _controller_lock()
+    if lock is not None:
+        with lock as held:
+            if not held.acquired:
+                # Another replica is planning this tick. Skipping is correct:
+                # the agenda it produces is the same one this replica would
+                # have produced, from the same board.
+                result["skipped"] = "another replica holds the controller lock"
+                return result
+            return _tick_locked(result)
+
+    return _tick_locked(result)
+
+
+def _tick_locked(result: Dict[str, Any]) -> Dict[str, Any]:
     digest = build_digest()
     if digest is None:
         return result

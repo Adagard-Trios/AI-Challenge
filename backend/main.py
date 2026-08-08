@@ -1267,8 +1267,52 @@ DEFAULT_INTEL_CONFIG = {
 }
 
 
+INTEL_CONFIG_KEY = "intel"
+
+
+def _config_row():
+    """
+    (session_scope, AppConfig) when a shared database is configured, else None.
+
+    Keyed on DATABASE_URL, like every other store: splitting configuration
+    across a different backend would let two subsystems disagree about what
+    exists.
+    """
+    if not (os.getenv("DATABASE_URL") or "").strip():
+        return None
+    try:
+        from auth.db import session_scope
+        from src.storage.app_config_model import AppConfig
+
+        return session_scope, AppConfig
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[Intel Config] shared store unavailable: %s", exc)
+        return None
+
+
 def load_intel_config() -> dict:
-    """Load intel config from JSON file."""
+    """
+    The watched profiles, keywords and products.
+
+    Prefers the shared database. The JSON file remains the fallback for a
+    laptop with no DATABASE_URL -- and note WHERE that file lives:
+    backend/src/config/, inside the source tree and therefore inside the
+    container image. Edits made against an image layer are lost on the next
+    restart, and with replicas each pod keeps its own copy, so which keywords
+    the agents used depended on which pod served the PUT.
+    """
+    shared = _config_row()
+    if shared is not None:
+        session_scope, AppConfig = shared
+        try:
+            with session_scope() as session:
+                row = session.get(AppConfig, INTEL_CONFIG_KEY)
+                if row and row.doc:
+                    return dict(row.doc)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[Intel Config] shared read failed (%s); "
+                           "falling back to the file", exc)
+
     try:
         if os.path.exists(INTEL_CONFIG_PATH):
             with open(INTEL_CONFIG_PATH, "r", encoding="utf-8") as f:
@@ -1279,7 +1323,24 @@ def load_intel_config() -> dict:
 
 
 def save_intel_config(config: dict) -> bool:
-    """Save intel config to JSON file."""
+    """Persist the config. Shared database when configured, file otherwise."""
+    shared = _config_row()
+    if shared is not None:
+        session_scope, AppConfig = shared
+        try:
+            with session_scope() as session:
+                row = session.get(AppConfig, INTEL_CONFIG_KEY)
+                if row is None:
+                    session.add(AppConfig(key=INTEL_CONFIG_KEY, doc=config,
+                                          revision=1))
+                else:
+                    row.doc = config
+                    row.revision = (row.revision or 0) + 1
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[Intel Config] shared write failed (%s); "
+                           "falling back to the file", exc)
+
     try:
         os.makedirs(os.path.dirname(INTEL_CONFIG_PATH), exist_ok=True)
         with open(INTEL_CONFIG_PATH, "w", encoding="utf-8") as f:
@@ -2228,10 +2289,7 @@ def get_intel_config(_user=Depends(require_user)):
     Intelligence Agent monitors in addition to defaults.
     """
     try:
-        path = _ensure_intel_config()
-        with open(path, "r", encoding="utf-8") as f:
-            config = json.load(f)
-        return {"status": "success", "config": config}
+        return {"status": "success", "config": load_intel_config()}
     except Exception as e:
         logger.error(f"[IntelConfig] Error reading config: {e}")
         return {"status": "error", "error": str(e)}
@@ -2251,11 +2309,7 @@ def update_intel_config(config: IntelConfigUpdate, _user=Depends(require_user)):
     Replaces the entire user config with the provided values.
     """
     try:
-        path = _ensure_intel_config()
-
-        # Read existing config
-        with open(path, "r", encoding="utf-8") as f:
-            existing = json.load(f)
+        existing = load_intel_config()
 
         # Update with provided values
         if config.user_profiles is not None:
@@ -2266,8 +2320,7 @@ def update_intel_config(config: IntelConfigUpdate, _user=Depends(require_user)):
             existing["user_products"] = config.user_products
 
         # Save
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(existing, f, indent=2)
+        save_intel_config(existing)
 
         logger.info(f"[IntelConfig] Updated config: {len(existing.get('user_keywords', []))} keywords, {sum(len(v) for v in existing.get('user_profiles', {}).values())} profiles")
         return {"status": "updated", "config": existing}
@@ -2292,9 +2345,7 @@ def add_intel_target(target_type: str, value: str, platform: Optional[str] = Non
         POST /api/intel/config/add?target_type=profile&value=CompetitorX&platform=twitter
     """
     try:
-        path = _ensure_intel_config()
-        with open(path, "r", encoding="utf-8") as f:
-            config = json.load(f)
+        config = load_intel_config()
 
         added = False
 
@@ -2318,8 +2369,7 @@ def add_intel_target(target_type: str, value: str, platform: Optional[str] = Non
             return {"status": "error", "error": f"Invalid target_type: {target_type}"}
 
         if added:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(config, f, indent=2)
+            save_intel_config(config)
             logger.info(f"[IntelConfig] Added {target_type}: {value}")
 
         return {"status": "added" if added else "already_exists", "config": config}
@@ -2340,9 +2390,7 @@ def remove_intel_target(target_type: str, value: str, platform: Optional[str] = 
         platform: Required for "profile" type
     """
     try:
-        path = _ensure_intel_config()
-        with open(path, "r", encoding="utf-8") as f:
-            config = json.load(f)
+        config = load_intel_config()
 
         removed = False
 
@@ -2364,8 +2412,7 @@ def remove_intel_target(target_type: str, value: str, platform: Optional[str] = 
             return {"status": "error", "error": f"Invalid target_type: {target_type}"}
 
         if removed:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(config, f, indent=2)
+            save_intel_config(config)
             logger.info(f"[IntelConfig] Removed {target_type}: {value}")
 
         return {"status": "removed" if removed else "not_found", "config": config}

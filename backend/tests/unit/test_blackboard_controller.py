@@ -359,13 +359,20 @@ def test_shadow_mode_takes_no_claims():
 
     source = (PROJECT_ROOT / "src" / "blackboard" / "controller.py").read_text(
         encoding="utf-8")
-    tick = next(
-        n for n in ast.walk(ast.parse(source))
-        if isinstance(n, ast.FunctionDef) and n.name == "tick"
-    )
-    body = ast.get_source_segment(source, tick) or ""
-    assert 'mode() == "active"' in body, (
-        "tick() claims without checking the mode, so shadow would hold slots"
+    # Whichever function holds the agenda loop. It moved from tick() into
+    # _tick_locked when the advisory lock was added, and pinning the name
+    # would make this test fail on a refactor that changed nothing it cares
+    # about.
+    bodies = [
+        ast.get_source_segment(source, n) or ""
+        for n in ast.walk(ast.parse(source))
+        if isinstance(n, ast.FunctionDef) and "claim(" in
+        (ast.get_source_segment(source, n) or "")
+    ]
+    assert bodies, "nothing in controller.py claims a source"
+    assert any('mode() == "active"' in b for b in bodies), (
+        "a source is claimed without checking the mode, so shadow would hold "
+        "slots against a controller that executes nothing"
     )
 
 

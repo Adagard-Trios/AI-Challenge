@@ -93,6 +93,53 @@ def _require(user: Optional[User]) -> User:
     return user
 
 
+def _require_a_machine_that_can_log_in() -> None:
+    """
+    Refuse clearly, rather than failing deep inside Playwright.
+
+    Connecting an account is not a thing a server can do, at any memory size.
+    browser_login.py launches with headless=False so a human can complete 2FA
+    and any challenge, and the resulting session is encrypted to the OS keyring
+    of the machine that created it. A container has no display and no keyring.
+
+    Without this the request reaches start_connect, Playwright raises about a
+    missing browser or a missing display, and the user gets a stack trace that
+    reads like a bug in the platform rather than "this cannot be done here".
+
+    DISABLE_LOCAL_SOCIAL_SESSIONS is the signal: the deployment sets it
+    precisely because sessions do not belong on a shared host, so it already
+    means "this machine is not where accounts live".
+    """
+    import os
+
+    disabled = (os.getenv("DISABLE_LOCAL_SOCIAL_SESSIONS", "") or "").strip()
+    if disabled.lower() in ("1", "true", "yes", "on"):
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Accounts cannot be connected on this server. Signing in opens "
+                "a real browser window for two-factor authentication, and the "
+                "session is encrypted to that machine's keyring -- neither "
+                "exists in a container. Run the collector on your own machine "
+                "(backend/scripts/collector.py, see HOSTING.md); it shares "
+                "this database and this pacing gate, so anything it collects "
+                "appears here."
+            ),
+        )
+
+    try:
+        from playwright.sync_api import sync_playwright  # noqa: F401
+    except Exception:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Playwright is not installed on this server, so no browser can "
+                "be opened. This is deliberate in the deployed image: social "
+                "collection runs on the user's own machine. See HOSTING.md."
+            ),
+        )
+
+
 @router.get("/accounts")
 def list_accounts(user: Optional[User] = Depends(require_admin)):
     """Connection state, saved usernames, in-flight jobs and today's budget."""
@@ -166,6 +213,7 @@ def connect(payload: PlatformIn, user: Optional[User] = Depends(require_admin)):
     """
     _require(user)
     platform = _check_platform(payload.platform)
+    _require_a_machine_that_can_log_in()
 
     job = social_service.get_service().start_connect(platform)
     return {
@@ -241,6 +289,9 @@ def collect_now(payload: PlatformIn,
     """
     _require(user)
     platform = _check_platform(payload.platform)
+    # Collection drives a browser too, so the same refusal applies --
+    # and reaching it means the account was connected somewhere else.
+    _require_a_machine_that_can_log_in()
 
     outcome = social_service.get_service().collect(platform)
     posts = outcome.pop("posts", [])

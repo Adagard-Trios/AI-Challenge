@@ -1,0 +1,61 @@
+# The tunnel, as a workload the cluster restarts -- not a terminal window
+# somebody has to remember to reopen.
+#
+# Use a NAMED tunnel, not a quick one. A quick tunnel gets a new hostname on
+# every restart, and NEXT_PUBLIC_* is inlined at BUILD time, so a changed
+# hostname means REBUILDING THE FRONTEND rather than restarting it.
+#
+#   cloudflared tunnel login
+#   cloudflared tunnel create roger
+#   cloudflared tunnel route dns roger roger.example.com
+#   kubectl -n roger create secret generic cloudflared \
+#     --from-file=credentials.json=$HOME/.cloudflared/<TUNNEL-ID>.json
+#
+# Then put this in the tunnel's config (ingress rules live with the tunnel):
+#   ingress:
+#     - hostname: roger.example.com
+#       service: http://frontend:3000
+#     - service: http_status:404
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudflared
+spec:
+  replicas: 2          # two connectors so a rollout does not drop the tunnel
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cloudflared
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cloudflared
+    spec:
+      containers:
+        - name: cloudflared
+          image: cloudflare/cloudflared:latest
+          args:
+            - tunnel
+            - --config
+            - /etc/cloudflared/config.yaml
+            - --no-autoupdate
+            - run
+          volumeMounts:
+            - name: creds
+              mountPath: /etc/cloudflared
+              readOnly: true
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: 2000
+            failureThreshold: 3
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: "20m"
+              memory: "64Mi"
+            limits:
+              memory: "128Mi"
+      volumes:
+        - name: creds
+          secret:
+            secretName: cloudflared

@@ -119,6 +119,92 @@ def test_the_single_worker_warning_stands_down_when_tickets_are_shared(monkeypat
     ws_tickets.assert_single_worker()   # must not raise, and must not object
 
 
+# --- the event bus ----------------------------------------------------------
+
+def test_a_worker_publish_reaches_a_separate_subscriber(monkeypatch):
+    """
+    THE gap this closes, and it was silent.
+
+    Splitting into ROLE=api and ROLE=worker put the broadcaster and the sockets
+    in different processes:
+
+        worker  runs database_polling_loop -> manager.broadcast(...)
+        api     accepts /ws               -> holds active_connections
+
+    ConnectionManager is per-process, so the worker broadcast to a registry
+    that is always empty while the API replicas held every socket and heard
+    nothing. The live dashboard goes SILENT -- not broken-looking, just
+    permanently stale -- in exactly the topology the k8s manifests describe.
+    """
+    _needs_redis()
+
+    import asyncio
+
+    from src.runtime import bus, redis_client
+
+    monkeypatch.setenv("REDIS_URL", REDIS_URL)
+    redis_client.reset()
+
+    received = []
+
+    async def scenario():
+        async def handler(payload):
+            received.append(payload)
+
+        task = asyncio.create_task(bus.subscribe(handler))
+        await asyncio.sleep(1.5)                    # let it subscribe
+        published = bus.publish({"status": "operational", "total_events": 7})
+        await asyncio.sleep(1.5)
+        task.cancel()
+        return published
+
+    published = asyncio.run(scenario())
+
+    assert published is True
+    assert received and received[0]["total_events"] == 7, (
+        "a worker-published event never reached a subscriber; API replicas "
+        "would show a permanently stale dashboard"
+    )
+    redis_client.reset()
+
+
+def test_publish_reports_failure_so_the_caller_can_broadcast_locally(monkeypatch):
+    """
+    The return value is the point. A silent False that the caller ignored would
+    turn "no Redis" into "no live updates" for a single process -- which is the
+    laptop, and which worked fine before any of this existed.
+    """
+    from src.runtime import bus, redis_client
+
+    monkeypatch.delenv("REDIS_URL", raising=False)
+    redis_client.reset()
+
+    assert bus.publish({"anything": True}) is False
+    redis_client.reset()
+
+
+def test_the_poller_broadcasts_locally_only_when_the_bus_is_absent():
+    """
+    Doing both would deliver every event twice to a combined process, and
+    doing neither is the silent-dashboard bug.
+    """
+    import ast
+
+    source = (PROJECT_ROOT / "main.py").read_text(encoding="utf-8")
+    loop = next(
+        n for n in ast.walk(ast.parse(source))
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and n.name == "database_polling_loop"
+    )
+    body = ast.get_source_segment(source, loop) or ""
+
+    assert "bus.publish" in body, "the poller does not publish to the bus"
+    assert "if not bus.publish" in body, (
+        "the poller either always broadcasts locally (duplicate delivery) or "
+        "never does (silent for a single process)"
+    )
+
+
 # --- broadcast de-duplication -----------------------------------------------
 
 def test_two_replicas_do_not_both_broadcast_one_event(monkeypatch):

@@ -301,7 +301,7 @@ except Exception:  # noqa: BLE001
 #
 # src/runtime/shared_state keeps it in Redis when configured and in a process
 # dict when not, so a single local process is unchanged.
-from src.runtime import shared_state  # noqa: E402
+from src.runtime import bus, shared_state  # noqa: E402
 
 shared_state.install_defaults({
     "final_ranked_feed": [],
@@ -811,7 +811,17 @@ async def database_polling_loop():
                     shared_state.update(fields)
 
                     # Broadcast to WebSocket clients
-                    await manager.broadcast(shared_state.snapshot())
+                    # Publish to every replica, and broadcast locally only if
+                    # there is no bus to publish to.
+                    #
+                    # This process holds NO sockets in the api/worker split --
+                    # the API replicas do. Broadcasting locally would reach an
+                    # empty registry and the live dashboard would go silent
+                    # everywhere, which looks like stale data rather than a
+                    # missing fan-out.
+                    snapshot = shared_state.snapshot()
+                    if not bus.publish(snapshot):
+                        await manager.broadcast(snapshot)
                     logger.info(f"[DB_POLLER] Broadcasted {len(unique_feeds)} unique feeds")
 
         except Exception as e:
@@ -879,6 +889,16 @@ async def startup_event():
     # questions. An api replica with the agent loop off still must not poll and
     # broadcast, or every replica broadcasts the same events to its own
     # WebSocket clients and each keeps a private seen-set.
+    # Every process that SERVES sockets subscribes to the bus, including a
+    # combined one -- publish() returns False without Redis, so a single
+    # process still broadcasts locally and this subscriber simply idles.
+    if role in ("", "api"):
+        async def _relay(payload):
+            await manager.broadcast(payload)
+
+        asyncio.create_task(bus.subscribe(_relay))
+        logger.info("[API] Subscribed to the event bus")
+
     if collects:
         asyncio.create_task(database_polling_loop())
         logger.info("[API] Database polling started")

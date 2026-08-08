@@ -18,11 +18,16 @@ as it does today.
 
 WHAT IT DOES NOT DO
 -------------------
-It does not retry, and it does not hide failures behind a cache. A caller that
-needs Redis and cannot reach it has to decide what that means for ITS OWN
-correctness, and the answers differ: a missing cache entry is harmless, while a
-missing pacing deadline means "collect now" to every replica at once. Making
-that decision here, once, for everyone, would get one of them wrong.
+It does not decide what a failure MEANS. A caller that needs Redis and cannot
+reach it has to decide what that implies for ITS OWN correctness, and the
+answers differ: a missing cache entry is harmless, while a missing pacing
+deadline means "collect now" to every replica at once. Making that decision
+here, once, for everyone, would get one of them wrong.
+
+It does retry the CONNECTION, on a cooldown -- see get_client(). This paragraph
+used to say it did not, and that was true until the first real cluster
+deployment showed why it could not stay true: pods start in an order nobody
+controls, and a replica that lost the race with Redis kept its "no" forever.
 """
 
 from __future__ import annotations
@@ -30,6 +35,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time
 from typing import Any
 
 logger = logging.getLogger("Roger.runtime.redis")
@@ -37,11 +43,18 @@ logger = logging.getLogger("Roger.runtime.redis")
 _client: Any = None
 _resolved = False
 _lock = threading.Lock()
+_last_attempt = 0.0
 
 # Short by design. Every call site has a fallback, and a caller blocking for
 # 30 seconds on an unreachable Redis is worse than being told "no" immediately
 # -- especially inside the agent cycle, which has a wall-clock budget.
 CONNECT_TIMEOUT_SECONDS = 3.0
+
+# How long to wait before retrying a FAILED connection. Long enough that a
+# genuinely-down Redis costs one attempt every 10s per process rather than one
+# per call; short enough that a pod which lost the race with redis-0 at startup
+# recovers within a few dashboard refreshes instead of never.
+RETRY_AFTER_SECONDS = 10.0
 
 
 def redis_url() -> str:
@@ -57,20 +70,43 @@ def get_client():
     """
     The shared client, or None when Redis is not configured or not reachable.
 
-    Resolved once. A process that started without Redis does not silently
-    acquire it mid-run, and one that lost it does not reconnect on the hot
-    path -- both would make behaviour depend on timing, which is precisely what
-    makes the single-process assumptions above so hard to see.
-    """
-    global _client, _resolved
+    RESOLVED ONCE PER OUTCOME, NOT ONCE PER PROCESS.
 
-    if _resolved:
+    This used to resolve exactly once and cache the result forever, reasoning
+    that a process which started without Redis should not silently acquire it
+    mid-run. That is defensible for one long-lived process on a laptop. In a
+    cluster it is wrong, and it failed on the first real deployment:
+
+    The API pods started before redis-0 was ready, cached None, and then served
+    PER-PROCESS state forever while reporting healthy. Verified in kind -- the
+    worker wrote run_count=42, the key was present in Redis, a fresh process in
+    the same pod read it back correctly, and the running uvicorn kept answering
+    run_count=0. Nothing errored; the dashboard was simply permanently stale on
+    every replica.
+
+    Pod start order is not controllable, and Redis restarts. So a SUCCESSFUL
+    client is still cached forever -- there is no reconnect-per-call on the hot
+    path, which was the real point of the original design -- but a FAILURE is
+    retried after a cooldown. Bounded, so a Redis that is genuinely down costs
+    one connection attempt every RETRY_AFTER_SECONDS rather than one per call.
+    """
+    global _client, _resolved, _last_attempt
+
+    if _resolved and _client is not None:
         return _client
 
+    # A previous attempt failed. Retry, but not on every call.
+    if _resolved and _client is None:
+        if not redis_url():
+            return None          # not configured; nothing to retry
+        if (time.monotonic() - _last_attempt) < RETRY_AFTER_SECONDS:
+            return None
+
     with _lock:
-        if _resolved:
+        if _resolved and _client is not None:
             return _client
         _resolved = True
+        _last_attempt = time.monotonic()
 
         url = redis_url()
         if not url:
@@ -106,6 +142,7 @@ def get_client():
 
 def reset() -> None:
     """Tests only. Forces the next get_client() to resolve again."""
-    global _client, _resolved
+    global _client, _resolved, _last_attempt
     _client = None
     _resolved = False
+    _last_attempt = 0.0

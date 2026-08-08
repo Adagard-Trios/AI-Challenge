@@ -80,10 +80,14 @@ class MultiCollectionRetriever:
 
     def _init_client(self):
         try:
-            self.client = chromadb.PersistentClient(
-                path=self.persist_directory,
-                settings=Settings(anonymized_telemetry=False, allow_reset=True),
-            )
+            # Shared server when CHROMA_HOST is set, local directory
+            # otherwise. The chatbot must read the SAME corpus the agents
+            # write, and with replicas a local directory guarantees it does
+            # not -- Roger would answer from whatever this pod happened to
+            # collect.
+            from src.storage.chroma_client import get_client
+
+            self.client = get_client(path=self.persist_directory)
 
             all_collections = self.client.list_collections()
             available_names = [c.name for c in all_collections]

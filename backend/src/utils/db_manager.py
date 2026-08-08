@@ -290,11 +290,10 @@ class ChromaDBManager:
         os.makedirs(self.persist_directory, exist_ok=True)
 
         try:
-            # Initialize ChromaDB client with persistence
-            self.client = chromadb.PersistentClient(
-                path=self.persist_directory,
-                settings=Settings(anonymized_telemetry=False, allow_reset=True),
-            )
+            # Shared server when CHROMA_HOST is set, local directory otherwise.
+            from src.storage.chroma_client import get_client
+
+            self.client = get_client(path=self.persist_directory)
 
             # Get or create shared collection for all domains
             self.collection = self.client.get_or_create_collection(

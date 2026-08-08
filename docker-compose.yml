@@ -69,6 +69,25 @@ services:
       retries: 5
     restart: unless-stopped
 
+  chroma:
+    image: chromadb/chroma:latest
+    ports:
+      - "8100:8000"
+    volumes:
+      - chroma-data:/data
+    environment:
+      ANONYMIZED_TELEMETRY: "False"
+      IS_PERSISTENT: "TRUE"
+    healthcheck:
+      # v2 heartbeat. The v1 path returns 410 Gone on current images, so a
+      # healthcheck against it marks a perfectly healthy container unhealthy.
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/api/v2/heartbeat || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    restart: unless-stopped
+
   backend:
     build:
       # Context MUST be the repo root: the image needs models/, which is a
@@ -141,5 +160,6 @@ services:
     restart: unless-stopped
 
 volumes:
+  chroma-data:
   redis-data:
   postgres-data:

@@ -52,10 +52,13 @@ class ChromaDBStore:
 
     def _init_client(self):
         """Initialize ChromaDB client and collection"""
-        self.client = chromadb.PersistentClient(
-            path=config.CHROMADB_PATH,
-            settings=Settings(anonymized_telemetry=False, allow_reset=True),
-        )
+        # Shared server when CHROMA_HOST is set, local directory otherwise.
+        # A local directory cannot be shared, so with replicas each pod would
+        # embed into its own copy and semantic dedup would only ever see what
+        # that pod collected.
+        from .chroma_client import get_client
+
+        self.client = get_client(path=config.CHROMADB_PATH)
 
         # Get or create collection with sentence transformer embedding
         self.collection = self.client.get_or_create_collection(

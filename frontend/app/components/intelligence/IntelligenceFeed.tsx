@@ -11,6 +11,7 @@ import RelevanceBadge from "./RelevanceBadge";
 import WhyThisEvent from "./WhyThisEvent";
 import EntityChips from "./EntityChips";
 import { formatExact, formatWhen } from "@/app/lib/format";
+import { severityStyle } from "@/app/lib/severity";
 
 const IntelligenceFeed = () => {
   const { events, isConnected } = useRogerData();
@@ -62,13 +63,10 @@ const IntelligenceFeed = () => {
 
     const isRisk = item.impact_type === "risk";
 
-    const severityColorMap: Record<string, string> = {
-      critical: "destructive",
-      high: "warning",
-      medium: "primary",
-      low: "secondary",
-    };
-    const severityColor = severityColorMap[item.severity] || "secondary";
+    // One shared ladder (see app/lib/severity.ts). The local map this replaces
+    // sent `medium` to `primary`, which is green -- a medium advisory rendered
+    // in the colour that means "no warning in force".
+    const tone = severityStyle(item.severity);
 
     const domainIconMap: Record<string, React.ComponentType<any>> = {
       social: Newspaper,
@@ -88,31 +86,17 @@ const IntelligenceFeed = () => {
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: idx * 0.05 }}
       >
+        {/* The left rule's THICKNESS also tracks severity, so urgency survives
+            greyscale printing and colour-vision deficiency -- red/green being
+            exactly the pair that does not. */}
         <Card
-          className={`p-4 bg-muted/30 border-l-4 hover:bg-muted/50 transition-colors ${severityColor === "destructive"
-            ? "border-l-destructive"
-            : severityColor === "warning"
-              ? "border-l-warning"
-              : severityColor === "primary"
-                ? "border-l-primary"
-                : "border-l-secondary"
-            }`}
+          className={`p-4 bg-muted/30 hover:bg-muted/50 transition-colors ${tone.border}`}
         >
           <div className="flex items-start justify-between mb-2">
             <div className="flex-1">
               <div className="flex items-center gap-2 mb-1">
                 <Icon className="w-4 h-4" />
-                <Badge
-                  className={
-                    severityColor === "destructive"
-                      ? "bg-destructive text-destructive-foreground"
-                      : severityColor === "warning"
-                        ? "bg-warning text-warning-foreground"
-                        : severityColor === "primary"
-                          ? "bg-primary text-primary-foreground"
-                          : "bg-secondary text-secondary-foreground"
-                  }
-                >
+                <Badge className={tone.badge} title={tone.label}>
                   {item.severity?.toUpperCase()}
                 </Badge>
 

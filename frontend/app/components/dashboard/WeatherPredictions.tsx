@@ -31,10 +31,10 @@ interface WeatherPredictions {
 
 
 const SEVERITY_COLORS = {
-    normal: "bg-green-500/20 text-green-400 border-green-500/50",
-    advisory: "bg-yellow-500/20 text-yellow-400 border-yellow-500/50",
-    warning: "bg-orange-500/20 text-orange-400 border-orange-500/50",
-    critical: "bg-red-500/20 text-red-400 border-red-500/50",
+    normal: "bg-success/20 text-success border-success/50",
+    advisory: "bg-severity-medium/20 text-severity-medium border-severity-medium/50",
+    warning: "bg-severity-high/20 text-severity-high border-severity-high/50",
+    critical: "bg-destructive/20 text-destructive border-destructive/50",
 };
 
 const SEVERITY_ICONS = {
@@ -108,12 +108,12 @@ export default function WeatherPredictions() {
 
     if (loading) {
         return (
-            <div className="bg-slate-800/50 rounded-xl p-6 border border-slate-700/50">
+            <div className="bg-card rounded-xl p-6 border border-border">
                 <div className="animate-pulse space-y-4">
-                    <div className="h-6 bg-slate-700 rounded w-1/3"></div>
+                    <div className="h-6 bg-muted rounded w-1/3"></div>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                         {[1, 2, 3, 4].map((i) => (
-                            <div key={i} className="h-24 bg-slate-700 rounded-lg"></div>
+                            <div key={i} className="h-24 bg-muted rounded-lg"></div>
                         ))}
                     </div>
                 </div>
@@ -125,22 +125,22 @@ export default function WeatherPredictions() {
     const filteredDistricts = getFilteredDistricts();
 
     return (
-        <div className="bg-slate-800/50 rounded-xl p-6 border border-slate-700/50">
+        <div className="bg-card rounded-xl p-6 border border-border">
             {/* Header */}
             <div className="flex items-center justify-between mb-6">
                 <div>
-                    <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                    <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
                         🌦️ Weather Predictions
                     </h2>
                     {predictions && (
-                        <p className="text-sm text-slate-400 mt-1">
+                        <p className="text-sm text-foreground mt-1">
                             Forecast for {predictions.prediction_date}
                         </p>
                     )}
                 </div>
                 <button
                     onClick={fetchPredictions}
-                    className="p-2 rounded-lg bg-slate-700 hover:bg-slate-600 transition-colors"
+                    className="p-2 rounded-lg bg-muted hover:bg-muted/80 transition-colors"
                     title="Refresh predictions"
                 >
                     🔄
@@ -157,10 +157,10 @@ export default function WeatherPredictions() {
                 />
             ) : error ? (
                 <div className="text-center py-8">
-                    <p className="text-red-400 mb-4">{error}</p>
+                    <p className="text-destructive mb-4">{error}</p>
                     <button
                         onClick={fetchPredictions}
-                        className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg transition-colors"
+                        className="px-4 py-2 bg-info hover:bg-info/90 rounded-lg transition-colors"
                     >
                         Retry
                     </button>
@@ -193,20 +193,20 @@ export default function WeatherPredictions() {
                                 onClick={() => setSelectedDistrict(selectedDistrict === district ? null : district)}
                             >
                                 <div className="flex items-center justify-between mb-2">
-                                    <h3 className="font-semibold text-white">{district}</h3>
+                                    <h3 className="font-semibold text-foreground">{district}</h3>
                                     <span className="text-xl">{SEVERITY_ICONS[pred.severity]}</span>
                                 </div>
 
                                 <div className="grid grid-cols-2 gap-2 text-sm">
                                     <div>
-                                        <span className="text-slate-400">Temp:</span>
-                                        <span className="ml-1 text-white">
+                                        <span className="text-foreground">Temp:</span>
+                                        <span className="ml-1 text-foreground">
                                             {pred.temperature.low_c}° - {pred.temperature.high_c}°C
                                         </span>
                                     </div>
                                     <div>
-                                        <span className="text-slate-400">Rain:</span>
-                                        <span className="ml-1 text-white">
+                                        <span className="text-foreground">Rain:</span>
+                                        <span className="ml-1 text-foreground">
                                             {pred.rainfall.amount_mm}mm
                                         </span>
                                     </div>
@@ -214,25 +214,25 @@ export default function WeatherPredictions() {
 
                                 {pred.flood_risk > 0 && (
                                     <div className="mt-2 text-sm">
-                                        <span className="text-red-400">⚠️ Flood Risk: </span>
-                                        <span className="text-white">{(pred.flood_risk * 100).toFixed(0)}%</span>
+                                        <span className="text-destructive">⚠️ Flood Risk: </span>
+                                        <span className="text-foreground">{(pred.flood_risk * 100).toFixed(0)}%</span>
                                     </div>
                                 )}
 
                                 {/* Expanded details */}
                                 {selectedDistrict === district && (
-                                    <div className="mt-4 pt-3 border-t border-white/20 text-sm space-y-2">
+                                    <div className="mt-4 pt-3 border-t border-border text-sm space-y-2">
                                         <div className="flex justify-between">
-                                            <span className="text-slate-400">Rain Probability:</span>
-                                            <span className="text-white">{(pred.rainfall.probability * 100).toFixed(0)}%</span>
+                                            <span className="text-foreground">Rain Probability:</span>
+                                            <span className="text-foreground">{(pred.rainfall.probability * 100).toFixed(0)}%</span>
                                         </div>
                                         <div className="flex justify-between">
-                                            <span className="text-slate-400">Humidity:</span>
-                                            <span className="text-white">{pred.humidity_pct}%</span>
+                                            <span className="text-foreground">Humidity:</span>
+                                            <span className="text-foreground">{pred.humidity_pct}%</span>
                                         </div>
                                         <div className="flex justify-between">
-                                            <span className="text-slate-400">Station:</span>
-                                            <span className="text-white">{pred.station_used}</span>
+                                            <span className="text-foreground">Station:</span>
+                                            <span className="text-foreground">{pred.station_used}</span>
                                         </div>
                                     </div>
                                 )}
@@ -242,7 +242,7 @@ export default function WeatherPredictions() {
 
                     {/* Footer */}
                     {predictions && (
-                        <div className="mt-4 text-xs text-slate-500 text-center space-y-1">
+                        <div className="mt-4 text-xs text-muted-foreground text-center space-y-1">
                             <div>
                                 Generated: {new Date(predictions.generated_at).toLocaleString()} |
                                 {predictions.total_districts} districts

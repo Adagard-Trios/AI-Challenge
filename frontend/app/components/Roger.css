@@ -1,3 +1,10 @@
+/* Roger assistant styles.
+ *
+ * Every colour here used to be a literal hex, so the assistant kept a fixed
+ * dark palette of its own -- it would have stayed dark while the rest of the
+ * app switched to light, and read as a different product bolted on. Now it
+ * inherits the same tokens as everything else and follows the theme.
+ */
 /* Roger Chatbox Styles */
 
 /* Typing Loader Animation */
@@ -6,7 +13,7 @@
   height: 25px;
   border-radius: 4px;
   display: block;
-  background-color: #22c55e;
+  background-color: hsl(var(--primary));
   margin: 0 auto;
   position: relative;
   animation: rogerAnimloader 0.3s 0.3s linear infinite alternate;
@@ -18,7 +25,7 @@
   width: 6px;
   height: 25px;
   border-radius: 4px;
-  background: #22c55e;
+  background: hsl(var(--primary));
   position: absolute;
   top: 50%;
   transform: translateY(-50%);
@@ -47,23 +54,23 @@
 }
 
 .roger-scrollbar::-webkit-scrollbar-track {
-  background: #1a1a1a;
+  background: hsl(var(--muted));
   border-radius: 4px;
 }
 
 .roger-scrollbar::-webkit-scrollbar-thumb {
-  background: #22c55e;
+  background: hsl(var(--primary));
   border-radius: 4px;
 }
 
 .roger-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: #16a34a;
+  background: hsl(var(--primary));
 }
 
 /* Firefox support */
 .roger-scrollbar {
   scrollbar-width: thin;
-  scrollbar-color: #22c55e #1a1a1a;
+  scrollbar-color: hsl(var(--primary)) hsl(var(--muted));
 }
 
 /* Markdown Styling for AI Responses */
@@ -103,7 +110,7 @@
 }
 
 .roger-markdown code {
-  background: #f3f4f6;
+  background: hsl(var(--muted));
   padding: 0.125rem 0.375rem;
   border-radius: 4px;
   font-size: 0.875rem;
@@ -111,8 +118,8 @@
 }
 
 .roger-markdown pre {
-  background: #1f2937;
-  color: #e5e7eb;
+  background: hsl(var(--muted));
+  color: hsl(var(--foreground));
   padding: 0.75rem;
   border-radius: 6px;
   overflow-x: auto;
@@ -126,10 +133,10 @@
 }
 
 .roger-markdown blockquote {
-  border-left: 3px solid #22c55e;
+  border-left: 3px solid hsl(var(--primary));
   padding-left: 0.75rem;
   margin: 0.5rem 0;
-  color: #6b7280;
+  color: hsl(var(--muted-foreground));
   font-style: italic;
 }
 
@@ -141,23 +148,23 @@
 
 .roger-markdown th,
 .roger-markdown td {
-  border: 1px solid #e5e7eb;
+  border: 1px solid hsl(var(--border));
   padding: 0.375rem 0.5rem;
   font-size: 0.875rem;
 }
 
 .roger-markdown th {
-  background: #f9fafb;
+  background: hsl(var(--muted));
   font-weight: 600;
 }
 
 .roger-markdown a {
-  color: #22c55e;
+  color: hsl(var(--primary));
   text-decoration: underline;
 }
 
 .roger-markdown a:hover {
-  color: #16a34a;
+  color: hsl(var(--primary));
 }
 
 .roger-markdown strong {

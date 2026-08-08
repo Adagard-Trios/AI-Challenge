@@ -77,13 +77,13 @@ const BudgetBar = ({ budget }: { budget: Budget | null }) => {
     0, Math.min(1, budget.requests_used / budget.requests_cap),
   );
   const tone =
-    fraction >= 0.9 ? "bg-red-400"
+    fraction >= 0.9 ? "bg-destructive"
       : fraction >= 0.7 ? "bg-amber-400"
         : "bg-emerald-400";
 
   return (
     <div className="mt-2 max-w-xs">
-      <div className="flex items-center justify-between text-xs text-slate-400 mb-0.5">
+      <div className="flex items-center justify-between text-xs text-foreground mb-0.5">
         <span title="Requests this account has made today, against its daily cap">
           Today&apos;s collection budget
         </span>
@@ -91,7 +91,7 @@ const BudgetBar = ({ budget }: { budget: Budget | null }) => {
           {budget.requests_used}/{budget.requests_cap}
         </span>
       </div>
-      <div className="h-1 w-full rounded-full bg-slate-700 overflow-hidden">
+      <div className="h-1 w-full rounded-full bg-muted overflow-hidden">
         <div
           className={`h-full ${tone} transition-all duration-500`}
           style={{ width: `${fraction * 100}%` }}
@@ -201,10 +201,10 @@ const AccountRow = ({
     });
 
   return (
-    <div className="rounded-lg border border-slate-700/50 bg-slate-800/40 p-4">
+    <div className="rounded-lg border border-border bg-card p-4">
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
         <div className="flex items-center gap-2.5">
-          <span className="text-sm font-medium text-slate-100">
+          <span className="text-sm font-medium text-foreground">
             {LABELS[platform] ?? platform}
           </span>
           {account.connected ? (
@@ -213,7 +213,7 @@ const AccountRow = ({
               Connected{account.handle ? ` as ${account.handle}` : ""}
             </span>
           ) : (
-            <span className="text-xs text-slate-500">Not connected</span>
+            <span className="text-xs text-muted-foreground">Not connected</span>
           )}
         </div>
 
@@ -223,7 +223,7 @@ const AccountRow = ({
               <button
                 onClick={collect}
                 disabled={busy !== null}
-                className="flex items-center gap-1.5 rounded-md border border-slate-600 px-2.5 py-1.5 text-xs text-slate-200 hover:bg-slate-700/50 disabled:opacity-50"
+                className="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-foreground hover:bg-muted disabled:opacity-50"
               >
                 {busy === "collect"
                   ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -233,7 +233,7 @@ const AccountRow = ({
               <button
                 onClick={disconnect}
                 disabled={busy !== null}
-                className="flex items-center gap-1.5 rounded-md border border-slate-600 px-2.5 py-1.5 text-xs text-slate-400 hover:bg-slate-700/50 disabled:opacity-50"
+                className="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-foreground hover:bg-muted disabled:opacity-50"
               >
                 <Trash2 className="w-3.5 h-3.5" />
                 Disconnect
@@ -269,7 +269,7 @@ const AccountRow = ({
           into one button would hide which of the two just happened. */}
       <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
         <label className="block">
-          <span className="mb-1 block text-xs text-slate-400">
+          <span className="mb-1 block text-xs text-foreground">
             Username or email
           </span>
           <input
@@ -278,12 +278,12 @@ const AccountRow = ({
             onChange={(e) => setUsername(e.target.value)}
             autoComplete="off"
             placeholder={`your ${LABELS[platform] ?? platform} login`}
-            className="w-full rounded-md border border-slate-600 bg-slate-900/60 px-2.5 py-1.5 text-sm text-slate-100 placeholder:text-slate-600 focus:border-slate-400 focus:outline-none"
+            className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-border focus:outline-none"
           />
         </label>
 
         <label className="block">
-          <span className="mb-1 block text-xs text-slate-400">Password</span>
+          <span className="mb-1 block text-xs text-foreground">Password</span>
           <div className="relative">
             <input
               type={reveal ? "text" : "password"}
@@ -291,13 +291,13 @@ const AccountRow = ({
               onChange={(e) => setPassword(e.target.value)}
               autoComplete="new-password"
               placeholder={account.has_credentials ? "•••••••• (saved)" : "password"}
-              className="w-full rounded-md border border-slate-600 bg-slate-900/60 px-2.5 py-1.5 pr-8 text-sm text-slate-100 placeholder:text-slate-600 focus:border-slate-400 focus:outline-none"
+              className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 pr-8 text-sm text-foreground placeholder:text-muted-foreground focus:border-border focus:outline-none"
             />
             <button
               type="button"
               onClick={() => setReveal(!reveal)}
               aria-label={reveal ? "Hide password" : "Show password"}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
             >
               {reveal ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
             </button>
@@ -309,7 +309,7 @@ const AccountRow = ({
             onClick={saveLogin}
             disabled={busy !== null || !username.trim() || !password}
             title="Encrypt and store on this machine, for pre-filling the login form"
-            className="flex items-center gap-1.5 rounded-md border border-slate-600 px-2.5 py-1.5 text-xs text-slate-200 hover:bg-slate-700/50 disabled:opacity-40"
+            className="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-foreground hover:bg-muted disabled:opacity-40"
           >
             {busy === "save"
               ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -320,7 +320,7 @@ const AccountRow = ({
           <button
             onClick={connect}
             disabled={busy !== null || Boolean(job?.running)}
-            className="flex items-center gap-1.5 rounded-md bg-sky-600/90 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-600 disabled:opacity-40"
+            className="flex items-center gap-1.5 rounded-md bg-info px-3 py-1.5 text-xs font-medium text-info-foreground hover:bg-info/90 disabled:opacity-40"
           >
             {busy === "connect" || job?.running
               ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -334,7 +334,7 @@ const AccountRow = ({
         <button
           onClick={forget}
           disabled={busy !== null}
-          className="mt-2 text-xs text-slate-500 hover:text-slate-300 disabled:opacity-50"
+          className="mt-2 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
         >
           Forget saved login
         </button>
@@ -345,7 +345,7 @@ const AccountRow = ({
         <div
           className={`mt-3 flex items-start gap-2 rounded-md p-2.5 text-xs ${
             job.state === "failed"
-              ? "bg-red-500/10 text-red-300"
+              ? "bg-destructive/10 text-destructive"
               : "bg-sky-500/10 text-sky-200"
           }`}
         >
@@ -363,9 +363,9 @@ const AccountRow = ({
         </p>
       )}
 
-      {note && <p className="mt-3 text-xs text-slate-300">{note}</p>}
+      {note && <p className="mt-3 text-xs text-foreground">{note}</p>}
       {error && (
-        <p className="mt-3 flex items-start gap-2 text-xs text-red-300">
+        <p className="mt-3 flex items-start gap-2 text-xs text-destructive">
           <AlertTriangle className="mt-0.5 w-3.5 h-3.5 shrink-0" />
           {error}
         </p>
@@ -415,11 +415,11 @@ const SocialAccounts = () => {
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="flex items-center gap-2 text-lg font-bold text-slate-100">
+          <h2 className="flex items-center gap-2 text-lg font-bold text-foreground">
             <ShieldCheck className="w-5 h-5 text-sky-400" />
             SOCIAL ACCOUNTS
           </h2>
-          <p className="mt-0.5 text-xs text-slate-400">
+          <p className="mt-0.5 text-xs text-foreground">
             Sign in once per platform. Sessions are reused afterwards, which is
             the single biggest factor in how long a connected account keeps
             working.
@@ -427,7 +427,7 @@ const SocialAccounts = () => {
         </div>
         <button
           onClick={() => void load()}
-          className="flex items-center gap-1.5 rounded-md border border-slate-600 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-slate-700/50"
+          className="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-foreground hover:bg-muted"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
           Refresh
@@ -436,16 +436,16 @@ const SocialAccounts = () => {
 
       {/* Where the browser opens is genuinely surprising if you are not sitting
           at the host machine, so it is stated before the buttons, not after. */}
-      <div className="flex items-start gap-2 rounded-lg border border-slate-700/50 bg-slate-800/30 p-3 text-xs text-slate-300">
-        <Monitor className="mt-0.5 w-4 h-4 shrink-0 text-slate-400" />
+      <div className="flex items-start gap-2 rounded-lg border border-border bg-card p-3 text-xs text-foreground">
+        <Monitor className="mt-0.5 w-4 h-4 shrink-0 text-foreground" />
         <div className="space-y-1">
           <p>
-            <strong className="text-slate-200">Connect</strong> opens a real
+            <strong className="text-foreground">Connect</strong> opens a real
             browser window <em>on the machine running this server</em> and
             pre-fills your login. You complete the sign-in there, including any
             2FA — the password is never submitted for you.
           </p>
-          <p className="text-slate-400">
+          <p className="text-foreground">
             Passwords are encrypted on that machine and are never returned by
             this API. Automated collection is against every platform&apos;s
             terms; the budget bars show how hard each account is being worked so
@@ -459,25 +459,25 @@ const SocialAccounts = () => {
            endpoints store a password and open a browser, so they will not work
            anonymously by design -- but "why is this blank" deserves an answer
            and a command, not silence. */
-        <div className="rounded-lg border border-slate-700/50 bg-slate-800/30 p-4 text-sm">
-          <p className="mb-2 font-medium text-slate-200">
+        <div className="rounded-lg border border-border bg-card p-4 text-sm">
+          <p className="mb-2 font-medium text-foreground">
             Sign in to manage social accounts.
           </p>
-          <p className="mb-3 text-xs text-slate-400">
+          <p className="mb-3 text-xs text-foreground">
             These fields store a password and open a browser on this machine, so
             they always require an account — even when auth is otherwise off.
             There is no self-registration; create the first account with:
           </p>
-          <pre className="overflow-x-auto rounded bg-slate-900/70 p-2.5 text-xs text-slate-300">
+          <pre className="overflow-x-auto rounded bg-background p-2.5 text-xs text-foreground">
             cd backend{"\n"}python scripts/create_admin.py
           </pre>
-          <p className="mt-2 text-xs text-slate-500">
+          <p className="mt-2 text-xs text-muted-foreground">
             That account is only for this dashboard. It is unrelated to your
             social media passwords, which are stored separately and encrypted.
           </p>
         </div>
       ) : loading && accounts.length === 0 ? (
-        <p className="text-sm text-slate-400">Loading accounts…</p>
+        <p className="text-sm text-foreground">Loading accounts…</p>
       ) : (
         <div className="space-y-3">
           {accounts.map((account) => (

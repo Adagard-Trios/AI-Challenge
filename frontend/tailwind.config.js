@@ -67,6 +67,28 @@ module.exports = {
           DEFAULT: "hsl(var(--info))",
           foreground: "hsl(var(--info-foreground))",
         },
+        // The warning ladder (red / amber / yellow / blue). Kept separate from
+        // destructive/warning/info so that changing a BUTTON's colour can never
+        // silently change what a flood severity looks like.
+        // See app/lib/severity.ts.
+        severity: {
+          critical: {
+            DEFAULT: "hsl(var(--severity-critical))",
+            foreground: "hsl(var(--severity-critical-foreground))",
+          },
+          high: {
+            DEFAULT: "hsl(var(--severity-high))",
+            foreground: "hsl(var(--severity-high-foreground))",
+          },
+          medium: {
+            DEFAULT: "hsl(var(--severity-medium))",
+            foreground: "hsl(var(--severity-medium-foreground))",
+          },
+          low: {
+            DEFAULT: "hsl(var(--severity-low))",
+            foreground: "hsl(var(--severity-low-foreground))",
+          },
+        },
         success: {
           DEFAULT: "hsl(var(--success))",
           foreground: "hsl(var(--success-foreground))",

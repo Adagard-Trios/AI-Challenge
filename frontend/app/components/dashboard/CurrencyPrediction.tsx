@@ -24,9 +24,9 @@ interface CurrencyPrediction {
 
 
 const VOLATILITY_COLORS = {
-    low: "bg-green-500/20 text-green-400 border-green-500/50",
-    medium: "bg-yellow-500/20 text-yellow-400 border-yellow-500/50",
-    high: "bg-red-500/20 text-red-400 border-red-500/50",
+    low: "bg-success/20 text-success border-success/50",
+    medium: "bg-severity-medium/20 text-severity-medium border-severity-medium/50",
+    high: "bg-destructive/20 text-destructive border-destructive/50",
 };
 
 export default function CurrencyPrediction() {
@@ -87,25 +87,25 @@ export default function CurrencyPrediction() {
 
     if (loading) {
         return (
-            <div className="bg-slate-800/50 rounded-xl p-6 border border-slate-700/50">
+            <div className="bg-card rounded-xl p-6 border border-border">
                 <div className="animate-pulse space-y-4">
-                    <div className="h-6 bg-slate-700 rounded w-1/3"></div>
-                    <div className="h-20 bg-slate-700 rounded"></div>
+                    <div className="h-6 bg-muted rounded w-1/3"></div>
+                    <div className="h-20 bg-muted rounded"></div>
                 </div>
             </div>
         );
     }
 
     return (
-        <div className="bg-slate-800/50 rounded-xl p-6 border border-slate-700/50">
+        <div className="bg-card rounded-xl p-6 border border-border">
             {/* Header */}
             <div className="flex items-center justify-between mb-6">
                 <div>
-                    <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                    <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
                         💱 USD/LKR Prediction
                     </h2>
                     {prediction && (
-                        <p className="text-sm text-slate-400 mt-1">
+                        <p className="text-sm text-foreground mt-1">
                             Forecast for {prediction.prediction_date}
                         </p>
                     )}
@@ -114,7 +114,7 @@ export default function CurrencyPrediction() {
                     it as "counterclockwise arrows button" or nothing at all. */}
                 <button
                     onClick={fetchPrediction}
-                    className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg bg-slate-700 hover:bg-slate-600 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                    className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg bg-muted hover:bg-muted/80 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                     title="Refresh"
                     aria-label="Refresh USD/LKR prediction"
                 >
@@ -132,10 +132,10 @@ export default function CurrencyPrediction() {
                 />
             ) : error ? (
                 <div className="text-center py-8">
-                    <p className="text-red-400 mb-4">{error}</p>
+                    <p className="text-destructive mb-4">{error}</p>
                     <button
                         onClick={fetchPrediction}
-                        className="px-4 py-2 min-h-[44px] bg-blue-600 hover:bg-blue-500 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                        className="px-4 py-2 min-h-[44px] bg-info text-info-foreground hover:bg-info/90 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                     >
                         Retry
                     </button>
@@ -145,17 +145,17 @@ export default function CurrencyPrediction() {
                     {/* Main Prediction Card */}
                     <div
                         className={`p-6 rounded-xl border mb-6 ${prediction.expected_change_pct < 0
-                            ? "bg-green-500/10 border-green-500/30"
-                            : "bg-red-500/10 border-red-500/30"
+                            ? "bg-success/10 border-success/50"
+                            : "bg-destructive/10 border-destructive/50"
                             }`}
                     >
                         <div className="grid grid-cols-3 gap-4 text-center">
                             <div>
-                                <div className="text-slate-400 text-sm">Current Rate</div>
-                                <div className="text-2xl font-bold text-white">
+                                <div className="text-foreground text-sm">Current Rate</div>
+                                <div className="text-2xl font-bold text-foreground">
                                     {prediction.current_rate.toFixed(2)}
                                 </div>
-                                <div className="text-xs text-slate-500">LKR/USD</div>
+                                <div className="text-xs text-muted-foreground">LKR/USD</div>
                             </div>
                             <div className="flex items-center justify-center">
                                 <div className="text-4xl">
@@ -163,21 +163,21 @@ export default function CurrencyPrediction() {
                                 </div>
                             </div>
                             <div>
-                                <div className="text-slate-400 text-sm">Predicted</div>
-                                <div className="text-2xl font-bold text-white">
+                                <div className="text-foreground text-sm">Predicted</div>
+                                <div className="text-2xl font-bold text-foreground">
                                     {prediction.predicted_rate.toFixed(2)}
                                 </div>
-                                <div className="text-xs text-slate-500">LKR/USD</div>
+                                <div className="text-xs text-muted-foreground">LKR/USD</div>
                             </div>
                         </div>
 
-                        <div className="mt-4 pt-4 border-t border-white/10 flex items-center justify-between">
+                        <div className="mt-4 pt-4 border-t border-border flex items-center justify-between">
                             <div>
-                                <span className="text-slate-400">Expected Change: </span>
+                                <span className="text-foreground">Expected Change: </span>
                                 <span
                                     className={`font-bold ${prediction.expected_change_pct < 0
-                                        ? "text-green-400"
-                                        : "text-red-400"
+                                        ? "text-success"
+                                        : "text-destructive"
                                         }`}
                                 >
                                     {prediction.expected_change_pct > 0 ? "+" : ""}
@@ -197,10 +197,10 @@ export default function CurrencyPrediction() {
                     {/* Trend Info */}
                     <div className="grid grid-cols-2 gap-4 mb-6">
                         {prediction.weekly_trend !== undefined && (
-                            <div className="p-4 rounded-lg bg-slate-700/50">
-                                <div className="text-slate-400 text-sm">7-Day Trend</div>
+                            <div className="p-4 rounded-lg bg-muted">
+                                <div className="text-foreground text-sm">7-Day Trend</div>
                                 <div
-                                    className={`text-lg font-bold ${prediction.weekly_trend < 0 ? "text-green-400" : "text-red-400"
+                                    className={`text-lg font-bold ${prediction.weekly_trend < 0 ? "text-success" : "text-destructive"
                                         }`}
                                 >
                                     {prediction.weekly_trend > 0 ? "+" : ""}
@@ -209,10 +209,10 @@ export default function CurrencyPrediction() {
                             </div>
                         )}
                         {prediction.monthly_trend !== undefined && (
-                            <div className="p-4 rounded-lg bg-slate-700/50">
-                                <div className="text-slate-400 text-sm">30-Day Trend</div>
+                            <div className="p-4 rounded-lg bg-muted">
+                                <div className="text-foreground text-sm">30-Day Trend</div>
                                 <div
-                                    className={`text-lg font-bold ${prediction.monthly_trend < 0 ? "text-green-400" : "text-red-400"
+                                    className={`text-lg font-bold ${prediction.monthly_trend < 0 ? "text-success" : "text-destructive"
                                         }`}
                                 >
                                     {prediction.monthly_trend > 0 ? "+" : ""}
@@ -224,8 +224,8 @@ export default function CurrencyPrediction() {
 
                     {/* Mini Chart (7-day history) */}
                     {history.length > 0 && (
-                        <div className="p-4 rounded-lg bg-slate-700/30">
-                            <div className="text-sm text-slate-400 mb-2">Last 7 Days</div>
+                        <div className="p-4 rounded-lg bg-muted">
+                            <div className="text-sm text-foreground mb-2">Last 7 Days</div>
                             <div className="flex items-end justify-between h-16 gap-1">
                                 {history.map((day, i) => {
                                     const minRate = Math.min(...history.map((h) => h.close));
@@ -236,7 +236,7 @@ export default function CurrencyPrediction() {
                                     return (
                                         <div
                                             key={i}
-                                            className="flex-1 bg-blue-500/50 rounded-t hover:bg-blue-400/50 transition-colors"
+                                            className="flex-1 bg-info/50 rounded-t hover:bg-info/50 transition-colors"
                                             style={{ height: `${Math.max(20, height)}%` }}
                                             title={`${day.date}: ${day.close.toFixed(2)} LKR`}
                                         />
@@ -248,7 +248,7 @@ export default function CurrencyPrediction() {
 
 
                     {/* Footer */}
-                    <div className="mt-4 text-xs text-slate-500 text-center space-y-1">
+                    <div className="mt-4 text-xs text-muted-foreground text-center space-y-1">
                         <div>
                             Generated: {new Date(prediction.generated_at).toLocaleString()} |
                             Model: {prediction.model_version}

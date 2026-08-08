@@ -413,7 +413,12 @@ function useRogerDataInternal() {
   // immediate fetch. Measured with the backend down that produced ~34 API
   // calls per 10s against a 5s interval that should produce 4.
   const isConnectedRef = useRef(isConnected);
-  isConnectedRef.current = isConnected;
+  // Synced in an effect, not assigned during render: a ref write during render
+  // is a side effect in the render phase, which breaks under concurrent
+  // rendering (React can render, discard, and re-render).
+  useEffect(() => {
+    isConnectedRef.current = isConnected;
+  }, [isConnected]);
 
   // REST API fallback polling (when WebSocket disconnected)
   const fetchData = useCallback(async () => {

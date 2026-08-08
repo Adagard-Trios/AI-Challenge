@@ -11,6 +11,7 @@ import HealthAlerts from "./HealthAlerts";
 import CommodityPrices from "./CommodityPrices";
 import WaterSupplyStatus from "./WaterSupplyStatus";
 import { formatTime } from "@/app/lib/format";
+import { severityStyle } from "@/app/lib/severity";
 
 const DashboardOverview = () => {
   // Get data from hook (fetched via various /api/ endpoints)
@@ -121,16 +122,16 @@ const DashboardOverview = () => {
             <>
               <Wifi className="w-5 h-5 text-success" />
               <div className="flex-1">
-                <h3 className="font-bold text-success">SYSTEM OPERATIONAL</h3>
-                <p className="text-xs text-muted-foreground">Real-time intelligence streaming • Run #{dashboard.total_events}</p>
+                <h3 className="font-bold text-success">Live</h3>
+                <p className="text-xs text-muted-foreground">Receiving updates as they arrive • {dashboard.total_events} events this cycle</p>
               </div>
             </>
           ) : (
             <>
               <WifiOff className="w-5 h-5 text-warning" />
               <div className="flex-1">
-                <h3 className="font-bold text-warning">RECONNECTING...</h3>
-                <p className="text-xs text-muted-foreground">Attempting to restore live feed</p>
+                <h3 className="font-bold text-warning">Reconnecting</h3>
+                <p className="text-xs text-muted-foreground">Showing the last data received; retrying in the background</p>
               </div>
             </>
           )}
@@ -197,12 +198,10 @@ const DashboardOverview = () => {
           {sortedEvents.slice(0, 10).map((event, idx) => {
             const isRisk = event.impact_type === 'risk';
             const isFlood = event.category === 'flood_monitoring' || event.category === 'flood_alert';
-            const severityColor = {
-              critical: 'destructive',
-              high: 'warning',
-              medium: 'primary',
-              low: 'secondary'
-            }[event.severity] || 'secondary';
+            // Shared warning ladder. The map this replaces also sent `medium`
+            // to `primary` (green), and built its classes by interpolation so
+            // Tailwind could not see them.
+            const tone = severityStyle(event.severity);
 
             return (
               <motion.div
@@ -211,19 +210,22 @@ const DashboardOverview = () => {
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: idx * 0.05 }}
               >
-                <Card className={`p-4 bg-muted/30 border-l-4 border-l-${severityColor} hover:bg-muted/50 transition-colors`}>
+                <Card className={`p-4 bg-muted/30 hover:bg-muted/50 transition-colors ${tone.border}`}>
                   <div className="flex items-start justify-between mb-2">
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-1 flex-wrap">
-                        <Badge className={`bg-${severityColor} text-${severityColor}-foreground`}>
+                        <Badge className={tone.badge} title={tone.label}>
                           {event.severity.toUpperCase()}
                         </Badge>
+                        {/* "✨ OPPORTUNITY" sat on the same row as landslide and
+                            flood alerts. The distinction still matters; the
+                            sparkle did not. */}
                         <Badge className={isRisk ? "bg-destructive/20 text-destructive" : "bg-success/20 text-success"}>
-                          {isRisk ? "⚠️ RISK" : "✨ OPPORTUNITY"}
+                          {isRisk ? "RISK" : "OPPORTUNITY"}
                         </Badge>
                         <Badge className="border border-border">{event.domain}</Badge>
                         {isFlood && (
-                          <Badge className="bg-info/20 text-info">🌊 FLOOD</Badge>
+                          <Badge className="bg-info/20 text-info">FLOOD</Badge>
                         )}
                       </div>
                       <p className="font-semibold text-sm mb-1">{event.summary}</p>

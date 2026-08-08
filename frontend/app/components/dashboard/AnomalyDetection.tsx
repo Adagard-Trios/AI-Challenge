@@ -121,7 +121,7 @@ const AnomalyDetection = () => {
                         <Brain className="w-6 h-6 text-primary" />
                     </div>
                     <div>
-                        <h2 className="text-lg font-bold">ANOMALY DETECTION</h2>
+                        <h2 className="text-lg font-bold">UNUSUAL ACTIVITY</h2>
                         <p className="text-xs text-muted-foreground font-mono">
                             {/* The old subtitle said "BERT + Isolation Forest"
                                 unconditionally, including when no model was
@@ -250,7 +250,7 @@ const AnomalyDetection = () => {
                                         <div className="flex-1 min-w-0">
                                             <div className="flex items-center gap-2 mb-2 flex-wrap">
                                                 <Badge className="bg-destructive/20 text-destructive text-xs">
-                                                    ⚠️ ANOMALY
+                                                    UNUSUAL
                                                 </Badge>
                                                 <Badge className="border border-border text-xs">
                                                     {anomaly.domain}

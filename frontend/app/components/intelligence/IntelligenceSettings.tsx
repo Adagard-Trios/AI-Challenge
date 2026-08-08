@@ -166,7 +166,7 @@ const IntelligenceSettings = () => {
     };
 
     const platformColors = {
-        twitter: "bg-blue-500/20 text-blue-400 border-blue-500/30",
+        twitter: "bg-info/20 text-info border-info/50",
         facebook: "bg-indigo-500/20 text-indigo-400 border-indigo-500/30",
         linkedin: "bg-sky-500/20 text-sky-400 border-sky-500/30",
     };

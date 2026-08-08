@@ -3,11 +3,94 @@
 @tailwind utilities;
 
 /* =========================================================
-   DESIGN SYSTEM — Tactical Dark UI
+   DESIGN SYSTEM
+
+   Two themes, light first.
+
+   This used to be dark-only: `:root` held the dark palette, there was no
+   `.dark` block, and `darkMode: ["class"]` in the Tailwind config had nothing
+   to switch to. That is the wrong default for who actually uses this. A
+   district officer checks a flood warning on a phone, outdoors, in Sri Lankan
+   daylight -- a 7%-lightness background is close to unreadable there. Dark
+   stays, because the same dashboard gets watched for hours in an operations
+   room; it is now a choice rather than the only option, and the default
+   follows the device.
+
+   SEVERITY
+
+   The --severity-* ramp is the warning ladder that Sri Lanka's DMC, the WMO
+   and the Common Alerting Protocol all use: red / amber / yellow / blue.
+   See app/lib/severity.ts for why event severity deliberately has no green
+   step. Green belongs to all-clear states only, so that green on this
+   dashboard always means one thing.
    ========================================================= */
 
 @layer base {
+
+  /* ---------- Light (default) ---------- */
   :root {
+    --background: 0 0% 100%;
+    --foreground: 220 15% 12%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 220 15% 12%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 15% 12%;
+
+    --primary: 142 55% 30%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 215 20% 92%;
+    --secondary-foreground: 220 15% 20%;
+
+    --muted: 220 14% 96%;
+    /* 4.7:1 on white — passes AA for body text, unlike the usual pale grey. */
+    --muted-foreground: 220 10% 42%;
+
+    --accent: 38 92% 42%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 44%;
+    --destructive-foreground: 0 0% 100%;
+
+    --info: 210 90% 42%;
+    --info-foreground: 0 0% 100%;
+
+    --success: 142 60% 30%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 25 90% 40%;
+    --warning-foreground: 0 0% 100%;
+
+    --border: 220 13% 88%;
+    --input: 220 13% 88%;
+    --ring: 142 55% 30%;
+
+    --radius: 0.25rem;
+
+    /* The warning ladder. Darkened for contrast against a white page. */
+    --severity-critical: 0 72% 44%;
+    --severity-critical-foreground: 0 0% 100%;
+    --severity-high: 25 90% 40%;
+    --severity-high-foreground: 0 0% 100%;
+    --severity-medium: 45 95% 35%;
+    --severity-medium-foreground: 0 0% 100%;
+    --severity-low: 210 85% 40%;
+    --severity-low-foreground: 0 0% 100%;
+
+    --sidebar-background: 220 14% 98%;
+    --sidebar-foreground: 220 15% 20%;
+    --sidebar-primary: 142 55% 30%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 14% 94%;
+    --sidebar-accent-foreground: 220 15% 12%;
+    --sidebar-border: 220 13% 88%;
+    --sidebar-ring: 142 55% 30%;
+  }
+
+  /* ---------- Dark ---------- */
+  .dark {
     --background: 0 0% 7%;
     --foreground: 0 0% 95%;
 
@@ -24,19 +107,25 @@
     --secondary-foreground: 0 0% 95%;
 
     --muted: 0 0% 15%;
-    --muted-foreground: 0 0% 60%;
+    --muted-foreground: 0 0% 65%;
 
     --accent: 38 92% 50%;
     --accent-foreground: 0 0% 5%;
 
-    --destructive: 0 72% 51%;
-    --destructive-foreground: 0 0% 98%;
+    /* Lifted from 51% to 62%: as TEXT this measured 3.6-3.9:1, under AA. 62
+       rather than 58 because the worst case is red text on --card (10%), which
+       is lighter than the page and costs ~0.5 of the ratio. Foregrounds go
+       dark, because at this lightness these are only ever solid chips under
+       dark labels. */
+    --destructive: 0 78% 62%;
+    --destructive-foreground: 0 0% 10%;
 
+    /* White on this blue was 3.3:1. Dark on it is 5.4:1. */
     --info: 210 100% 56%;
-    --info-foreground: 0 0% 98%;
+    --info-foreground: 0 0% 10%;
 
-    --success: 142 76% 36%;
-    --success-foreground: 0 0% 98%;
+    --success: 142 76% 45%;
+    --success-foreground: 0 0% 10%;
 
     --warning: 25 95% 53%;
     --warning-foreground: 0 0% 5%;
@@ -45,7 +134,15 @@
     --input: 0 0% 18%;
     --ring: 142 45% 45%;
 
-    --radius: 0.25rem;
+    /* Same ladder, lightened to hold contrast on a near-black page. */
+    --severity-critical: 0 78% 58%;
+    --severity-critical-foreground: 0 0% 10%;
+    --severity-high: 25 95% 55%;
+    --severity-high-foreground: 0 0% 10%;
+    --severity-medium: 45 95% 55%;
+    --severity-medium-foreground: 0 0% 10%;
+    --severity-low: 210 90% 62%;
+    --severity-low-foreground: 0 0% 10%;
 
     --sidebar-background: 0 0% 5%;
     --sidebar-foreground: 0 0% 85%;
@@ -55,12 +152,6 @@
     --sidebar-accent-foreground: 0 0% 95%;
     --sidebar-border: 0 0% 15%;
     --sidebar-ring: 142 45% 45%;
-
-    --shadow-tactical: 0 4px 20px hsl(0 0% 0% / 0.5);
-    --shadow-glow-primary: 0 0 20px hsl(142 45% 45% / 0.3);
-    --shadow-glow-accent: 0 0 20px hsl(38 92% 50% / 0.3);
-
-    --transition-tactical: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   body {
@@ -90,68 +181,16 @@
    ========================================================= */
 
 @layer utilities {
-  .tactical-grid {
-    background-image:
-      linear-gradient(hsl(0 0% 20% / 0.1) 1px, transparent 1px),
-      linear-gradient(90deg, hsl(0 0% 20% / 0.1) 1px, transparent 1px);
-    background-size: 20px 20px;
-  }
 
-  .scan-line {
-    animation: scan 3s linear infinite;
-  }
+  /* Removed: .tactical-grid, .scan-line, .pulse-border, .status-active and
+     .data-display.
 
-  @keyframes scan {
-    0% {
-      transform: translateY(-100%);
-    }
-
-    100% {
-      transform: translateY(100%);
-    }
-  }
-
-  .pulse-border {
-    animation: pulse-border 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-  }
-
-  @keyframes pulse-border {
-
-    0%,
-    100% {
-      border-color: hsl(142 45% 45% / 0.3);
-    }
-
-    50% {
-      border-color: hsl(142 45% 45% / 0.8);
-    }
-  }
-
-  .data-display {
-    @apply font-mono text-sm tracking-tight;
-  }
-
-  .status-active {
-    @apply relative;
-  }
-
-  .status-active::before {
-    content: "";
-    @apply absolute -left-3 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-success;
-    animation: pulse-dot 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-  }
-
-  @keyframes pulse-dot {
-
-    0%,
-    100% {
-      opacity: 1;
-    }
-
-    50% {
-      opacity: 0.4;
-    }
-  }
+     All five were defined here and used by nothing -- verified against every
+     component. They were the CSS half of a mission-control aesthetic that does
+     not fit a civilian early-warning tool for district offices, and a scan-line
+     sweeping across a flood warning is decoration pretending to be
+     instrumentation. The scrollbar and touch utilities below are kept: those do
+     real work. */
 
   /* Hide scrollbar utility for mobile horizontal scroll */
   .hide-scrollbar {

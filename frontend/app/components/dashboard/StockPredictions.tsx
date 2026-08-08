@@ -90,9 +90,9 @@ const StockPredictions = () => {
 
   const getTrendColor = (trend: string) => {
     switch (trend) {
-      case 'bullish': return 'bg-green-500/20 text-green-400 border-green-500/30';
-      case 'bearish': return 'bg-red-500/20 text-red-400 border-red-500/30';
-      default: return 'bg-slate-500/20 text-slate-400 border-slate-500/30';
+      case 'bullish': return 'bg-success/20 text-success border-success/50';
+      case 'bearish': return 'bg-destructive/20 text-destructive border-destructive/50';
+      default: return 'bg-muted text-foreground border-border';
     }
   };
 
@@ -134,17 +134,17 @@ const StockPredictions = () => {
               <div className="text-lg font-bold">{predictions.summary.total_stocks}</div>
               <div className="text-xs text-muted-foreground">Total</div>
             </div>
-            <div className="p-2 rounded-lg bg-green-500/10 text-center">
-              <div className="text-lg font-bold text-green-400">{predictions.summary.bullish}</div>
-              <div className="text-xs text-green-400">Bullish 📈</div>
+            <div className="p-2 rounded-lg bg-success/10 text-center">
+              <div className="text-lg font-bold text-success">{predictions.summary.bullish}</div>
+              <div className="text-xs text-success">Bullish 📈</div>
             </div>
-            <div className="p-2 rounded-lg bg-red-500/10 text-center">
-              <div className="text-lg font-bold text-red-400">{predictions.summary.bearish}</div>
-              <div className="text-xs text-red-400">Bearish 📉</div>
+            <div className="p-2 rounded-lg bg-destructive/10 text-center">
+              <div className="text-lg font-bold text-destructive">{predictions.summary.bearish}</div>
+              <div className="text-xs text-destructive">Bearish 📉</div>
             </div>
-            <div className="p-2 rounded-lg bg-slate-500/10 text-center">
-              <div className="text-lg font-bold text-slate-400">{predictions.summary.neutral}</div>
-              <div className="text-xs text-slate-400">Neutral ➡️</div>
+            <div className="p-2 rounded-lg bg-muted text-center">
+              <div className="text-lg font-bold text-foreground">{predictions.summary.neutral}</div>
+              <div className="text-xs text-foreground">Neutral ➡️</div>
             </div>
           </div>
         )}
@@ -194,7 +194,7 @@ const StockPredictions = () => {
                     <div className="font-mono text-lg">
                       LKR {stock.predicted_price?.toFixed(2) || '---'}
                     </div>
-                    <div className={`text-sm font-mono ${stock.expected_change_pct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                    <div className={`text-sm font-mono ${stock.expected_change_pct >= 0 ? 'text-success' : 'text-destructive'}`}>
                       {stock.expected_change_pct >= 0 ? '+' : ''}{stock.expected_change_pct?.toFixed(2) || '0.00'}%
                     </div>
                   </div>

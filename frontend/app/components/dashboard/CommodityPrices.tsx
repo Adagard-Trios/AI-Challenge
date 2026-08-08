@@ -43,8 +43,8 @@ const CommodityPrices = ({ commodityData }: CommodityPricesProps) => {
         <Card className="p-4 bg-card border-border">
             <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
-                    <div className="p-2 rounded-lg bg-green-500/20">
-                        <ShoppingBasket className="w-5 h-5 text-green-500" />
+                    <div className="p-2 rounded-lg bg-success/20">
+                        <ShoppingBasket className="w-5 h-5 text-success" />
                     </div>
                     <div>
                         <h3 className="font-bold text-sm">🛒 COMMODITIES</h3>

@@ -15,6 +15,7 @@ import {
 import { Badge } from "../ui/badge";
 import { apiGet } from "../../lib/api";
 import { formatExact, formatWhen } from "../../lib/format";
+import { severityStyle } from "../../lib/severity";
 
 /**
  * Ongoing stories — events threaded together instead of deduplicated away.
@@ -84,12 +85,9 @@ const STATE_CONFIG: Record<
     },
 };
 
-const SEVERITY_TONE: Record<string, string> = {
-    critical: "bg-destructive/20 text-destructive",
-    high: "bg-destructive/15 text-destructive",
-    medium: "bg-warning/20 text-warning",
-    low: "bg-muted text-muted-foreground",
-};
+/* SEVERITY_TONE lived here too -- a third independent copy, and like the one in
+   IndexDrivers it painted `critical` and `high` the same red. Shared ladder
+   now; see app/lib/severity.ts. */
 
 const StoryCard = ({ story }: { story: Story }) => {
     const [open, setOpen] = useState(false);
@@ -109,11 +107,8 @@ const StoryCard = ({ story }: { story: Story }) => {
 
                         {story.peak_severity && (
                             <Badge
-                                className={`${
-                                    SEVERITY_TONE[story.peak_severity.toLowerCase()] ??
-                                    SEVERITY_TONE.low
-                                } text-xs`}
-                                title="Highest severity seen across this story"
+                                className={`${severityStyle(story.peak_severity).soft} text-xs`}
+                                title={`Highest severity seen across this story — ${severityStyle(story.peak_severity).label}`}
                             >
                                 PEAK {story.peak_severity.toUpperCase()}
                             </Badge>

@@ -146,7 +146,11 @@ const RiverNetStatus = ({ riverData, compact = false }: RiverNetStatusProps) => 
                 <div className="flex items-center gap-3 mb-4">
                     <Waves className="w-6 h-6 text-info" />
                     <h3 className="font-bold">FLOOD MONITORING</h3>
-                    <Badge className="ml-auto bg-muted">Offline</Badge>
+                    {/* text-muted-foreground is not optional here: Badge's
+                        default variant carries text-primary-foreground, so
+                        overriding only the background left white-on-light-grey
+                        (1.1:1) once a light theme existed. */}
+                    <Badge className="ml-auto bg-muted text-muted-foreground">Offline</Badge>
                 </div>
                 <div className="text-center text-muted-foreground py-4">
                     <Waves className="w-10 h-10 mx-auto mb-2 opacity-50" />

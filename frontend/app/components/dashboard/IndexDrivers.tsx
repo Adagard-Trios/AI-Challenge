@@ -4,6 +4,7 @@ import { useState } from "react";
 import { ChevronDown, ChevronRight, HelpCircle } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { formatPercent } from "../../lib/format";
+import { severityStyle } from "../../lib/severity";
 
 /**
  * The events behind a risk index.
@@ -30,12 +31,9 @@ export interface Driver {
     contribution: number;
 }
 
-const SEVERITY_TONE: Record<string, string> = {
-    critical: "bg-destructive/20 text-destructive",
-    high: "bg-destructive/15 text-destructive",
-    medium: "bg-warning/20 text-warning",
-    low: "bg-muted text-muted-foreground",
-};
+/* SEVERITY_TONE lived here and rendered `critical` and `high` in the SAME red,
+   which made the two most urgent levels indistinguishable in the one view whose
+   job is ranking. Replaced by the shared ladder. */
 
 interface IndexDriversProps {
     /** Human label for the index, e.g. "Compliance volatility". */
@@ -102,11 +100,8 @@ const IndexDrivers = ({ label, value, explanation, drivers }: IndexDriversProps)
                                     className="flex items-start gap-2 text-xs"
                                 >
                                     <Badge
-                                        className={`${
-                                            SEVERITY_TONE[
-                                                String(driver.severity ?? "").toLowerCase()
-                                            ] ?? SEVERITY_TONE.low
-                                        } text-xs shrink-0`}
+                                        className={`${severityStyle(driver.severity).soft} text-xs shrink-0`}
+                                        title={severityStyle(driver.severity).label}
                                     >
                                         {String(driver.severity ?? "n/a").toUpperCase()}
                                     </Badge>

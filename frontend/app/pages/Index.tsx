@@ -16,6 +16,7 @@ import HistoricalIntel from "../components/dashboard/HistoricalIntel";
 import TrendingTopics from "../components/dashboard/TrendingTopics";
 import SatelliteView from "../components/map/SatelliteView";
 import LoadingScreen from "../components/LoadingScreen";
+import ThemeToggle from "../components/ThemeToggle";
 import SocialAccounts from "../components/settings/SocialAccounts";
 import CollectedPosts from "../components/settings/CollectedPosts";
 import { Activity, Map, Radio, BarChart3, Zap, Brain, Cloud, Satellite, Link2, Layers } from "lucide-react";
@@ -25,15 +26,24 @@ import { useNavigate } from "react-router-dom";
 import { Badge } from "../components/ui/badge";
 import { useEffect, useState } from "react";
 
-/** The nine dashboard tabs, in the order they appear. */
+/**
+ * The nine dashboard tabs, in the order they appear.
+ *
+ * "TERRITORY MAP" and "ANOMALIES" are gone. This is a civilian early-warning
+ * tool for district offices and small businesses -- districts are
+ * administrative units, not territory to be held, and the military register
+ * read badly against a product whose own framing is SDG 11/13. "SITUATIONAL
+ * AWARENESS" and "INTEL FEED" stay: they are the domain's actual vocabulary
+ * and the team wants them.
+ */
 const TABS = [
   { value: "overview", label: "OVERVIEW", Icon: BarChart3 },
-  { value: "map", label: "TERRITORY MAP", Icon: Map },
+  { value: "map", label: "DISTRICTS", Icon: Map },
   { value: "intelligence", label: "INTEL FEED", Icon: Radio },
   { value: "stories", label: "STORIES", Icon: Layers },
   { value: "satellite", label: "SATELLITE", Icon: Satellite },
   { value: "weather", label: "WEATHER", Icon: Cloud },
-  { value: "anomalies", label: "ANOMALIES", Icon: Brain },
+  { value: "anomalies", label: "UNUSUAL ACTIVITY", Icon: Brain },
   { value: "analytics", label: "ANALYTICS", Icon: Activity },
   { value: "accounts", label: "ACCOUNTS", Icon: Link2 },
 ] as const;
@@ -108,24 +118,29 @@ const Index = () => {
               </div>
             </div>
             <div className="flex items-center gap-2 sm:gap-4">
-              {/* Connection Status */}
+              {/* Connection status.
+                  "OPERATIONAL" / "RECONNECTING" described the transport in
+                  mission-control register. What a district officer needs to
+                  know is whether what they are looking at is current. */}
               {isConnected ? (
                 <Badge className="bg-success/20 text-success flex items-center gap-1 sm:gap-2 text-xs">
                   <span className="w-2 h-2 rounded-full bg-success animate-pulse"></span>
-                  <span className="hidden sm:inline">OPERATIONAL</span>
+                  <span className="hidden sm:inline">Live</span>
                 </Badge>
               ) : (
                 <Badge className="bg-warning/20 text-warning flex items-center gap-1 sm:gap-2 text-xs">
                   <span className="w-2 h-2 rounded-full bg-warning animate-pulse"></span>
-                  <span className="hidden sm:inline">RECONNECTING</span>
+                  <span className="hidden sm:inline">Reconnecting</span>
                 </Badge>
               )}
 
-              {/* System Status - hidden on mobile */}
+              {/* Collection cycle count - hidden on mobile */}
               <Badge className="border border-border items-center gap-2 hidden sm:flex">
                 <Zap className="w-3 h-3" />
-                Run #{run_count}
+                Cycle {run_count}
               </Badge>
+
+              <ThemeToggle />
 
               {/* Sign in / out.
                   Without this there was no way to authenticate when

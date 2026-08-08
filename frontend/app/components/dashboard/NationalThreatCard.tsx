@@ -80,9 +80,9 @@ export default function NationalThreatCard() {
                 };
             case 'MODERATE':
                 return {
-                    bgColor: 'bg-yellow-500/20',
-                    borderColor: 'border-yellow-500',
-                    textColor: 'text-yellow-500',
+                    bgColor: 'bg-severity-medium/20',
+                    borderColor: 'border-severity-medium/50',
+                    textColor: 'text-severity-medium',
                     icon: Activity,
                     gradient: 'from-yellow-500 to-amber-600',
                     pulse: false
@@ -135,7 +135,7 @@ export default function NationalThreatCard() {
                         animate={{ scale: 1, opacity: 1 }}
                         className={`relative p-3 sm:p-4 rounded-full bg-gradient-to-br ${config.gradient}`}
                     >
-                        <ThreatIcon className="w-6 h-6 sm:w-8 sm:h-8 text-white" />
+                        <ThreatIcon className="w-6 h-6 sm:w-8 sm:h-8 text-primary-foreground" />
                         {config.pulse && (
                             <span className="absolute inset-0 rounded-full animate-ping bg-current opacity-20" />
                         )}

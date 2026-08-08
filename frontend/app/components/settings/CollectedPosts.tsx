@@ -50,10 +50,10 @@ interface Post {
 
 const PLATFORM_TONE: Record<string, string> = {
   twitter: "bg-sky-500/15 text-sky-300",
-  linkedin: "bg-blue-500/15 text-blue-300",
+  linkedin: "bg-info/15 text-info",
   facebook: "bg-indigo-500/15 text-indigo-300",
   instagram: "bg-pink-500/15 text-pink-300",
-  reddit: "bg-orange-500/15 text-orange-300",
+  reddit: "bg-severity-high/15 text-severity-high",
 };
 
 const CollectedPosts = () => {
@@ -82,18 +82,18 @@ const CollectedPosts = () => {
     <div className="space-y-3">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h3 className="flex items-center gap-2 text-sm font-bold text-slate-100">
-            <Inbox className="w-4 h-4 text-slate-400" />
+          <h3 className="flex items-center gap-2 text-sm font-bold text-foreground">
+            <Inbox className="w-4 h-4 text-foreground" />
             COLLECTED POSTS
           </h3>
-          <p className="mt-0.5 text-xs text-slate-400">
+          <p className="mt-0.5 text-xs text-foreground">
             Raw posts from your connected accounts, newest first. These also feed
             the intelligence pipeline on the next agent cycle.
           </p>
         </div>
         <button
           onClick={() => void load()}
-          className="flex items-center gap-1.5 rounded-md border border-slate-600 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-slate-700/50"
+          className="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-foreground hover:bg-muted"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
           Refresh
@@ -108,8 +108,8 @@ const CollectedPosts = () => {
               onClick={() => setFilter(p)}
               className={`rounded-md px-2 py-1 text-xs transition-colors ${
                 filter === p
-                  ? "bg-slate-700 text-slate-100"
-                  : "text-slate-400 hover:text-slate-200"
+                  ? "bg-muted text-foreground"
+                  : "text-foreground hover:text-foreground"
               }`}
             >
               {p === "all" ? `All (${posts.length})` : p}
@@ -119,8 +119,8 @@ const CollectedPosts = () => {
       )}
 
       {!loading && posts.length === 0 && (
-        <div className="rounded-lg border border-slate-700/50 bg-slate-800/30 p-4 text-xs text-slate-400">
-          <p className="mb-1 font-medium text-slate-300">Nothing collected yet.</p>
+        <div className="rounded-lg border border-border bg-card p-4 text-xs text-foreground">
+          <p className="mb-1 font-medium text-foreground">Nothing collected yet.</p>
           <p>
             Connect an account above, then use <strong>Collect now</strong>. If
             this stays empty after a successful collect, check the account&apos;s
@@ -134,23 +134,23 @@ const CollectedPosts = () => {
         {shown.map((post, index) => (
           <div
             key={`${post.platform}-${post.collected_at}-${index}`}
-            className="rounded-lg border border-slate-700/50 bg-slate-800/40 p-3"
+            className="rounded-lg border border-border bg-card p-3"
           >
             <div className="mb-1.5 flex flex-wrap items-center gap-2">
               <span
                 className={`rounded px-1.5 py-0.5 text-xs ${
-                  PLATFORM_TONE[post.platform] ?? "bg-slate-700 text-slate-300"
+                  PLATFORM_TONE[post.platform] ?? "bg-muted text-foreground"
                 }`}
               >
                 {post.platform}
               </span>
               {post.poster && (
-                <span className="text-xs font-medium text-slate-300">
+                <span className="text-xs font-medium text-foreground">
                   {post.poster}
                 </span>
               )}
               <span
-                className="text-xs text-slate-500"
+                className="text-xs text-muted-foreground"
                 title={formatExact(post.posted_at ?? post.collected_at)}
               >
                 {formatWhen(post.posted_at ?? post.collected_at)}
@@ -158,11 +158,11 @@ const CollectedPosts = () => {
             </div>
 
             {post.text ? (
-              <p className="whitespace-pre-wrap text-sm leading-snug text-slate-200">
+              <p className="whitespace-pre-wrap text-sm leading-snug text-foreground">
                 {post.text.length > 400 ? `${post.text.slice(0, 400)}…` : post.text}
               </p>
             ) : (
-              <p className="text-sm italic text-slate-500">
+              <p className="text-sm italic text-muted-foreground">
                 No caption — this post is the image.
               </p>
             )}
@@ -173,20 +173,20 @@ const CollectedPosts = () => {
             {(post.images ?? []).filter((i) => i.ocr_text).map((image, i) => (
               <div
                 key={`${image.url}-${i}`}
-                className="mt-2 rounded border border-slate-700/50 bg-slate-900/40 p-2"
+                className="mt-2 rounded border border-border bg-background p-2"
               >
-                <div className="mb-1 flex items-center gap-2 text-xs text-slate-400">
+                <div className="mb-1 flex items-center gap-2 text-xs text-foreground">
                   <ScanText className="h-3 w-3" />
                   <span>Text in image</span>
                   {image.ocr_lang && image.ocr_lang !== "unknown" && (
-                    <span className="rounded bg-slate-700 px-1 py-0.5">
+                    <span className="rounded bg-muted px-1 py-0.5">
                       {image.ocr_lang}
                     </span>
                   )}
                   {image.ocr_confidence !== null && (
                     <span
                       className={
-                        image.ocr_confidence < 0.6 ? "text-amber-400" : "text-slate-500"
+                        image.ocr_confidence < 0.6 ? "text-amber-400" : "text-muted-foreground"
                       }
                       title={
                         image.ocr_confidence < 0.6
@@ -199,13 +199,13 @@ const CollectedPosts = () => {
                     </span>
                   )}
                 </div>
-                <p className="whitespace-pre-wrap text-xs text-slate-300">
+                <p className="whitespace-pre-wrap text-xs text-foreground">
                   {image.ocr_text}
                 </p>
               </div>
             ))}
 
-            <div className="mt-2 flex items-center gap-4 text-xs text-slate-500">
+            <div className="mt-2 flex items-center gap-4 text-xs text-muted-foreground">
               <span className="flex items-center gap-1">
                 <ThumbsUp className="w-3 h-3" />
                 {formatCount(post.likes)}
@@ -223,7 +223,7 @@ const CollectedPosts = () => {
                   href={post.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="ml-auto text-slate-400 hover:text-slate-200"
+                  className="ml-auto text-foreground hover:text-foreground"
                 >
                   Open original →
                 </a>

@@ -193,12 +193,22 @@ def test_api_error_path_matches_the_success_shape():
 
 @pytest.mark.parametrize(
     "relpath",
-    ["app/hooks/use-roger-data.ts", "app/components/dashboard/RiverNetStatus.tsx"],
+    # Without the extension: use-roger-data moved from .ts to .tsx when it
+    # gained a provider, and this test SILENTLY SKIPPED rather than failing --
+    # a guard that disappears when a file is renamed is not a guard. Skipping
+    # only when the frontend is absent entirely is the behaviour meant.
+    ["app/hooks/use-roger-data", "app/components/dashboard/RiverNetStatus"],
 )
 def test_frontend_types_match_the_api(relpath):
-    path = FRONTEND / relpath
-    if not path.exists():
-        pytest.skip(f"{relpath} not present")
+    candidates = [FRONTEND / f"{relpath}{ext}" for ext in (".ts", ".tsx")]
+    path = next((p for p in candidates if p.exists()), None)
+    if path is None:
+        if not FRONTEND.exists():
+            pytest.skip("frontend not present")
+        raise AssertionError(
+            f"{relpath}.ts/.tsx not found; if it moved, update this list "
+            f"rather than letting the check vanish"
+        )
 
     code = _strip_ts_comments(path.read_text(encoding="utf-8"))
 

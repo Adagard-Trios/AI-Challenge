@@ -5,7 +5,8 @@
  * FIXED: State now MERGES instead of REPLACES when receiving WebSocket updates.
  * This prevents data from disappearing when partial updates arrive.
  */
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, createContext, useContext } from 'react';
+import type { ReactNode } from 'react';
 import { API_BASE, apiFetch, websocketUrl } from "@/app/lib/api";
 
 const WS_URL = API_BASE.replace('http', 'ws') + '/ws';
@@ -156,7 +157,13 @@ const DEFAULT_DASHBOARD: RiskDashboard = {
   last_updated: new Date().toISOString()
 };
 
-export function useRogerData() {
+// The implementation. NOT exported directly -- see the provider below.
+//
+// Every call to this opens its OWN WebSocket, runs its own polling loop and
+// does its own initial fetches. Seven components called it, so a single browser
+// tab held seven WebSocket connections, each consuming a single-use auth
+// ticket, and fetched /api/feeds eight times on load.
+function useRogerDataInternal() {
   const [state, setState] = useState<RogerState>({
     final_ranked_feed: [],
     risk_dashboard_snapshot: DEFAULT_DASHBOARD,
@@ -444,4 +451,51 @@ export function useRogerData() {
     commodityData,
     waterData,
   };
+}
+
+// ---------------------------------------------------------------------------
+// One instance, shared.
+//
+// WHY A CONTEXT AND NOT REACT-QUERY
+//
+// react-query is already installed and its provider already mounted, and the
+// obvious fix was to route these fetches through it. That would have
+// deduplicated the HTTP requests and left the real problem untouched: the
+// duplication here is not repeated REQUESTS, it is repeated HOOK INSTANCES.
+// Each one opens its own WebSocket and runs its own polling loop, and no HTTP
+// cache dedupes a socket.
+//
+// Seven components called useRogerData, so one browser tab held seven
+// WebSocket connections -- each redeeming its own single-use auth ticket --
+// alongside seven polling loops and eight fetches of /api/feeds on load.
+//
+// Sharing one instance fixes all of it at once and changes no component.
+// ---------------------------------------------------------------------------
+
+type RogerData = ReturnType<typeof useRogerDataInternal>;
+
+const RogerDataContext = createContext<RogerData | null>(null);
+
+export function RogerDataProvider({ children }: { children: ReactNode }) {
+  const value = useRogerDataInternal();
+  return (
+    <RogerDataContext.Provider value={value}>
+      {children}
+    </RogerDataContext.Provider>
+  );
+}
+
+/**
+ * The live platform data.
+ *
+ * Falls back to its own instance when no provider is mounted rather than
+ * throwing. A missing provider would otherwise take the whole dashboard down,
+ * and the degraded behaviour -- an extra socket -- is exactly what every
+ * component did before this existed.
+ */
+export function useRogerData(): RogerData {
+  const shared = useContext(RogerDataContext);
+  if (shared) return shared;
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  return useRogerDataInternal();
 }

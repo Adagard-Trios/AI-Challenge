@@ -1226,7 +1226,44 @@ JSON array only:"""
         }
 
         if not feed:
-            logger.info("[DataRefresherAgent] Empty feed - returning zero metrics")
+            # "No NEW events" is not "no risk". Keep the last snapshot.
+            #
+            # A cycle whose events were all suppressed by dedup -- which is the
+            # NORMAL outcome when the sources have not published anything since
+            # the last run -- used to return zeros here, and those zeros
+            # overwrote a perfectly good snapshot. Observed: the dashboard went
+            # from compliance 0.53 / market 0.52 / 2 high-priority to all
+            # zeros, on a cycle that reported "0 unique, 11 exact dups".
+            #
+            # A reader cannot tell that apart from "the country is calm", which
+            # is the opposite of what an intelligence dashboard is for -- and
+            # it is the same failure shape as everything else this system has
+            # had: reporting zero when the truth is "no change".
+            #
+            # The previous snapshot is carried forward with the timestamp it
+            # was actually computed at, so "nothing changed" is visible as an
+            # ageing last_updated rather than hidden behind a fresh one.
+            previous = {}
+            try:
+                from src.runtime import shared_state
+
+                previous = shared_state.get("risk_dashboard_snapshot") or {}
+            except Exception:  # noqa: BLE001
+                previous = {}
+
+            if previous.get("total_events"):
+                logger.info(
+                    "[DataRefresherAgent] No new events this cycle; keeping the "
+                    "previous snapshot (last computed %s)",
+                    previous.get("last_updated"),
+                )
+                carried = dict(previous)
+                carried["stale"] = True
+                return {"risk_dashboard_snapshot": carried}
+
+            # Nothing has ever been computed, so zeros are the honest answer.
+            logger.info("[DataRefresherAgent] Empty feed and no previous "
+                        "snapshot - reporting zero metrics")
             return {"risk_dashboard_snapshot": snapshot}
 
         # Compute aggregate metrics - feed uses 'confidence' field, not 'confidence_score'

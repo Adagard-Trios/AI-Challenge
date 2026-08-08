@@ -440,3 +440,61 @@ def test_main_no_longer_keeps_an_unbounded_set():
             )
 
     assert "mark_if_new" in source
+
+
+# --- connecting late ---------------------------------------------------------
+
+def test_a_process_that_starts_before_redis_recovers(monkeypatch):
+    """
+    REGRESSION from the first real cluster deployment, and it was silent.
+
+    get_client() used to resolve exactly once and cache the result for the life
+    of the process. The API pods started before redis-0 was ready, cached None,
+    and then served PER-PROCESS state forever while reporting healthy:
+
+        worker writes run_count=42  ->  key present in Redis
+        fresh process in the api pod reads it back as 42
+        the RUNNING uvicorn keeps answering run_count=0
+
+    Nothing errored. The dashboard was simply permanently stale on every
+    replica, which is the failure mode this whole track exists to remove.
+
+    Pod start order is not controllable and Redis restarts, so a failure must
+    be retried.
+    """
+    import time as _time
+
+    from src.runtime import redis_client as rc
+
+    monkeypatch.setenv("REDIS_URL", "redis://127.0.0.1:6399/0")   # nothing there
+    rc.reset()
+    assert rc.get_client() is None
+
+    _needs_redis()                       # skip the rest if there is no real one
+    monkeypatch.setenv("REDIS_URL", REDIS_URL)
+
+    # Still inside the cooldown: must not hammer a down Redis.
+    assert rc.get_client() is None
+
+    rc._last_attempt = _time.monotonic() - rc.RETRY_AFTER_SECONDS - 1
+    assert rc.get_client() is not None, (
+        "a process that started before Redis never acquires it, and serves "
+        "per-process state forever while reporting healthy"
+    )
+    rc.reset()
+
+
+def test_a_working_client_is_not_reconnected_per_call(monkeypatch):
+    """
+    The original design's real point, which the retry must not undo: no
+    reconnect on the hot path. A successful client stays cached.
+    """
+    _needs_redis()
+    from src.runtime import redis_client as rc
+
+    monkeypatch.setenv("REDIS_URL", REDIS_URL)
+    rc.reset()
+    first = rc.get_client()
+    assert first is not None
+    assert rc.get_client() is first, "the client was rebuilt on a second call"
+    rc.reset()

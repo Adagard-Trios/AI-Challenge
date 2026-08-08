@@ -97,3 +97,71 @@ def test_zero_is_a_plausible_reading_so_the_write_is_logged():
         "nothing logs that the snapshot was applied, so a future regression "
         "would again be silent"
     )
+
+
+def test_a_cycle_with_no_new_events_does_not_blank_the_dashboard():
+    """
+    REGRESSION, and the most misleading kind.
+
+    A cycle whose events are all suppressed by dedup is the NORMAL outcome when
+    the sources have published nothing since the last run. DataRefresherAgent
+    used to return zero metrics for that, and those zeros overwrote a perfectly
+    good snapshot. Observed on a real run that reported "0 unique, 11 exact
+    dups":
+
+        before   compliance 0.53, market 0.52, 2 high priority
+        after    all zeros
+
+    A reader cannot tell that apart from "the country is calm", which is the
+    opposite of what an intelligence dashboard is for. "No new events" is not
+    "no risk".
+    """
+    from src.nodes.combinedAgentNode import CombinedAgentNode
+    from src.runtime import shared_state
+
+    shared_state.update({"risk_dashboard_snapshot": {
+        "compliance_volatility": 0.53, "market_instability": 0.52,
+        "total_events": 7, "high_priority_count": 2,
+        "last_updated": "2026-08-08T10:00:00",
+    }})
+
+    node = CombinedAgentNode.__new__(CombinedAgentNode)
+
+    class EmptyState:
+        final_ranked_feed = []
+
+    snapshot = CombinedAgentNode.data_refresher_agent(
+        node, EmptyState())["risk_dashboard_snapshot"]
+
+    assert snapshot["compliance_volatility"] == 0.53, (
+        "a quiet cycle blanked the risk indices; the dashboard now claims "
+        "nothing is happening rather than nothing changed"
+    )
+    assert snapshot["total_events"] == 7
+    # Marked, and the timestamp is the one it was actually computed at, so
+    # "nothing changed" shows as an ageing last_updated rather than hiding
+    # behind a fresh one.
+    assert snapshot.get("stale") is True
+    assert snapshot["last_updated"] == "2026-08-08T10:00:00"
+
+
+def test_zeros_are_still_reported_when_nothing_has_ever_been_computed():
+    """Carrying forward must not invent a history that does not exist."""
+    from src.nodes.combinedAgentNode import CombinedAgentNode
+    from src.runtime import redis_client, shared_state
+
+    client = redis_client.get_client()
+    if client is not None:
+        client.delete(shared_state.STATE_KEY)
+    shared_state.reset()
+
+    node = CombinedAgentNode.__new__(CombinedAgentNode)
+
+    class EmptyState:
+        final_ranked_feed = []
+
+    snapshot = CombinedAgentNode.data_refresher_agent(
+        node, EmptyState())["risk_dashboard_snapshot"]
+
+    assert snapshot["total_events"] == 0
+    assert snapshot.get("stale") is None

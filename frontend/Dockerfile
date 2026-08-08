@@ -32,6 +32,19 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
+# Guarantee public/ exists before the run stage copies it.
+#
+# The run stage does `COPY --from=build /app/public ./public`, and Docker's
+# COPY fails the whole build when its source does not exist. git cannot track
+# an empty directory, so public/ is only present because some file inside it
+# is committed -- which made the image build depend on that, silently. Deleting
+# the last file in public/ would have broken `docker build` while leaving
+# `next build` perfectly green, and the error names a COPY rather than the
+# deletion that caused it.
+#
+# One line here means the build no longer cares either way.
+RUN mkdir -p public
+
 # NEXT_PUBLIC_* is inlined into the client bundle at BUILD time, not read at
 # runtime. That is why these are build args rather than container env: setting
 # them in `docker run` has no effect whatsoever, which is the single most

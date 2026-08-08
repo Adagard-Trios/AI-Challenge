@@ -8,6 +8,7 @@ UPDATED: Supports 'Opportunity' tracking and new Scoring Logic
 from __future__ import annotations
 import json
 import logging
+import os
 import re
 import uuid
 from datetime import datetime
@@ -124,6 +125,111 @@ def topics_from_event(item: dict) -> List[str]:
             break
 
     return out
+
+
+def _blackboard_enabled() -> bool:
+    """
+    Whether to mirror events onto the board.
+
+    On by default and killable without a redeploy. The board is new and writes
+    on the hot path of every cycle; a switch that needs a deploy to flip is not
+    a switch you can use when something is wrong at 2am.
+    """
+    return os.getenv("BLACKBOARD_ENABLED", "1").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
+def _shadow_write_board(events: List[Dict[str, Any]]) -> None:
+    """
+    Mirror classified events onto the blackboard. Best-effort, always.
+
+    Nothing reads these yet -- this is the shadow stage, where the board is
+    populated and observed before anything depends on it. Doing it in this
+    order means the stage that starts consuming the board has real data to be
+    judged against rather than an empty table and a hypothesis.
+    """
+    if not events or not _blackboard_enabled():
+        return
+
+    try:
+        from src.blackboard.store import BoardStore
+    except Exception:  # noqa: BLE001
+        return
+
+    store = BoardStore()
+    written = 0
+    failed = 0
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        try:
+            entity_names = [
+                e.get("name") for e in (event.get("entities") or [])
+                if isinstance(e, dict) and e.get("name")
+            ]
+            if store.record_event(
+                event_id=event.get("event_id") or "",
+                summary=event.get("summary") or "",
+                domain=event.get("domain"),
+                severity=event.get("severity"),
+                impact_type=event.get("impact_type"),
+                confidence=event.get("confidence"),
+                entity_keys=entity_names,
+                payload={
+                    "region": event.get("region"),
+                    "fake_news_score": event.get("fake_news_score"),
+                    "llm_filtered": event.get("llm_filtered"),
+                },
+            ):
+                written += 1
+        except Exception:  # noqa: BLE001
+            failed += 1
+            continue
+
+    if written:
+        logger.info("[Blackboard] mirrored %d/%d events", written, len(events))
+    if failed:
+        # Counted rather than logged per event: a board that is entirely down
+        # would otherwise produce one line per event per cycle. But it must
+        # say something, or "mirrored 0" and "wrote nothing because there was
+        # nothing" look the same.
+        logger.warning("[Blackboard] %d/%d events could not be mirrored",
+                       failed, len(events))
+
+
+def _shadow_write_assessment(snapshot: Dict[str, Any]) -> None:
+    """Mirror the risk snapshot onto the board. Best-effort."""
+    if not snapshot or not _blackboard_enabled():
+        return
+    try:
+        from src.blackboard.store import BoardStore
+
+        BoardStore().record_assessment(snapshot=snapshot)
+    except Exception as exc:  # noqa: BLE001
+        # Logged, not swallowed. A bare `pass` here would make "the board is
+        # broken" and "there was nothing to record" produce identical
+        # evidence, which is the failure mode this project keeps hitting.
+        logger.warning("[Blackboard] could not record the assessment: %s", exc)
+
+
+def _run_decay_pass() -> None:
+    """
+    Age the board and delete what has stopped describing the present.
+
+    Also closes two leaks that predate the board entirely: ChromaDB had no
+    delete method at all, so the semantic corpus grew forever, and
+    trending_detector.cleanup_old_data has always been defined and never
+    called.
+    """
+    if not _blackboard_enabled():
+        return
+    try:
+        from src.blackboard import maintenance
+
+        maintenance.run()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[Blackboard] maintenance skipped: %s", exc)
 
 
 logger = logging.getLogger("combined_node")
@@ -855,6 +961,17 @@ JSON array only:"""
                 f"[FeedAggregatorAgent] {domain.title()}: {len(items)} categorized items"
             )
 
+        # Shadow-write to the blackboard.
+        #
+        # Nothing reads this yet. It runs here because `converted` is already
+        # exactly the shape the board wants -- classified, deduplicated,
+        # entity-extracted -- so mirroring it costs one write per event and no
+        # recomputation.
+        #
+        # Placed AFTER the return value is built, and wrapped, because the
+        # board is an enrichment: losing it must never cost the feed.
+        _shadow_write_board(converted)
+
         return {"final_ranked_feed": converted, "categorized_feeds": categorized}
 
     def _extract_feeds(
@@ -1131,6 +1248,16 @@ JSON array only:"""
             self.storage.cleanup_old_data()
         except Exception as e:
             logger.error(f"[DataRefresherAgent] Cleanup error: {e}")
+
+        # Mirror the assessment onto the board, then age and evict.
+        #
+        # Placed here rather than in its own node because it needs no new
+        # topology: this node already runs once per cycle, last, after
+        # everything that writes. Adding a graph node would change the shape of
+        # the graph to express "and then tidy up", which is not a stage of the
+        # pipeline.
+        _shadow_write_assessment(snapshot)
+        _run_decay_pass()
 
         return {"risk_dashboard_snapshot": snapshot}
 

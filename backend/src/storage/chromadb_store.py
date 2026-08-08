@@ -10,8 +10,13 @@ from datetime import datetime
 logger = logging.getLogger("chromadb_store")
 
 try:
-    import chromadb
-    from chromadb.config import Settings
+    # Imported for the probe, not for use: the client is built by
+    # chroma_client.get_client(), which chooses between the shared server and a
+    # local directory. Keeping the import is what makes CHROMADB_AVAILABLE mean
+    # anything -- deleting it because a linter calls it unused would turn a
+    # missing package into an AttributeError somewhere further away.
+    import chromadb  # noqa: F401
+    from chromadb.config import Settings  # noqa: F401
 
     CHROMADB_AVAILABLE = True
 except ImportError:
@@ -158,6 +163,34 @@ class ChromaDBStore:
 
         except Exception as e:
             logger.error(f"[ChromaDB] Add error: {e}")
+
+    def delete_events(self, event_ids) -> int:
+        """
+        Remove events from the semantic corpus.
+
+        This class had NO delete at all -- only clear_collection(), which is
+        all-or-nothing. So the dedup corpus grew forever: every event ever
+        classified stayed embedded, on the largest thing this system keeps on
+        disk, with no way to remove one short of wiping the lot.
+
+        Returns how many ids were requested, not how many existed. ChromaDB
+        does not report that, and inventing a number would be worse than
+        admitting the limit.
+        """
+        if not self.client or not event_ids:
+            return 0
+
+        ids = [str(i) for i in event_ids if i]
+        if not ids:
+            return 0
+
+        try:
+            self.collection.delete(ids=ids)
+            logger.info("[ChromaDB] deleted %d event vectors", len(ids))
+            return len(ids)
+        except Exception as e:
+            logger.error(f"[ChromaDB] Delete error: {e}")
+            return 0
 
     def get_stats(self) -> Dict[str, Any]:
         """Get collection statistics"""

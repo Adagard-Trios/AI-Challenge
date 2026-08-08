@@ -16,6 +16,28 @@ spec:
       labels:
         app.kubernetes.io/name: chroma
     spec:
+      # OFF, and this is not optional -- chroma CrashLoopBackOffs without it.
+      #
+      # Kubernetes injects legacy Docker-link environment variables for every
+      # Service in the namespace: a Service named "chroma" produces
+      #
+      #     CHROMA_PORT=tcp://10.96.221.70:8000
+      #
+      # and ChromaDB reads CHROMA_PORT as ITS OWN config, expecting a port
+      # number. It panics on startup:
+      #
+      #     Error loading config: invalid type: found string
+      #     "tcp://10.96.221.70:8000", expected u16 for key "PORT"
+      #
+      # The collision exists purely because the Service and the app happen to
+      # share a name prefix. Turning the links off is the general fix -- naming
+      # the Service something else would only move the trap.
+      #
+      # The api and worker pods survive the same injection only because the
+      # ConfigMap sets CHROMA_PORT=8000 explicitly, and an explicit env var
+      # wins over a service link. That is luck rather than design, so it is
+      # written down here.
+      enableServiceLinks: false
       containers:
         - name: chroma
           image: chromadb/chroma:latest

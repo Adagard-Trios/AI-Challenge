@@ -310,7 +310,13 @@ current_state: Dict[str, Any] = {
 
 # Thread-safe communication
 feed_update_queue = asyncio.Queue()
-seen_event_ids: Set[str] = set()  # Duplicate prevention
+# Broadcast de-duplication.
+#
+# This was `seen_event_ids: Set[str] = set()` -- unbounded, per-process, and
+# emptied on restart, so a long run leaked and a restart re-broadcast
+# everything. src/runtime/dedup keeps it in Redis when configured (atomic,
+# shared, self-expiring) and in a bounded LRU when not.
+from src.runtime.dedup import mark_if_new  # noqa: E402
 
 # Global event loop reference for cross-thread broadcasting
 main_event_loop = None
@@ -754,13 +760,16 @@ async def database_polling_loop():
             if new_feeds:
                 logger.info(f"[DB_POLLER] Found {len(new_feeds)} new feeds")
 
-                # Filter duplicates (by event_id)
+                # Filter duplicates (by event_id).
+                #
+                # mark_if_new is one atomic operation rather than a
+                # check-then-add pair: with replicas, two pollers both find the
+                # id absent and both broadcast, so whether a user sees an event
+                # twice depends on which replica they connected to.
                 unique_feeds = []
                 for feed in new_feeds:
                     event_id = feed.get("event_id")
-                    if event_id and event_id not in seen_event_ids:
-                        seen_event_ids.add(event_id)
-
+                    if event_id and mark_if_new(event_id):
                         # Add district categorization for map
                         feed["district"] = categorize_feed_by_district(feed)
                         unique_feeds.append(feed)

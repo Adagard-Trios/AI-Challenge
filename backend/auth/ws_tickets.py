@@ -11,10 +11,23 @@ Instead: the client asks an authenticated REST endpoint for a ticket, then
 connects with ``?ticket=...``. The ticket is single-use, expires in 30 seconds,
 and grants nothing on its own.
 
-In-process storage is sound here *only* because there is exactly one worker:
-scripts/start_backend.sh runs `uvicorn main:app` with no --workers flag. Adding
-workers later would silently break this -- assert_single_worker() exists to make
-that failure loud rather than mysterious.
+In-process storage is sound *only* because there is exactly one worker:
+scripts/start_backend.sh runs `uvicorn main:app` with no --workers flag.
+
+That assumption has now been lifted rather than merely asserted. When REDIS_URL
+is set, tickets live in Redis, because the two halves of this handshake do not
+land on the same process:
+
+    POST /api/auth/ws-ticket   ->  api-1     (an ordinary HTTP request)
+    new WebSocket(...?ticket=) ->  api-3     (a separate connection)
+
+With N replicas and in-process storage, roughly (N-1)/N of connections are
+rejected with code 1008 -- which presents as "the dashboard is flaky" rather
+than as an auth bug, and costs a day to find. assert_single_worker() below
+predicted this and said "Move them to Redis"; this is that move.
+
+Unset REDIS_URL keeps the in-process dict, which remains correct for one
+process and is what the laptop runs.
 """
 
 from __future__ import annotations
@@ -48,9 +61,40 @@ def _purge_locked(now: float) -> None:
         _tickets.pop(k, None)
 
 
+def _shared():
+    """The Redis client when shared tickets are in play, else None."""
+    try:
+        from src.runtime.redis_client import configured, get_client
+
+        return get_client() if configured() else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _key(ticket: str) -> str:
+    return f"roger:wst:{ticket}"
+
+
 def issue(user_id: str) -> str:
-    now = time.monotonic()
     ticket = secrets.token_urlsafe(24)
+
+    client = _shared()
+    if client is not None:
+        try:
+            # Redis owns the TTL, so no clock is compared across processes --
+            # the same reason the pacing gate stores an expiry rather than a
+            # monotonic deadline.
+            client.set(_key(ticket), user_id, ex=TICKET_TTL_SECONDS)
+            return ticket
+        except Exception as exc:  # noqa: BLE001
+            # Falling back to the local dict is safe: the worst case is that
+            # this ticket only works if the WebSocket lands on this same
+            # replica, which is exactly today's behaviour. Nothing is granted
+            # that should not be.
+            logger.warning("[auth.ws] could not store ticket in Redis (%s); "
+                           "falling back to this process", exc)
+
+    now = time.monotonic()
     with _lock:
         _purge_locked(now)
         if len(_tickets) >= _MAX_OUTSTANDING:
@@ -65,6 +109,22 @@ def redeem(ticket: Optional[str]) -> Optional[str]:
     """Consume a ticket, returning its user_id. Returns None if invalid."""
     if not ticket:
         return None
+
+    client = _shared()
+    if client is not None:
+        try:
+            # GETDEL is the single-use guarantee, and it must be ATOMIC: GET
+            # then DELETE lets two connections racing the same ticket both read
+            # it before either deletes, and both authenticate.
+            user_id = client.getdel(_key(ticket))
+            if user_id:
+                return user_id
+            # Fall through: a ticket issued before Redis was configured may
+            # still be in the local dict.
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[auth.ws] could not redeem via Redis (%s); "
+                           "checking local tickets", exc)
+
     now = time.monotonic()
     with _lock:
         _purge_locked(now)
@@ -93,11 +153,15 @@ def assert_single_worker() -> None:
     "the dashboard is flaky" and costs a day.
     """
     import os
+
+    if _shared() is not None:
+        return  # tickets are shared; workers and replicas are both fine
+
     workers = os.getenv("WEB_CONCURRENCY") or os.getenv("UVICORN_WORKERS")
     if workers and workers.strip() not in ("", "1"):
         logger.error(
             "[auth.ws] %s workers configured, but WebSocket tickets are stored "
             "in-process. Tickets issued by one worker will be rejected by "
-            "another. Move them to Redis or run a single worker.",
+            "another. Set REDIS_URL, or run a single worker.",
             workers,
         )

@@ -22,6 +22,20 @@ const nextConfig: NextConfig = {
   // NOTE: NEXT_PUBLIC_* values are inlined into the client bundle at BUILD time
   // regardless of hosting model, so changing the API URL needs a rebuild rather
   // than just a restart.
+
+  // Emit .next/standalone — a self-contained server.js plus only the
+  // node_modules actually reached at runtime.
+  //
+  // This is for the container image (frontend/Dockerfile) and changes nothing
+  // for Render, which runs `npm start` against the ordinary build. Without it
+  // the runtime image has to carry the entire node_modules tree, which is over
+  // a gigabyte here.
+  //
+  // Note for anyone editing the Dockerfile: standalone does NOT include
+  // .next/static or public/. They are copied separately, and forgetting them
+  // serves HTML with no CSS or JS — which reads as a broken build rather than
+  // a missing COPY.
+  output: "standalone",
 };
 
 export default nextConfig;

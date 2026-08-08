@@ -36,9 +36,14 @@ services:
       - NEO4J_USER=neo4j
       - NEO4J_PASSWORD=slac2026
     volumes:
-      - ./backend/src:/app/backend/src
-      - ./backend/data:/app/backend/data  # Persist storage data
-    command: python main.py
+      # Runtime state only. Mounting ./backend/src over the image meant the
+      # container ran host source rather than what was built, which hides a
+      # stale image and diverges from how this deploys anywhere else.
+      - ./backend/data:/app/backend/data
+    # No `command:` override. `python main.py` does start a server -- there is
+    # a __main__ block -- but it hardcodes port 8000 and bypasses
+    # scripts/start_backend.sh, which is what honours $PORT and skips training
+    # when DISABLE_AUTO_TRAIN is set. Use the image's CMD.
     depends_on:
       neo4j:
         condition: service_healthy
@@ -53,13 +58,27 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        # BUILD args, not `environment`. Next inlines NEXT_PUBLIC_* into the
+        # client bundle at build time; setting them at runtime does nothing,
+        # which is the most common way this frontend ends up deployed pointing
+        # at localhost.
+        #
+        # And this is the BROWSER's view of the API, so it must be a URL the
+        # browser can reach. http://backend:8000 resolves only inside the
+        # compose network -- the browser is not in it, so every request failed.
+        #
+        # Both names: eight components read NEXT_PUBLIC_API_URL while
+        # AnomalyDetection.tsx and StockPredictions.tsx read
+        # NEXT_PUBLIC_API_BASE.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+        NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://localhost:8000}
     ports:
       - "3000:3000"
-    environment:
-      - NEXT_PUBLIC_API_URL=http://backend:8000
     depends_on:
       - backend
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-      - /app/. next
+    # No volumes. The previous `./frontend:/app` mounted host source over the
+    # built image, so the container ran an unbuilt tree; `/app/. next` (note
+    # the space) created an anonymous volume at a path that does not exist
+    # rather than shielding .next as intended.
+    restart: unless-stopped

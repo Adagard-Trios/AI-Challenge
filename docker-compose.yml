@@ -1,38 +1,86 @@
-version: '3.8'
+# Local container stack: backend + frontend.
+#
+# The previous version of this file had never been run successfully. It was
+# broken in four independent ways, each of which alone would have failed the
+# first `docker compose up`:
+#
+#   command: python backend/api/main.py   -> the Dockerfile ends with
+#                                            WORKDIR /app/backend, so this
+#                                            resolved to
+#                                            /app/backend/backend/api/main.py.
+#                                            No such file, and it overrode the
+#                                            CMD that does work.
+#   volumes: ./src:/app/src               -> there is no src/ at the repo root
+#                                            (it lives at backend/src). Docker
+#                                            silently created an empty dir.
+#   frontend build: ./frontend            -> frontend/Dockerfile did not exist.
+#                                            This is the fatal one: the build
+#                                            fails before anything starts.
+#   NEXT_PUBLIC_API_URL as `environment`  -> Next inlines NEXT_PUBLIC_* at
+#                                            BUILD time. Setting it at runtime
+#                                            does nothing at all.
+#
+# For the production stack with Neo4j, see docker-compose.prod.yml.
 
 services:
-  # Backend API
   backend:
     build:
+      # Context MUST be the repo root: the image needs models/, which is a
+      # sibling of backend/, and main.py resolves it as
+      # Path(__file__).parent.parent / "models".
       context: .
       dockerfile: backend/Dockerfile
     ports:
       - "8000:8000"
     environment:
-      - GROQ_API_KEY=${GROQ_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY:?set GROQ_API_KEY in .env or the environment}
       - PYTHONUNBUFFERED=1
+      - PORT=8000
+      # Training inside the API container delays the port bind past the health
+      # check and OOMs small instances. Artefacts are committed under
+      # models/*/artifacts.
+      - DISABLE_AUTO_TRAIN=1
+      # Let the health check pass before five scraping agents start.
+      - AGENT_LOOP_START_DELAY=45
+      # Social collection cannot work in a container: connecting an account
+      # opens a VISIBLE browser for 2FA and encrypts the session to the host's
+      # OS keyring. Say so explicitly rather than letting it fail at runtime.
+      - DISABLE_LOCAL_SOCIAL_SESSIONS=1
     volumes:
-      - ./src:/app/src
-      - ./backend:/app/backend
-    command: python backend/api/main.py
+      # Runtime state only. Deliberately NOT mounting source over the image:
+      # the container runs what was built, and a source mount hides the fact
+      # that the image is stale.
+      - ./backend/data:/app/backend/data
+    # No `command:` override. The image's CMD runs scripts/start_backend.sh,
+    # which honours $PORT and binds 0.0.0.0 -- both required here.
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/status"]
       interval: 30s
       timeout: 10s
+      # The first cycle builds the LangGraph and warms the ONNX embedder, so
+      # allow a slow start rather than restarting a container that is working.
+      start_period: 90s
       retries: 3
+    restart: unless-stopped
 
-  # Frontend (Next.js)
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        # BUILD-time, and both names. Eight components read
+        # NEXT_PUBLIC_API_URL; AnomalyDetection.tsx and StockPredictions.tsx
+        # read NEXT_PUBLIC_API_BASE. Setting only one leaves those two panels
+        # pointed at localhost:8000, which surfaces as an opaque CORS error.
+        #
+        # This is the browser's view of the API, so it is localhost (the host
+        # port mapping), NOT http://backend:8000 -- that name only resolves
+        # inside the compose network, and the browser is not in it.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+        NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://localhost:8000}
     ports:
       - "3000:3000"
-    environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8000
     depends_on:
-      - backend
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-      - /app/.next
+      backend:
+        condition: service_started
+    restart: unless-stopped

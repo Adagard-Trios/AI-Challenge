@@ -262,6 +262,29 @@ def _write_foci(snapshot: Dict[str, Any]) -> None:
     sensors.report_what_control_would_do()
 
 
+def _run_shadow_controller() -> None:
+    """
+    Compute the agenda a scheduler would follow, record it, and run nothing.
+
+    The fan-out above has already collected everything this cycle, unchanged.
+    What this adds is a checkable record of what a controller would have
+    SKIPPED -- so that before collection is handed to it, we can ask whether
+    those runs were actually producing anything.
+
+    The risk being managed is specific: opportunistic control yields less data,
+    not obviously smarter data, and "the feed looks dead" is a failure this
+    project has hit repeatedly and been slow to notice each time.
+    """
+    if not _blackboard_enabled():
+        return
+    try:
+        from src.blackboard import controller
+
+        controller.tick()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[Blackboard] controller tick failed: %s", exc)
+
+
 def _run_decay_pass() -> None:
     """
     Age the board and delete what has stopped describing the present.
@@ -1307,6 +1330,7 @@ JSON array only:"""
         # pipeline.
         _shadow_write_assessment(snapshot)
         _write_foci(snapshot)
+        _run_shadow_controller()
         _run_decay_pass()
 
         return {"risk_dashboard_snapshot": snapshot}

@@ -1,0 +1,37 @@
+# dev — a single node (k3d / Docker Desktop), laptop-sized.
+#
+# One api replica and no HPA. On a single node three api pods share one CPU, so
+# they buy isolation but not throughput, and the memory is better spent leaving
+# the machine usable.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: roger
+
+resources:
+  - ../../base
+
+patches:
+  - path: patch-single-replica.yaml
+    target:
+      kind: Deployment
+      name: api
+  - path: patch-single-replica.yaml
+    target:
+      kind: Deployment
+      name: frontend
+  - path: patch-resources.yaml
+    target:
+      kind: Deployment
+      name: api
+  - path: patch-resources.yaml
+    target:
+      kind: Deployment
+      name: worker
+
+  # The HPA would fight the single-replica patch: it sets minReplicas 2 and
+  # would immediately scale api back up.
+  - path: remove-hpa.yaml
+    target:
+      kind: HorizontalPodAutoscaler
+      name: api

@@ -1,0 +1,88 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  labels:
+    app.kubernetes.io/name: api
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: api
+    spec:
+      # WebSocket clients should not be cut mid-frame on a rollout.
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: api
+          image: roger-backend
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: roger-config
+            - secretRef:
+                name: roger-secrets
+          env:
+            # This pod serves HTTP and collects nothing. Both are needed:
+            # DISABLE_AGENT_LOOP stops the graph, ROLE additionally stops the
+            # storage poller -- otherwise every replica polls and broadcasts
+            # the same events to its own WebSocket clients.
+            - name: ROLE
+              value: "api"
+            - name: DISABLE_AGENT_LOOP
+              value: "1"
+
+          # Probes. Read k8s/base/README.md before changing these.
+          #
+          # /healthz and /readyz are async and /api/status is NOT. About 47 of
+          # main.py's routes are sync def, which FastAPI runs in AnyIO's
+          # 40-thread pool; saturate it and every sync route queues, including
+          # a sync health check. A liveness probe on a queued endpoint kills
+          # HEALTHY pods under load, shifts their traffic to the survivors, and
+          # takes those down too -- scaling up causing the outage it prevents.
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            # 150s. `import main` builds ~74 routes and warms the ONNX
+            # embedder; a tight startup budget restarts a pod that is merely
+            # booting.
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            # Checks the database. A pod whose dependencies are down leaves the
+            # Service instead of being killed -- restarting does not fix a
+            # database and throws away a warm process.
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          # requests are MANDATORY, not tidiness: the HPA computes utilisation
+          # against them. Without requests.cpu it reports <unknown>/70% and
+          # never scales -- an autoscaler that looks configured and does
+          # nothing.
+          resources:
+            requests:
+              cpu: "150m"
+              memory: "300Mi"
+            limits:
+              # No CPU limit on purpose: CPU is compressible, and a limit here
+              # throttles request handling under exactly the load the HPA is
+              # trying to scale out of.
+              memory: "700Mi"

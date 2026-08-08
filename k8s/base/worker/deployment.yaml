@@ -1,0 +1,95 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  labels:
+    app.kubernetes.io/name: worker
+spec:
+  # ONE. Not a starting point to tune.
+  #
+  # Two workers means two agent cycles against a Groq allowance already at its
+  # 8,000 tokens/minute ceiling at one, and two collection schedules against a
+  # single personal social account. The shared pacing gate in Redis defends
+  # against the second, but the topology should not depend on that defence.
+  #
+  # If throughput is the problem, the fix is AGENT_LOOP_INTERVAL_SECONDS or
+  # fewer LLM calls per cycle. It is never this number.
+  replicas: 1
+
+  # Recreate, not RollingUpdate.
+  #
+  # The default surges a second pod before terminating the first, so every
+  # rollout briefly runs TWO workers -- the exact situation above, for the
+  # length of a deploy. The worker serves no traffic, so the few seconds of
+  # downtime cost nothing.
+  strategy:
+    type: Recreate
+
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: worker
+    spec:
+      # A cycle in flight should finish rather than be cut in half.
+      terminationGracePeriodSeconds: 120
+      containers:
+        - name: worker
+          image: roger-backend
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: roger-config
+            - secretRef:
+                name: roger-secrets
+          env:
+            - name: ROLE
+              value: "worker"
+            - name: DISABLE_AGENT_LOOP
+              value: "0"
+
+          # Startup and readiness only. Deliberately NO livenessProbe.
+          #
+          # A cycle legitimately runs for minutes -- it fans out to five agents,
+          # downloads gazette PDFs and calls an LLM. Liveness here would kill a
+          # working process mid-collection, and the restart begins another
+          # cycle: a crash loop that looks like instability and is caused by
+          # the probe. This is the same failure that killed the Render instance
+          # before AGENT_LOOP_START_DELAY existed.
+          #
+          # A wedged worker is caught by its silence in the logs and by feeds
+          # going stale, not by an HTTP timeout.
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 36
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 5
+
+          resources:
+            requests:
+              cpu: "300m"
+              memory: "600Mi"
+            limits:
+              # Higher than api: the worker builds the LangGraph, holds five
+              # agents and runs anomaly inference.
+              memory: "1500Mi"
+
+# Deliberately NO PodDisruptionBudget for the worker.
+#
+# replicas: 1 plus a PDB with minAvailable: 1 means the eviction API can never
+# remove the pod, so `kubectl drain` blocks forever and node maintenance
+# deadlocks. Losing collection for the length of a reschedule is fine; an
+# undrainable node is not.

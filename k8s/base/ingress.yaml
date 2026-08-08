@@ -1,0 +1,46 @@
+# / -> frontend, /api and /ws -> api.
+#
+# The WebSocket annotations are load-bearing, not tuning. main.py's
+# ConnectionManager sends a heartbeat every 60s, which is exactly nginx's
+# default proxy-read-timeout -- so the proxy cuts idle sockets at the moment
+# the heartbeat is due, and it presents as "the dashboard keeps disconnecting"
+# rather than as a proxy setting.
+#
+# Traefik (k3d's default) handles WebSockets with no annotations; these are
+# ignored there and matter on nginx-ingress.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: roger
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    # Not for correctness -- worker events reach every replica through Redis
+    # pub/sub regardless -- but it stops a reconnect storm reshuffling every
+    # client across pods.
+    nginx.ingress.kubernetes.io/affinity: "cookie"
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  number: 8000
+          - path: /ws
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  number: 8000
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 3000

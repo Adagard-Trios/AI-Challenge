@@ -1,0 +1,12 @@
+# Keeps at least one api pod serving during a voluntary disruption (node drain,
+# rollout). Only api gets one: the worker is replicas:1, and a PDB there would
+# make the node undrainable forever.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: api
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: api

@@ -363,3 +363,37 @@ def test_the_image_dependencies_are_declared():
     for requirements in ("requirements.txt", "requirements-service.txt"):
         text = (PROJECT_ROOT / requirements).read_text(encoding="utf-8")
         assert "rapidocr" in text, f"{requirements} omits the OCR engine"
+
+
+def test_image_enrichment_reads_the_key_the_scrapers_actually_emit():
+    """
+    REGRESSION, and it was completely silent.
+
+    ScrapeResult.as_dict() puts the posts under "results" (src/scrapers/base.py).
+    _read_images looked for "posts", found None on every call, and returned
+    immediately -- so image OCR NEVER RAN on the agent path, while the
+    Collect-now path did it and worked.
+
+    That is the exact one-path-works shape that _read_images was written to
+    fix, reintroduced by the fix itself. Nothing errored: an image-only post
+    simply carried no text into classification and looked like an empty post
+    rather than a broken one.
+
+    Asserted against the real as_dict() rather than a hand-written literal, so
+    renaming the field breaks this test instead of silently disabling OCR
+    again.
+    """
+    import inspect
+
+    from src.scrapers.base import ScrapeResult
+    from src.scrapers import registry
+
+    assert '"results":' in inspect.getsource(ScrapeResult.as_dict), (
+        "as_dict no longer emits 'results'; update _read_images to match"
+    )
+
+    read = inspect.getsource(registry._read_images)
+    assert 'payload.get("results")' in read, (
+        "_read_images does not read the key as_dict() emits, so image OCR "
+        "silently never runs on the agent path"
+    )

@@ -104,6 +104,55 @@ def describe_environment() -> dict:
     return facts
 
 
+def _persist(posts: list, platform: str) -> int:
+    """
+    Store what was collected, through the SAME path the dashboard's
+    "Collect now" uses.
+
+    Without this the collector scraped and threw the results away -- verified,
+    embarrassingly, by finding 0 rows in IngestedPost after a run that had
+    logged "collected 10 posts". Exactly the dead end this project already
+    fixed once for the Collect-now button, reintroduced by me in a new script.
+
+    Reusing social.routes._store rather than writing a second copy is the
+    point: it owns the content hash (so posts dedupe against the dashboard's),
+    the image ingestion, and the hand-off into the intelligence pipeline. A
+    parallel implementation would drift, and the half that drifted would be
+    the one nobody was watching.
+    """
+    if not posts:
+        return 0
+
+    from auth.db import session_scope
+    from auth.models import User
+    from src.social.routes import _store
+
+    try:
+        with session_scope() as session:
+            # The rows are user-scoped. The collector runs as the machine
+            # owner, so attribute to the admin -- the same account that
+            # connected the session being used.
+            # role == "admin", not User.is_admin: is_admin is a PYTHON
+            # PROPERTY, so filtering on it raises
+            # "'property' object has no attribute 'is_'" -- which the caller
+            # then logs and swallows, storing nothing.
+            owner = (
+                session.query(User).filter(User.role == "admin")
+                .order_by(User.created_at.asc()).first()
+                or session.query(User).order_by(User.created_at.asc()).first()
+            )
+            if owner is None:
+                logger.warning("no user to attribute posts to; not storing")
+                return 0
+
+            for post in posts:
+                post.setdefault("platform", platform)
+            return _store(session, owner, posts)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("could not store %s posts: %s", platform, exc)
+        return 0
+
+
 def collect_once() -> dict:
     """
     One pass over every connected account.
@@ -155,7 +204,10 @@ def collect_once() -> dict:
                             "connected and working", platform,
                             outcome.get("retry_after_seconds", "?"))
             elif status == "ok":
-                logger.info("%s: collected %d posts", platform, count)
+                stored = _persist(outcome.get("results") or [], platform)
+                results[platform]["stored"] = stored
+                logger.info("%s: collected %d posts, stored %d",
+                            platform, count, stored)
             else:
                 logger.warning("%s: %s -- %s", platform, status,
                                outcome.get("reason", ""))

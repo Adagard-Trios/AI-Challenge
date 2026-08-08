@@ -172,7 +172,16 @@ def _read_images(payload: dict) -> None:
     Best-effort throughout: OCR is an enrichment, and losing it must never cost
     the posts.
     """
-    posts = payload.get("posts")
+    # "results", not "posts". ScrapeResult.as_dict() emits the list under
+    # "results" (base.py), so reading "posts" found None on EVERY call and this
+    # function returned immediately -- meaning image OCR never ran on the agent
+    # path at all, while the Collect-now path did it and worked.
+    #
+    # That is the same one-path-works shape as the original bug this function
+    # was written to fix, reintroduced by the fix itself. Nothing failed: OCR
+    # was simply never attempted, so an image-only post carried no text into
+    # classification and looked like an empty post rather than a broken one.
+    posts = payload.get("results") or payload.get("posts")
     if not posts:
         return
 

@@ -22,10 +22,72 @@ keeps the old text and says so rather than showing a stale brief as current.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("stories")
+
+# --- headlines ---------------------------------------------------------------
+#
+# A story's title used to be `summary[:200]` while its brief was the same
+# summary, so every card showed one paragraph twice -- once clipped mid-word and
+# once in full:
+#
+#   Sri Lanka Political Summary: **Executive Summary** The latest Sri Lankan
+#   Government Gazette (dated 31 July 2026) has been published, signalling
+#   ongoing legislative activity, though the specific provi
+#
+# Three faults in one string: raw markdown asterisks (nothing renders them, so
+# they show literally), a domain prefix the card already displays as a badge,
+# and a cut that lands inside a word.
+#
+# combinedAgentNode already asks the model for "Short headline, max 12 words",
+# so a real title exists on that path. This is the fallback path, and it needs
+# to derive one rather than slice.
+
+_MARKDOWN = re.compile(r"[*_`#>]+")
+# "Sri Lanka Political Summary:", "Business Intelligence Summary:" -- the card
+# shows the domain as a badge, so repeating it in the headline spends the first
+# four words saying nothing.
+_DOMAIN_PREFIX = re.compile(r"^[A-Z][\w\s()]{0,40}?Summary\s*:\s*", re.I)
+_EXEC_PREFIX = re.compile(r"^\s*Executive Summary\s*[:\-–]*\s*", re.I)
+_SENTENCE = re.compile(r"^(.+?[.!?])(?:\s|$)")
+
+MAX_HEADLINE_WORDS = 14
+
+
+def headline_from(summary: str, max_words: int = MAX_HEADLINE_WORDS) -> str:
+    """
+    A short headline derived from a summary.
+
+    Idempotent, which is what lets it run at read time as well as write time:
+    an already-clean headline has no markdown, no prefix and few enough words,
+    so it passes through unchanged. That matters because stories written before
+    this existed are still in the database with a 200-character slice as their
+    title, and there is no migration -- they are cleaned as they are served.
+    """
+    if not summary:
+        return ""
+
+    text = _MARKDOWN.sub("", str(summary)).strip()
+    text = _DOMAIN_PREFIX.sub("", text, count=1)
+    text = _EXEC_PREFIX.sub("", text, count=1)
+    text = re.sub(r"\s+", " ", text).strip()
+    if not text:
+        return ""
+
+    match = _SENTENCE.match(text)
+    sentence = match.group(1) if match else text
+
+    words = sentence.split()
+    if len(words) <= max_words:
+        # Trailing full stops read as a sentence, not a headline.
+        return sentence.rstrip(".").strip()
+
+    # Cut on a word boundary and say that it was cut. The old slice landed
+    # mid-word, which reads as a rendering bug rather than an abbreviation.
+    return " ".join(words[:max_words]).rstrip(",;:.") + "…"
 
 # Ordered. Used to decide whether a story escalated.
 SEVERITY_RANK = {"low": 0, "medium": 1, "high": 2, "critical": 3}
@@ -148,7 +210,7 @@ class StoryTracker:
                     # The matched event is the start of a thread nobody has
                     # threaded yet. Seed the story from it, then add this one.
                     story = Story(
-                        title=summary[:200],
+                        title=headline_from(summary),
                         brief=summary,
                         domain=domain,
                         peak_severity=severity,
@@ -218,7 +280,10 @@ class StoryTracker:
                 return [
                     {
                         "id": s.id,
-                        "title": s.title,
+                        # Cleaned on the way out, not only on the way in:
+                        # stories written before headline_from existed still
+                        # hold a 200-character slice, and this is idempotent.
+                        "title": headline_from(s.title) or s.title,
                         "brief": s.brief,
                         "domain": s.domain,
                         "event_count": s.event_count,
@@ -290,7 +355,10 @@ class StoryTracker:
                     ]
                     out.append({
                         "id": story.id,
-                        "title": story.title,
+                        # Idempotent, so stories written before headline_from
+                        # existed are cleaned as they are served rather than
+                        # needing a migration.
+                        "title": headline_from(story.title) or story.title,
                         "brief": story.brief,
                         "brief_stale": bool(story.brief_stale),
                         "domain": story.domain,

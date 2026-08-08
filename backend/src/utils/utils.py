@@ -2712,6 +2712,246 @@ def scrape_cse_stock_impl(
 # GOVERNMENT GAZETTE (Deep Scraping)
 # ============================================
 
+# gazette.lk names its files <date>-<lang><part>.pdf: E, S, T for English,
+# Sinhala and Tamil, optionally followed by a roman-numeral part (Sii, Siii).
+#
+# Language used to be detected with href.endswith("S.pdf"), which matches
+# Gazette-2026-07-24-S.pdf but NOT Gazette-2026-07-31-Siii.pdf -- and since the
+# variable was initialised to "english", every part-numbered Sinhala and Tamil
+# file was labelled English. The scraper then preferred those "English" PDFs,
+# so the text handed downstream was Sinhala while claiming to be English.
+_GAZETTE_LANG = re.compile(r"-([EST])(I*)\.pdf$", re.I)
+_LANG_NAMES = {"e": "english", "s": "sinhala", "t": "tamil"}
+
+# An index line: "Notices calling for Tenders … … … … 1234". The first pages of
+# every gazette are these, and taking summary = content[:500] returned nothing
+# but dot leaders and page numbers -- which is what reached the dashboard as
+# "the specific provisions remain largely unparsed".
+_DOT_LEADER = re.compile(r"[.…]{3,}|(?:\s…){2,}")
+_BARE_NUMBERS = re.compile(r"^[\d\s\-–—.,/]+$")
+
+# How much substantive text to hand the model, and from where.
+#
+# A gazette part runs to ~200k characters, far past any context worth spending
+# per cycle. Taking the first N was the obvious choice and the wrong one: the
+# opening pages are the publication rules -- submission deadlines, where to send
+# notices -- so the model dutifully reported that the gazette "explains the
+# rules for publishing the Gazette itself", which is true and useless.
+#
+# Sampling several windows across the document reaches the actual notices.
+GAZETTE_WINDOW_OFFSETS = (0.10, 0.35, 0.60, 0.85)
+
+# Groq's free tier allows 8,000 tokens per MINUTE, shared with the agent loop.
+#
+# Sinhala and Tamil cost roughly three times more tokens per character than
+# English -- a 14,000-character Sinhala sample measured 10,269 tokens and was
+# rejected outright:
+#
+#   413 - Request too large ... on tokens per minute (TPM):
+#         Limit 8000, Requested 10269
+#
+# So the character budget depends on the script, and both budgets leave room
+# for the agent cycle that is also spending from the same allowance.
+GAZETTE_CHARS_LATIN = 9000
+GAZETTE_CHARS_INDIC = 3600
+
+
+def _is_indic(text: str) -> bool:
+    """Whether this text is mostly non-Latin, and so token-expensive."""
+    sample = text[:2000]
+    if not sample:
+        return False
+    non_ascii = sum(1 for ch in sample if ord(ch) > 0x0400)
+    return non_ascii > len(sample) * 0.25
+
+
+def _sample_gazette(body: str) -> str:
+    """Representative windows through a long gazette, not just its opening."""
+    budget = GAZETTE_CHARS_INDIC if _is_indic(body) else GAZETTE_CHARS_LATIN
+    if len(body) <= budget:
+        return body
+    per_window = budget // len(GAZETTE_WINDOW_OFFSETS)
+    parts = []
+    for fraction in GAZETTE_WINDOW_OFFSETS:
+        start = int(len(body) * fraction)
+        parts.append(body[start:start + per_window])
+    return "\n[...]\n".join(parts)
+
+
+# A gazette is published weekly; the agent loop runs every 60 seconds. Without
+# this, the same PDF would be re-summarised ~10,000 times between editions,
+# spending the whole rate limit on an answer that cannot have changed.
+_GAZETTE_SUMMARY_CACHE: Dict[str, str] = {}
+
+
+def _gazette_cache_path():
+    from pathlib import Path
+
+    return Path(__file__).resolve().parent.parent.parent / "data" / "cache" / "gazette_summaries.json"
+
+
+def _load_gazette_cache() -> Dict[str, str]:
+    if _GAZETTE_SUMMARY_CACHE:
+        return _GAZETTE_SUMMARY_CACHE
+    try:
+        path = _gazette_cache_path()
+        if path.exists():
+            _GAZETTE_SUMMARY_CACHE.update(json.loads(path.read_text("utf-8")))
+    except Exception:  # noqa: BLE001
+        pass
+    return _GAZETTE_SUMMARY_CACHE
+
+
+def _save_gazette_cache() -> None:
+    try:
+        path = _gazette_cache_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(_GAZETTE_SUMMARY_CACHE, ensure_ascii=False, indent=1),
+            encoding="utf-8",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[GAZETTE] could not persist summary cache: %s", exc)
+
+
+def _gazette_language(url: str, link_text: str = "") -> str:
+    """Language of a gazette PDF, from its filename rather than its link text."""
+    match = _GAZETTE_LANG.search(url or "")
+    if match:
+        return _LANG_NAMES.get(match.group(1).lower(), "unknown")
+    lowered = (link_text or "").lower()
+    for name in ("sinhala", "tamil", "english"):
+        if name in lowered:
+            return name
+    return "unknown"
+
+
+def strip_gazette_index(text: str) -> str:
+    """
+    Drop the index pages so what remains is actual notices.
+
+    Kept separate and importable because it is the difference between
+    summarising a gazette and summarising its table of contents.
+    """
+    if not text:
+        return ""
+    kept: List[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if _DOT_LEADER.search(stripped):
+            continue
+        if _BARE_NUMBERS.match(stripped):
+            continue
+        kept.append(stripped)
+    return "\n".join(kept)
+
+
+def summarise_gazette(
+    text: str, title: str = "", cache_key: str = ""
+) -> Optional[str]:
+    """
+    What this gazette actually contains, in prose.
+
+    Returns None when no summary could be produced -- no key, no model, no
+    usable text. The caller then omits the field rather than presenting raw PDF
+    as though it were a summary, which is what previously reached the feed:
+
+        0000 - B 82815 - (2026/07) E - 01 පිටුව පිටුව තනතුරු ඇබෑෑර්තු … … -
+
+    That is the index page of a Sinhala PDF, sliced at 500 characters and
+    labelled a summary.
+    """
+    if cache_key:
+        cached = _load_gazette_cache().get(cache_key)
+        if cached:
+            logger.info("[GAZETTE] summary served from cache")
+            return cached
+
+    body = strip_gazette_index(text)
+    if len(body) < 400:
+        return None
+
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        logger.info("[GAZETTE] no GROQ_API_KEY; skipping summary")
+        return None
+
+    try:
+        from groq import Groq
+
+        from src.llms.models import agent_model
+    except Exception as exc:  # noqa: BLE001
+        logger.info("[GAZETTE] summariser unavailable: %s", exc)
+        return None
+
+    # "Answer in English" is not optional: gazette.lk often publishes the
+    # Sinhala and Tamil parts days before the English one, so the text handed
+    # to the model is frequently not English and the summary must be anyway.
+    prompt = (
+        "This is the text of a Sri Lankan Government Gazette"
+        f"{f' ({title})' if title else ''}. The source may be in Sinhala, "
+        "Tamil or English; ANSWER IN ENGLISH regardless.\n\n"
+        "Summarise what it ACTUALLY CONTAINS in 3-5 sentences: appointments, "
+        "regulations, tenders, land acquisitions, price orders, and which "
+        "ministries or bodies are involved. Name concrete items. Do not say a "
+        "gazette was published or describe it as routine legislative activity "
+        "-- that is already known and is not a summary.\n\n"
+        # Without this the model bails. Sinhala and Tamil PDFs from gazette.lk
+        # extract with doubled vowel signs and broken ligatures, and a model
+        # shown that text concludes it is garbled and refuses -- even though
+        # the notices are perfectly identifiable through the noise.
+        "The text is extracted from a PDF and the Sinhala or Tamil may be "
+        "imperfectly encoded, with doubled or broken characters. Work with "
+        "whatever is legible and summarise what you can identify. Reply "
+        "UNREADABLE only if you cannot identify a single notice or subject.\n\n"
+        "The text below is sampled from several points in the document, "
+        "separated by [...].\n\n"
+        f"{_sample_gazette(body)}"
+    )
+
+    try:
+        completion = Groq(api_key=api_key).chat.completions.create(
+            model=agent_model(),
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2,
+            # Deliberately large, and deliberately NOT paired with
+            # reasoning_effort="low".
+            #
+            # gpt-oss reasons before it answers and both come out of this
+            # budget. At 900 the prose was cut off mid-sentence, so the obvious
+            # move was to cut the reasoning instead -- which made it worse: on
+            # low effort the model read one screen of imperfectly-extracted
+            # Sinhala, reasoned "The text is garbled Sinhala. Likely
+            # unreadable." and returned UNREADABLE. At full effort it works
+            # through the same text and produces a real summary.
+            #
+            # 2500 output plus ~2200 input stays inside the 8,000/minute
+            # allowance with room for the agent cycle.
+            max_tokens=2500,
+        )
+        summary = (completion.choices[0].message.content or "").strip()
+    except Exception as exc:  # noqa: BLE001
+        # Rate limits are the common case on the free tier and are transient;
+        # the next cycle picks the gazette up, so this is not an error.
+        if "rate_limit" in str(exc).lower() or "429" in str(exc) or "413" in str(exc):
+            logger.info(
+                "[GAZETTE] summary deferred -- model rate limit reached; "
+                "the next cycle will retry"
+            )
+        else:
+            logger.warning("[GAZETTE] summary failed: %s", exc)
+        return None
+
+    if not summary or "UNREADABLE" in summary.upper():
+        return None
+
+    if cache_key:
+        _GAZETTE_SUMMARY_CACHE[cache_key] = summary
+        _save_gazette_cache()
+    return summary
+
 
 def scrape_government_gazette_impl(
     keywords: Optional[List[str]] = None,
@@ -2730,6 +2970,7 @@ def scrape_government_gazette_impl(
     """
     base_url = "https://www.gazette.lk/government-gazette"
     results: List[Dict[str, Any]] = []
+    summarised_this_run = 0
 
     logger.info(f"[GAZETTE] Fetching latest gazettes from {base_url}")
     resp = _safe_get(base_url)
@@ -2798,15 +3039,13 @@ def scrape_government_gazette_impl(
                 for link in pdfemb_links:
                     href = link.get("href", "")
                     if href and ("/dl/Gazette/" in href or ".pdf" in href.lower()):
-                        # Detect language from URL (E=English, S=Sinhala, T=Tamil)
-                        language = "english"
-                        href_lower = href.lower()
-                        if href.endswith("S.pdf") or "sinhala" in href_lower:
-                            language = "sinhala"
-                        elif href.endswith("T.pdf") or "tamil" in href_lower:
-                            language = "tamil"
-
                         pdf_url = _make_absolute(href, post_url_abs)
+                        # E/S/T plus an optional roman-numeral part. The old
+                        # endswith("S.pdf") test missed Sii and Siii and left
+                        # them on the "english" default.
+                        language = _gazette_language(
+                            pdf_url, link.get_text(strip=True)
+                        )
                         pdf_links.append(
                             {
                                 "language": language,
@@ -2830,14 +3069,9 @@ def scrape_government_gazette_impl(
                         if is_gazette_pdf or is_pdf_file:
                             pdf_url = _make_absolute(href, post_url_abs)
 
-                            # Detect language
-                            language = "english"
-                            if "sinhala" in link_text or href.endswith("S.pdf"):
-                                language = "sinhala"
-                            elif "tamil" in link_text or href.endswith("T.pdf"):
-                                language = "tamil"
-                            elif href.endswith("E.pdf") or "english" in link_text:
-                                language = "english"
+                            # From the filename suffix, not a default of
+                            # "english" that every part-numbered file inherited.
+                            language = _gazette_language(pdf_url, link_text)
 
                             # Avoid duplicates
                             if not any(p["url"] == pdf_url for p in pdf_links):
@@ -2907,11 +3141,58 @@ def scrape_government_gazette_impl(
             "timestamp": utc_now().isoformat(),
         }
 
-        # Add a summary if we have content
-        if pdf_content:
-            first_content = pdf_content[0].get("content", "")
-            if first_content and not first_content.startswith("["):
-                result_entry["summary"] = first_content[:500]
+        # Summarise what the gazette CONTAINS.
+        #
+        # This used to be first_content[:500] -- the opening 500 characters of
+        # the PDF, which on every gazette is the index page. The feed therefore
+        # carried dot leaders and page numbers, and the agent, given nothing
+        # else to work with, wrote "a gazette has been published, signalling
+        # ongoing legislative activity, though the specific provisions remain
+        # largely unparsed". The provisions were never unparsed; they were
+        # downloaded in full and then thrown away.
+        #
+        # Prefer genuine English, now that language detection is right.
+        usable = [
+            c for c in pdf_content
+            if c.get("content") and not str(c["content"]).startswith("[")
+        ]
+        if usable:
+            chosen = next(
+                (c for c in usable if c.get("language") == "english"), usable[0]
+            )
+            # One uncached summary per scrape. The allowance is per MINUTE and
+            # shared with the agent cycle, so summarising every edition in one
+            # pass 413s on the second call. Cached editions are free, so the
+            # backlog fills in over successive cycles instead of failing all at
+            # once -- and a gazette is weekly, so there is never much backlog.
+            already = str(chosen.get("source_url") or "") in _load_gazette_cache()
+            if not already and summarised_this_run:
+                result_entry["summary_unavailable"] = (
+                    "The gazette PDF was downloaded. Its summary is queued for "
+                    "the next cycle to stay inside the model rate limit."
+                )
+                results.append(result_entry)
+                continue
+            if not already:
+                summarised_this_run += 1
+            summary = summarise_gazette(
+                str(chosen["content"]),
+                title=title,
+                # Keyed on the PDF, so a re-scrape of the same edition costs
+                # nothing against the rate limit.
+                cache_key=str(chosen.get("source_url") or ""),
+            )
+            if summary:
+                result_entry["summary"] = summary
+                result_entry["summary_language"] = chosen.get("language")
+                result_entry["summary_source_url"] = chosen.get("source_url")
+            else:
+                # No invented summary. The dashboard can say the PDF was
+                # fetched but not summarised, which is true and checkable.
+                result_entry["summary_unavailable"] = (
+                    "The gazette PDF was downloaded but could not be "
+                    "summarised on this cycle."
+                )
 
         results.append(result_entry)
         logger.info(f"[GAZETTE] Added gazette with {len(pdf_content)} PDF extractions")

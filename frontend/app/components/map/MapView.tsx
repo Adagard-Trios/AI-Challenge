@@ -89,7 +89,7 @@ const MapView = () => {
                 Live
               </Badge>
             ) : (
-              <Badge className="bg-warning/20 text-warning text-xs">Reconnecting...</Badge>
+              <Badge className="bg-warning/20 text-warning text-xs">Reconnecting</Badge>
             )}
             <Badge className="border border-border flex items-center gap-2 text-xs">
               <Activity className="w-3 h-3" />

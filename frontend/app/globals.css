@@ -74,7 +74,9 @@
     --severity-critical-foreground: 0 0% 100%;
     --severity-high: 25 90% 40%;
     --severity-high-foreground: 0 0% 100%;
-    --severity-medium: 45 95% 35%;
+    /* 28%, not 35%: yellow is the hardest step to carry white text. At 35 the
+       MEDIUM badge measured 3.44:1, under AA. */
+    --severity-medium: 45 95% 28%;
     --severity-medium-foreground: 0 0% 100%;
     --severity-low: 210 85% 40%;
     --severity-low-foreground: 0 0% 100%;
@@ -134,8 +136,10 @@
     --input: 0 0% 18%;
     --ring: 142 45% 45%;
 
-    /* Same ladder, lightened to hold contrast on a near-black page. */
-    --severity-critical: 0 78% 58%;
+    /* Same ladder, lightened to hold contrast on a near-black page.
+       Critical matches --destructive at 62%: at 58% the solid CRITICAL badge
+       measured 4.31:1 against its dark label, just under AA. */
+    --severity-critical: 0 78% 62%;
     --severity-critical-foreground: 0 0% 10%;
     --severity-high: 25 95% 55%;
     --severity-high-foreground: 0 0% 10%;

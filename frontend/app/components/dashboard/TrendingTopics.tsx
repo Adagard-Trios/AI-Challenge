@@ -41,6 +41,27 @@ export const TrendingTopics: React.FC = () => {
             try {
                 const response = await apiFetch(`${API_BASE}/api/trending`);
                 const result = await response.json();
+
+                // Validate the shape before storing it.
+                //
+                // This used to be a bare `setData(result)`, and the render then
+                // read `data.spike_alerts.length` and `data.trending_topics.length`
+                // unguarded. Any 200 response whose body was not the expected
+                // object -- notably `{status: "unavailable"}`, which this backend
+                // genuinely returns for capabilities that are not running --
+                // threw during render and, with no error boundary above it, took
+                // the ENTIRE dashboard down to Next's white "Application error"
+                // page. Reproduced in a production build.
+                if (
+                    !result ||
+                    !Array.isArray(result.trending_topics) ||
+                    !Array.isArray(result.spike_alerts)
+                ) {
+                    setData(null);
+                    setError('Trending data is unavailable');
+                    return;
+                }
+
                 setData(result);
                 setError(null);
             } catch (err) {

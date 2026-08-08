@@ -183,7 +183,7 @@ const IntelligenceFeed = () => {
               ) : (
                 <span className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-warning"></span>
-                  Reconnecting...
+                  Reconnecting
                 </span>
               )}
             </span>

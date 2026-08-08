@@ -299,7 +299,7 @@ const RiverNetStatus = ({ riverData, compact = false }: RiverNetStatusProps) => 
             <div className="mt-4 pt-3 border-t border-border flex items-center justify-between">
                 <p className="text-xs text-muted-foreground">
                     Source: <a href="https://rivernet.lk" target="_blank" rel="noopener noreferrer"
-                        className="text-primary hover:underline">rivernet.lk</a>
+                        className="text-primary hover:underline rounded inline-block min-h-[44px] sm:min-h-0 leading-[44px] sm:leading-normal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background">rivernet.lk</a>
                 </p>
                 <p className="text-xs text-muted-foreground">
                     {rivers.length} rivers monitored

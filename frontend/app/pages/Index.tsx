@@ -17,6 +17,7 @@ import TrendingTopics from "../components/dashboard/TrendingTopics";
 import SatelliteView from "../components/map/SatelliteView";
 import LoadingScreen from "../components/LoadingScreen";
 import ThemeToggle from "../components/ThemeToggle";
+import PanelBoundary from "../components/PanelBoundary";
 import SocialAccounts from "../components/settings/SocialAccounts";
 import CollectedPosts from "../components/settings/CollectedPosts";
 import { Activity, Map, Radio, BarChart3, Zap, Brain, Cloud, Satellite, Link2, Layers } from "lucide-react";
@@ -218,69 +219,69 @@ const Index = () => {
           </div>
 
           <TabsContent value="overview" className="space-y-6 animate-fade-in">
-            <DashboardOverview />
+            <PanelBoundary name="Situational overview"><DashboardOverview /></PanelBoundary>
             {/* The four risk indices the aggregator has always computed and
                 nothing rendered -- each one openable to the events behind it. */}
-            <RiskIndices />
-            <TrendingTopics />
+            <PanelBoundary name="Risk indices"><RiskIndices /></PanelBoundary>
+            <PanelBoundary name="Trending topics"><TrendingTopics /></PanelBoundary>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <StockPredictions />
-              <CurrencyPrediction />
+              <PanelBoundary name="Stock predictions"><StockPredictions /></PanelBoundary>
+              <PanelBoundary name="USD/LKR prediction"><CurrencyPrediction /></PanelBoundary>
             </div>
           </TabsContent>
 
           <TabsContent value="map" className="animate-fade-in">
-            <MapView />
+            <PanelBoundary name="District map"><MapView /></PanelBoundary>
           </TabsContent>
 
           <TabsContent value="intelligence" className="animate-fade-in space-y-8">
             {/* Search the collected corpus by picture. Answers "has this photo
                 been posted before", which text search cannot. */}
-            <ImageSearch />
-            <IntelligenceFeed />
+            <PanelBoundary name="Image search"><ImageSearch /></PanelBoundary>
+            <PanelBoundary name="Intel feed"><IntelligenceFeed /></PanelBoundary>
           </TabsContent>
 
           <TabsContent value="stories" className="animate-fade-in">
-            <StoryFeed />
+            <PanelBoundary name="Stories"><StoryFeed /></PanelBoundary>
           </TabsContent>
 
           <TabsContent value="satellite" className="animate-fade-in">
-            <SatelliteView />
+            <PanelBoundary name="Satellite view"><SatelliteView /></PanelBoundary>
           </TabsContent>
 
           <TabsContent value="weather" className="animate-fade-in space-y-6">
             {/* National Threat Score */}
-            <NationalThreatCard />
+            <PanelBoundary name="National threat score"><NationalThreatCard /></PanelBoundary>
 
             {/* Weather Predictions */}
-            <WeatherPredictions />
+            <PanelBoundary name="Weather predictions"><WeatherPredictions /></PanelBoundary>
 
             {/* Historical Climate Analysis */}
-            <HistoricalIntel />
+            <PanelBoundary name="Historical climate"><HistoricalIntel /></PanelBoundary>
           </TabsContent>
 
           <TabsContent value="anomalies" className="animate-fade-in">
-            <AnomalyDetection />
+            <PanelBoundary name="Unusual activity"><AnomalyDetection /></PanelBoundary>
           </TabsContent>
 
           <TabsContent value="analytics" className="animate-fade-in">
             <div className="grid gap-6">
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <StockPredictions />
-                <CurrencyPrediction />
+                <PanelBoundary name="Stock predictions"><StockPredictions /></PanelBoundary>
+                <PanelBoundary name="USD/LKR prediction"><CurrencyPrediction /></PanelBoundary>
               </div>
-              <AnomalyDetection />
+              <PanelBoundary name="Unusual activity"><AnomalyDetection /></PanelBoundary>
             </div>
           </TabsContent>
 
           <TabsContent value="accounts" className="animate-fade-in space-y-8">
             {/* Sign in here — the server is this machine, so the fields and the
                 browser window are both in front of you. */}
-            <SocialAccounts />
+            <PanelBoundary name="Social accounts"><SocialAccounts /></PanelBoundary>
 
             {/* Proof the accounts above are actually working. Without this the
                 whole flow ended at a row count in a database. */}
-            <CollectedPosts />
+            <PanelBoundary name="Collected posts"><CollectedPosts /></PanelBoundary>
 
           </TabsContent>
         </Tabs>

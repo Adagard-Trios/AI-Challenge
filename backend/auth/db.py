@@ -108,6 +108,13 @@ def init_db() -> None:
     # every event as new, which is silent and looks like a very busy news day.
     from src.storage import seen_hashes_model as _seen_hashes  # noqa: F401
 
+    # The blackboard tables. Registered now although nothing writes to them
+    # yet: creating three empty tables is free, and the alternative is that
+    # the stage which starts writing also has to introduce the schema, so a
+    # deploy that half-succeeds leaves writes failing against tables that were
+    # never made.
+    from src.blackboard import models as _blackboard_models  # noqa: F401
+
     Base.metadata.create_all(bind=engine())
 
     # create_all creates missing TABLES and ignores existing ones entirely, so

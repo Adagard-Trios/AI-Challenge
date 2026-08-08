@@ -128,6 +128,11 @@ psycopg[binary]>=3.2     # Postgres driver (Neon). SQLite needs nothing.
 # daily request budgets are otherwise per-process, so N replicas touch one
 # personal account N times as often. See src/runtime/redis_client.py.
 redis>=5.0
+
+# Post images. Optional: unset S3_* keeps the local directory, which is
+# correct for one process. Required for replicas -- an absolute path written
+# by one pod means nothing on another. See src/images/store.py.
+minio>=7.2
 # Deliberately NOT pydantic[email]: auth/routes.py validates addresses inline
 # rather than pull email-validator in for an invite-only tool.
 

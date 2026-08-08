@@ -192,7 +192,14 @@ def search_by_image(
         similarity = None
 
         if query_vector is not None and image.local_path:
-            vector = embed_image(image.local_path)
+            # Resolve through the store: with object storage, local_path is a
+            # KEY and the file may have been written by a different pod. A
+            # missing file here would silently mean "no similar image" rather
+            # than "this replica cannot read it".
+            from .store import fetch as _fetch
+
+            readable = _fetch(image.local_path)
+            vector = embed_image(readable) if readable else None
             if vector:
                 similarity = _cosine(query_vector, vector)
 

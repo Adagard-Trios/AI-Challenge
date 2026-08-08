@@ -79,13 +79,48 @@ services:
       ANONYMIZED_TELEMETRY: "False"
       IS_PERSISTENT: "TRUE"
     healthcheck:
-      # v2 heartbeat. The v1 path returns 410 Gone on current images, so a
-      # healthcheck against it marks a perfectly healthy container unhealthy.
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/api/v2/heartbeat || exit 1"]
+      # bash's own /dev/tcp, because the chroma image has NO probe tool at all
+      # -- no curl, no wget, no python, no nc. Two of my attempts failed here
+      # and reported a container "unhealthy" for hours while its endpoint
+      # returned 200 to the host, which is worse than having no check: it says
+      # something is wrong when nothing is.
+      #
+      # This tests that the port is accepting connections, not that the API
+      # answers. That is the honest limit of what can be checked from inside
+      # THIS image.
+      #
+      # Note the Kubernetes manifests are unaffected and do check HTTP: an
+      # httpGet probe is performed BY THE KUBELET from outside the container,
+      # so it needs no tools in the image. That difference is exactly why a
+      # compose healthcheck and a k8s probe are not the same problem.
+      # CMD with an explicit bash, NOT CMD-SHELL. /dev/tcp is a bash builtin
+      # and CMD-SHELL runs /bin/sh, which is dash here -- it reports
+      # "cannot create /dev/tcp/...: Directory nonexistent", because it is
+      # looking for a real file.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8000"]
       interval: 15s
       timeout: 5s
       retries: 5
       start_period: 40s
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    command: ["server", "/data", "--console-address", ":9001"]
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-roger}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-roger-local-dev}
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     restart: unless-stopped
 
   backend:
@@ -105,6 +140,12 @@ services:
       # From the HOST venv use localhost:5432 / localhost:6379 instead.
       - DATABASE_URL=postgresql+psycopg://roger:${POSTGRES_PASSWORD:-roger-local-dev}@postgres:5432/roger
       - REDIS_URL=redis://redis:6379/0
+      # Post images. A local directory cannot be shared, and an
+      # absolute path written by one pod means nothing on another.
+      - S3_ENDPOINT=minio:9000
+      - S3_BUCKET=roger-images
+      - S3_ACCESS_KEY=${S3_ACCESS_KEY:-roger}
+      - S3_SECRET_KEY=${S3_SECRET_KEY:-roger-local-dev}
       # Training inside the API container delays the port bind past the health
       # check and OOMs small instances. Artefacts are committed under
       # models/*/artifacts.
@@ -160,6 +201,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  minio-data:
   chroma-data:
   redis-data:
   postgres-data:

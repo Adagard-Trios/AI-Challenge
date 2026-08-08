@@ -91,6 +91,11 @@ plotly
 # more than one replica, because the social pacing gate and the daily request
 # budgets are per-process otherwise.
 redis>=5.0
+
+# Post images. Optional: unset S3_* keeps the local directory, which is
+# correct for one process. Required for replicas -- an absolute path written
+# by one pod means nothing on another. See src/images/store.py.
+minio>=7.2
 psycopg[binary]>=3.2
 neo4j
 langchain-neo4j

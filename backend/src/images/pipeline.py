@@ -203,16 +203,34 @@ def process_image(url: str, session=None) -> ImageResult:
         # Named by content hash, so the same picture from two URLs is stored
         # once and the filename is stable across runs.
         digest = hashlib.sha256(data).hexdigest()[:24]
-        path = IMAGE_DIR / f"{digest}.{(image.format or 'png').lower()}"
+        key = f"{digest}.{(image.format or 'png').lower()}"
+        path = IMAGE_DIR / key
         if not path.exists():
             path.write_bytes(data)
         result.local_path = str(path)
+
+        # Also to object storage when configured, and record the KEY rather
+        # than the path.
+        #
+        # An absolute path written by the worker means nothing on an API
+        # replica: image search opens local_path to embed a candidate, so it
+        # would find the row, fail to open the file, and report no match --
+        # which reads as "that picture is not in the corpus" rather than "this
+        # pod cannot see the file". The name is already a content hash, so the
+        # key needs no new scheme.
+        from .store import put as _put
+
+        stored = _put(str(path), key)
+        if stored:
+            result.local_path = stored
 
     except Exception as exc:  # noqa: BLE001
         result.error = f"decode failed: {exc}"
         return result
 
-    text, confidence = _read_text(Path(result.local_path))
+    # OCR reads the file just written, not the stored key -- it is still on
+    # this disk and a round trip to object storage would be pure cost.
+    text, confidence = _read_text(path)
     if text and (confidence is None or confidence >= MIN_OCR_CONFIDENCE):
         result.ocr_text = text
         result.ocr_confidence = confidence

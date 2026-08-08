@@ -3,6 +3,7 @@
 import { Card } from "../ui/card";
 import { TrendingUp, TrendingDown, Minus, Landmark, DollarSign, Percent, Building2 } from "lucide-react";
 import DataProvenance from "./DataProvenance";
+import { EMPTY } from "@/app/lib/format";
 
 interface EconomicIndicatorsProps {
     economyData?: Record<string, unknown> | null;
@@ -23,13 +24,25 @@ const EconomicIndicators = ({ economyData }: EconomicIndicatorsProps) => {
         return <Minus className="w-3 h-3 text-muted-foreground" />;
     };
 
+    // Each of these falls back to `null`, not 0.
+    //
+    // A currency board panel that prints "USD/LKR 0.00", "Inflation 0%" and
+    // "Reserves $0B" when the scrape failed is stating four things that are
+    // not true and would each be extraordinary news if they were. formatMeasure
+    // and friends render null as an em-dash, which is the honest answer.
+    const first = (...values: unknown[]): number | null => {
+        for (const v of values) if (typeof v === "number" && !Number.isNaN(v)) return v;
+        return null;
+    };
+
     // Get the exchange rate - prefer mid rate, fallback to sell or buy
-    const usdLkr = (exchangeRate.usd_lkr as number) ||
-        (exchangeRate.usd_lkr_sell as number) ||
-        (exchangeRate.usd_lkr_buy as number) || 0;
+    const usdLkr = first(exchangeRate.usd_lkr, exchangeRate.usd_lkr_sell, exchangeRate.usd_lkr_buy);
 
     // Get policy rate - prefer overnight, fallback to SDFR
-    const policyRate = (policyRates.overnight_rate as number) || (policyRates.sdfr as number) || 0;
+    const policyRate = first(policyRates.overnight_rate, policyRates.sdfr);
+
+    const ccpi = first(inflation.ccpi_yoy);
+    const reserves = first(forexReserves.value);
 
     return (
         <Card className="p-4 bg-card border-border">
@@ -57,7 +70,9 @@ const EconomicIndicators = ({ economyData }: EconomicIndicatorsProps) => {
                         <span className="text-xs text-muted-foreground">CCPI Inflation</span>
                     </div>
                     <div className="flex items-center gap-1">
-                        <span className="text-lg font-bold">{inflation.ccpi_yoy as number || 0}%</span>
+                        <span className={`text-lg font-bold ${ccpi === null ? "text-muted-foreground" : ""}`}>
+                            {ccpi === null ? EMPTY : `${ccpi}%`}
+                        </span>
                         {getTrendIcon(inflation.trend as string)}
                     </div>
                 </div>
@@ -69,7 +84,9 @@ const EconomicIndicators = ({ economyData }: EconomicIndicatorsProps) => {
                         <span className="text-xs text-muted-foreground">USD/LKR</span>
                     </div>
                     <div className="flex items-center gap-1">
-                        <span className="text-lg font-bold">{usdLkr.toFixed(2)}</span>
+                        <span className={`text-lg font-bold ${usdLkr === null ? "text-muted-foreground" : ""}`}>
+                            {usdLkr === null ? EMPTY : usdLkr.toFixed(2)}
+                        </span>
                         {getTrendIcon(exchangeRate.trend as string)}
                     </div>
                     {/* Show Buy/Sell if available */}
@@ -87,7 +104,9 @@ const EconomicIndicators = ({ economyData }: EconomicIndicatorsProps) => {
                         <Landmark className="w-3 h-3 text-muted-foreground" />
                         <span className="text-xs text-muted-foreground">Policy Rate</span>
                     </div>
-                    <span className="text-lg font-bold">{policyRate}%</span>
+                    <span className={`text-lg font-bold ${policyRate === null ? "text-muted-foreground" : ""}`}>
+                        {policyRate === null ? EMPTY : `${policyRate}%`}
+                    </span>
                 </div>
 
                 {/* Forex Reserves */}
@@ -97,7 +116,9 @@ const EconomicIndicators = ({ economyData }: EconomicIndicatorsProps) => {
                         <span className="text-xs text-muted-foreground">Reserves</span>
                     </div>
                     <div className="flex items-center gap-1">
-                        <span className="text-lg font-bold">${(forexReserves.value as number) || 0}B</span>
+                        <span className={`text-lg font-bold ${reserves === null ? "text-muted-foreground" : ""}`}>
+                            {reserves === null ? EMPTY : `$${reserves}B`}
+                        </span>
                         {getTrendIcon(forexReserves.trend as string)}
                     </div>
                 </div>

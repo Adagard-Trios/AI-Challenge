@@ -13,6 +13,18 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
   ]),
+
+  // tailwind.config.js and postcss.config.js are CommonJS by design -- Tailwind
+  // and PostCSS load them with require(), so `require()` inside them is correct
+  // rather than a lapse. The TypeScript preset flags it anyway, which made
+  // `npm run lint` fail on two lines that cannot be written another way.
+  {
+    files: ["*.config.js", "*.config.cjs"],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
+      "import/no-anonymous-default-export": "off",
+    },
+  },
 ]);
 
 export default eslintConfig;

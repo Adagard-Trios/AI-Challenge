@@ -22,12 +22,27 @@ import { formatPercent } from "../../lib/format";
  * the contributing events were already being computed and thrown away.
  */
 
-const TONE = (value: number) =>
-    value >= 0.7
-        ? { bar: "bg-destructive", text: "text-destructive", label: "HIGH" }
-        : value >= 0.4
-          ? { bar: "bg-warning", text: "text-warning", label: "ELEVATED" }
-          : { bar: "bg-success", text: "text-success", label: "LOW" };
+/**
+ * Tone for a score, including the case where there ISN'T one.
+ *
+ * `null` gets muted grey and the word "NO DATA" -- never green, never "LOW".
+ * Previously the value was coerced with `?? 0`, so an unreachable backend
+ * painted three green bars reading "0% LOW" next to a "Normal power supply"
+ * card. On a flood-and-outage warning system, absence rendered as reassurance
+ * is the single worst thing the UI can do.
+ */
+const TONE = (value: number | null) =>
+    value === null
+        ? { bar: "bg-muted-foreground/30", text: "text-muted-foreground", label: "NO DATA" }
+        : value >= 0.7
+          ? { bar: "bg-destructive", text: "text-destructive", label: "HIGH" }
+          : value >= 0.4
+            ? { bar: "bg-warning", text: "text-warning", label: "ELEVATED" }
+            : { bar: "bg-success", text: "text-success", label: "LOW" };
+
+/** 0-1 score to a percentage bar width; an unscored index has no bar. */
+const barWidth = (value: number | null) =>
+    value === null ? 0 : Math.max(0, Math.min(1, value)) * 100;
 
 const RiskIndices = () => {
     const { dashboard } = useRogerData();
@@ -37,7 +52,7 @@ const RiskIndices = () => {
         {
             key: "logistics_friction" as const,
             label: "Logistics friction",
-            value: dashboard?.logistics_friction ?? 0,
+            value: dashboard?.logistics_friction ?? null,
             Icon: TrendingDown,
             explanation:
                 "How much harder it is to move goods right now. Averages the confidence of social-unrest and weather events, the two things that most often close a road or a port.",
@@ -46,7 +61,7 @@ const RiskIndices = () => {
         {
             key: "compliance_volatility" as const,
             label: "Compliance volatility",
-            value: dashboard?.compliance_volatility ?? 0,
+            value: dashboard?.compliance_volatility ?? null,
             Icon: Scale,
             explanation:
                 "How fast the regulatory picture is changing. Averages political and gazette activity — a high value means rules are moving, not that any single rule is bad.",
@@ -55,7 +70,7 @@ const RiskIndices = () => {
         {
             key: "market_instability" as const,
             label: "Market instability",
-            value: dashboard?.market_instability ?? 0,
+            value: dashboard?.market_instability ?? null,
             Icon: Gauge,
             explanation:
                 "Turbulence in economic and competitor signals. Averages economic indicators and market intelligence events.",
@@ -63,7 +78,7 @@ const RiskIndices = () => {
         },
     ];
 
-    const opportunity = dashboard?.opportunity_index ?? 0;
+    const opportunity = dashboard?.opportunity_index ?? null;
 
     return (
         <Card className="p-4 sm:p-5 bg-card border-border">
@@ -79,7 +94,10 @@ const RiskIndices = () => {
                     className="bg-muted text-muted-foreground text-xs shrink-0"
                     title="Mean confidence across every event in this cycle"
                 >
-                    confidence {formatPercent(dashboard?.avg_confidence ?? 0)}
+                    {/* formatPercent(null) renders "—", which is the truth
+                        before a cycle completes. It used to be `?? 0`, i.e.
+                        "confidence 0%" -- a measured-sounding claim. */}
+                    confidence {formatPercent(dashboard?.avg_confidence)}
                 </Badge>
             </div>
 
@@ -101,10 +119,12 @@ const RiskIndices = () => {
                                 </span>
                             </div>
 
+                            {/* An unscored index gets an empty track, not a
+                                zero-width green bar. */}
                             <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
                                 <div
                                     className={`h-full ${tone.bar} transition-all duration-500`}
-                                    style={{ width: `${Math.max(0, Math.min(1, value)) * 100}%` }}
+                                    style={{ width: `${barWidth(value)}%` }}
                                 />
                             </div>
 
@@ -156,14 +176,20 @@ const RiskIndices = () => {
                             <TrendingUp className="w-4 h-4 text-success" />
                             Opportunity index
                         </span>
-                        <span className="font-mono text-sm font-semibold text-success">
+                        <span
+                            className={`font-mono text-sm font-semibold ${opportunity === null ? "text-muted-foreground" : "text-success"
+                                }`}
+                        >
                             {formatPercent(opportunity)}
+                            {opportunity === null && (
+                                <span className="ml-2 text-xs font-normal opacity-70">NO DATA</span>
+                            )}
                         </span>
                     </div>
                     <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
                         <div
                             className="h-full bg-success transition-all duration-500"
-                            style={{ width: `${Math.max(0, Math.min(1, opportunity)) * 100}%` }}
+                            style={{ width: `${barWidth(opportunity)}%` }}
                         />
                     </div>
                     <p className="mt-1.5 text-xs text-muted-foreground">

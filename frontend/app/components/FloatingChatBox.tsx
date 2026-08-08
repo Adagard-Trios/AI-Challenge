@@ -128,17 +128,33 @@ const FloatingChatBox = () => {
                 className={`absolute top-0 left-0 w-screen h-screen bg-black transition-opacity duration-500 ${isOpen ? 'opacity-40 flex' : 'opacity-0 hidden'}`}
             />
 
-            {/* Roger Button */}
-            <div
+            {/* Roger Button.
+                Was a <div onClick>: not focusable, not keyboard-operable, and
+                announced as "generic" rather than a button. Same for the close,
+                clear and send controls, and the domain filters below. */}
+            <button
+                type="button"
                 onClick={toggleChat}
-                className={`${isOpen ? 'translate-y-[100px]' : 'translate-y-0 delay-300'} select-none transition-transform duration-500 ease-in-out absolute bottom-[15px] right-[15px] sm:bottom-[20px] sm:right-[30px] flex items-center justify-center w-fit bg-[#373435] ring-[0.5px] ring-[#727376] rounded-full cursor-pointer px-[25px] py-[8px] sm:px-[30px] sm:py-[8px] shadow-lg hover:bg-[#4a4a4a] transition-colors`}
+                aria-expanded={isOpen}
+                aria-label={isOpen ? "Close Roger assistant" : "Open Roger assistant"}
+                className={`${isOpen ? 'translate-y-[100px]' : 'translate-y-0 delay-300'} select-none transition-transform duration-500 ease-in-out absolute bottom-[15px] right-[15px] sm:bottom-[20px] sm:right-[30px] flex items-center justify-center w-fit bg-[#373435] ring-[0.5px] ring-[#727376] rounded-full cursor-pointer px-[25px] sm:px-[30px] min-h-[44px] shadow-lg hover:bg-[#4a4a4a] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-400 focus-visible:ring-offset-2 focus-visible:ring-offset-black`}
             >
                 <Radio className="w-5 h-5 mr-2 text-green-400" />
-                <p className="select-none text-white text-[18px] sm:text-[18px] font-semibold">Roger</p>
-            </div>
+                <span className="select-none text-white text-[18px] sm:text-[18px] font-semibold">Roger</span>
+            </button>
 
-            {/* Chat Container */}
-            <div className={`${isOpen ? 'scale-100 delay-200' : 'scale-0'} roger-scrollbar absolute bottom-0 right-0 sm:bottom-[20px] sm:right-[30px] origin-bottom-right transition-transform duration-500 ease-in-out flex flex-col bg-[#373435] ring-[0.5px] ring-[#727376] h-[100dvh] w-[100vw] sm:h-[600px] sm:w-[420px] sm:rounded-[12px] justify-center overflow-hidden`}>
+            {/* Chat Container.
+                `scale-0` hides it visually but leaves everything inside it
+                focusable and announced -- a keyboard user tabbing the
+                dashboard landed in an invisible chat box, and a screen reader
+                read out the whole panel. `inert` takes the subtree out of the
+                tab order and the accessibility tree while it is closed, which
+                is exactly what the visual state already implies. */}
+            <div
+                inert={!isOpen}
+                aria-hidden={!isOpen}
+                className={`${isOpen ? 'scale-100 delay-200' : 'scale-0'} roger-scrollbar absolute bottom-0 right-0 sm:bottom-[20px] sm:right-[30px] origin-bottom-right transition-transform duration-500 ease-in-out flex flex-col bg-[#373435] ring-[0.5px] ring-[#727376] h-[100dvh] w-[100vw] sm:h-[600px] sm:w-[420px] sm:rounded-[12px] justify-center overflow-hidden`}
+            >
 
                 {/* Header - with safe area for iPhone notch */}
                 <div className="w-full select-none px-[16px] sm:px-[20px] bg-[#000000] text-white flex flex-row justify-between sm:rounded-t-[12px] py-[14px] sm:py-[18px] pt-[max(14px,env(safe-area-inset-top))] h-fit items-center border-b border-[#373435]">
@@ -152,39 +168,52 @@ const FloatingChatBox = () => {
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
-                        <div
+                        <button
+                            type="button"
                             onClick={clearHistory}
-                            className="cursor-pointer bg-[#373435] hover:bg-red-500/30 p-2 rounded-lg transition-colors"
+                            className="cursor-pointer bg-[#373435] hover:bg-red-500/30 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-400"
                             title="Clear chat history"
+                            aria-label="Clear chat history"
                         >
                             <Trash2 className="w-4 h-4 text-gray-400 hover:text-red-400" />
-                        </div>
-                        <div
+                        </button>
+                        <button
+                            type="button"
                             onClick={toggleChat}
-                            className="cursor-pointer bg-[#373435] hover:bg-[#4a4a4a] active:bg-[#555] px-[14px] py-[8px] sm:px-[12px] sm:py-[6px] rounded-[8px] sm:rounded-[6px] transition-colors touch-manipulation"
+                            aria-label="Close Roger assistant"
+                            className="cursor-pointer bg-[#373435] hover:bg-[#4a4a4a] active:bg-[#555] min-h-[44px] px-[14px] sm:px-[12px] rounded-[8px] sm:rounded-[6px] transition-colors touch-manipulation text-[14px] sm:text-[13px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-400"
                         >
-                            <p className="text-[14px] sm:text-[13px]">Close</p>
-                        </div>
+                            Close
+                        </button>
                     </div>
                 </div>
 
                 {/* Domain Filter - scrollable on mobile */}
-                <div className="flex gap-1.5 sm:gap-1 px-3 sm:px-4 py-3 bg-[#1a1a1a] border-b border-[#373435] overflow-x-auto sm:flex-wrap intel-scrollbar">
-                    <Badge
-                        className={`cursor-pointer text-xs sm:text-xs whitespace-nowrap px-3 py-1.5 sm:px-2 sm:py-1 transition-colors touch-manipulation ${!domainFilter ? 'bg-green-500 text-white' : 'bg-[#373435] text-gray-300 hover:bg-[#4a4a4a] active:bg-[#555]'}`}
-                        onClick={() => setDomainFilter(null)}
-                    >
-                        All
-                    </Badge>
-                    {domains.map(domain => (
-                        <Badge
-                            key={domain}
-                            className={`cursor-pointer text-xs sm:text-xs whitespace-nowrap px-3 py-1.5 sm:px-2 sm:py-1 capitalize transition-colors touch-manipulation ${domainFilter === domain ? 'bg-green-500 text-white' : 'bg-[#373435] text-gray-300 hover:bg-[#4a4a4a] active:bg-[#555]'}`}
-                            onClick={() => setDomainFilter(domain)}
-                        >
-                            {domain}
-                        </Badge>
-                    ))}
+                {/* Radio group semantics: these are mutually exclusive filters,
+                    so aria-pressed on real buttons says which one is active.
+                    As <Badge onClick> they were unfocusable divs and the
+                    selected state was conveyed by colour alone. */}
+                <div
+                    role="group"
+                    aria-label="Filter by domain"
+                    className="flex gap-1.5 sm:gap-1 px-3 sm:px-4 py-3 bg-[#1a1a1a] border-b border-[#373435] overflow-x-auto sm:flex-wrap intel-scrollbar"
+                >
+                    {[{ key: null, label: "All" }, ...domains.map(d => ({ key: d, label: d }))].map(
+                        ({ key, label }) => (
+                            <button
+                                key={label}
+                                type="button"
+                                onClick={() => setDomainFilter(key)}
+                                aria-pressed={domainFilter === key}
+                                className={`cursor-pointer text-xs whitespace-nowrap rounded-full px-3 py-1.5 sm:px-2 sm:py-1 capitalize transition-colors touch-manipulation focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-400 ${domainFilter === key
+                                    ? 'bg-green-500 text-white'
+                                    : 'bg-[#373435] text-gray-300 hover:bg-[#4a4a4a] active:bg-[#555]'
+                                    }`}
+                            >
+                                {label}
+                            </button>
+                        ),
+                    )}
                 </div>
 
                 {/* Messages Container */}
@@ -261,15 +290,18 @@ const FloatingChatBox = () => {
                         </div>
                         <div className="text-gray-300 text-center max-w-[280px]">
                             <p className="text-[16px] mb-3 leading-relaxed">
-                                Hello! I'm <strong>Roger</strong>, your intelligence assistant.
+                                Hello! I&apos;m <strong>Roger</strong>, your intelligence assistant.
                             </p>
                             <p className="text-[14px] text-gray-400 leading-relaxed">
-                                Ask me anything about Sri Lanka's political, economic, weather, or social intelligence data.
+                                Ask me anything about Sri Lanka&apos;s political, economic, weather, or social intelligence data.
                             </p>
-                            <div className="mt-4 space-y-2 text-[12px] text-gray-500">
+                            {/* text-gray-500 on #101010 measures 3.9:1 -- below
+                                WCAG AA's 4.5:1, at 12px. Moved up to gray-400
+                                (7.5:1). */}
+                            <div className="mt-4 space-y-2 text-[12px] text-gray-400">
                                 <p>Try asking:</p>
-                                <p className="italic">"What are the latest political events?"</p>
-                                <p className="italic">"Any weather warnings today?"</p>
+                                <p className="italic">&ldquo;What are the latest political events?&rdquo;</p>
+                                <p className="italic">&ldquo;Any weather warnings today?&rdquo;</p>
                             </div>
                         </div>
                     </div>
@@ -288,15 +320,18 @@ const FloatingChatBox = () => {
                             rows={2}
                             style={{ fontSize: '16px' }}
                         />
-                        <div
+                        <button
+                            type="button"
                             onClick={sendMessage}
-                            className={`absolute top-[6px] right-[6px] w-[44px] h-[44px] sm:w-[42px] sm:h-[42px] ring-[0.5px] ring-[#727376] cursor-pointer rounded-full flex items-center justify-center transition-all shadow-lg touch-manipulation active:scale-95 ${input.trim() && !isLoading
+                            disabled={!input.trim() || isLoading}
+                            aria-label="Send message"
+                            className={`absolute top-[6px] right-[6px] w-[44px] h-[44px] sm:w-[42px] sm:h-[42px] ring-[0.5px] ring-[#727376] cursor-pointer rounded-full flex items-center justify-center transition-all shadow-lg touch-manipulation active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-400 focus-visible:ring-offset-2 focus-visible:ring-offset-black disabled:cursor-not-allowed ${input.trim() && !isLoading
                                 ? 'bg-green-500 hover:bg-green-600 active:bg-green-700'
                                 : 'bg-[#373435] hover:bg-[#4a4a4a] active:bg-[#555]'
                                 }`}
                         >
                             <Send className={`w-5 h-5 ml-[2px] ${input.trim() && !isLoading ? 'text-white' : 'text-gray-400'}`} />
-                        </div>
+                        </button>
                     </div>
                     <p className="text-[11px] text-gray-500 mt-2 text-center sm:hidden">
                         Press Enter to send • Shift+Enter for new line

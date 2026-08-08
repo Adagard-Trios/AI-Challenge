@@ -1,6 +1,6 @@
 'use client'
 
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import ClientWrapper from "./ClientWrapper";
 import Index from "../pages/Index";
 import Login from "../pages/Login";
@@ -20,6 +20,22 @@ function LoginRoute() {
   const { user, loading } = useAuth();
   if (loading) return null;
   return user ? <Navigate to="/" replace /> : <Login />;
+}
+
+/**
+ * The chat, but only where the dashboard is.
+ *
+ * Mirrors RequireAuth's rule rather than restating it: visible when the backend
+ * is not enforcing auth (open mode, dashboard renders for everyone) or when
+ * there is a signed-in user. Hidden on the login screen either way.
+ */
+function ChatWhereItBelongs() {
+  const { user, loading, enforced } = useAuth();
+  const { pathname } = useLocation();
+
+  if (loading || pathname === "/login") return null;
+  if (enforced && !user) return null;
+  return <FloatingChatBox />;
 }
 
 export default function App() {
@@ -55,7 +71,15 @@ export default function App() {
           />
           <Route path="*" element={<NotFound />} />
         </Routes>
-        <FloatingChatBox />
+        {/*
+          The assistant belongs to the dashboard, not to every screen.
+
+          Mounted here unconditionally it also rendered on /login and on the
+          404 page -- so an unauthenticated visitor got a "Roger" button that
+          posts to /api/rag/chat with no token. Gated on the same condition
+          RequireAuth uses, so it appears exactly where the dashboard does.
+        */}
+        <ChatWhereItBelongs />
       </ClientWrapper>
     </AuthProvider>
   );

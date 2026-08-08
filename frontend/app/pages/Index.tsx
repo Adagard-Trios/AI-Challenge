@@ -18,12 +18,25 @@ import SatelliteView from "../components/map/SatelliteView";
 import LoadingScreen from "../components/LoadingScreen";
 import SocialAccounts from "../components/settings/SocialAccounts";
 import CollectedPosts from "../components/settings/CollectedPosts";
-import { Activity, Map, Radio, BarChart3, Zap, Brain, Cloud, DollarSign, Satellite, Link2, Layers } from "lucide-react";
+import { Activity, Map, Radio, BarChart3, Zap, Brain, Cloud, Satellite, Link2, Layers } from "lucide-react";
 import { useRogerData } from "../hooks/use-roger-data";
 import { useAuth } from "../lib/auth-context";
 import { useNavigate } from "react-router-dom";
 import { Badge } from "../components/ui/badge";
 import { useEffect, useState } from "react";
+
+/** The nine dashboard tabs, in the order they appear. */
+const TABS = [
+  { value: "overview", label: "OVERVIEW", Icon: BarChart3 },
+  { value: "map", label: "TERRITORY MAP", Icon: Map },
+  { value: "intelligence", label: "INTEL FEED", Icon: Radio },
+  { value: "stories", label: "STORIES", Icon: Layers },
+  { value: "satellite", label: "SATELLITE", Icon: Satellite },
+  { value: "weather", label: "WEATHER", Icon: Cloud },
+  { value: "anomalies", label: "ANOMALIES", Icon: Brain },
+  { value: "analytics", label: "ANALYTICS", Icon: Activity },
+  { value: "accounts", label: "ACCOUNTS", Icon: Link2 },
+] as const;
 
 const Index = () => {
   const { status, run_count, isConnected, first_run_complete, events } = useRogerData();
@@ -48,6 +61,24 @@ const Index = () => {
   useEffect(() => {
     const timer = setTimeout(() => setWaitedLongEnough(true), 8000);
     return () => clearTimeout(timer);
+  }, []);
+
+  // Ticking wall clock. Starts empty so the first client render matches, then
+  // updates every second.
+  const [clock, setClock] = useState("--:--");
+
+  useEffect(() => {
+    const tick = () =>
+      setClock(
+        new Date().toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false,
+        }),
+      );
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
   }, []);
 
   const noDataYet =
@@ -105,26 +136,26 @@ const Index = () => {
                 <button
                   onClick={() => { void logout(); }}
                   title={user.email}
-                  className="rounded border border-border px-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  className="rounded border border-border px-3 min-h-[44px] sm:min-h-0 sm:py-1 text-xs text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                 >
                   Sign out
                 </button>
               ) : (
                 <button
                   onClick={() => navigate("/login")}
-                  className="rounded bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:opacity-90 transition-opacity"
+                  className="rounded bg-primary px-3 min-h-[44px] sm:min-h-0 sm:py-1 text-xs font-medium text-primary-foreground hover:opacity-90 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                 >
                   Sign in
                 </button>
               )}
 
-              {/* Time - hidden on mobile */}
+              {/* Time - hidden on mobile.
+                  This rendered `new Date()` once at mount and never again, so
+                  the wall clock on a live operations dashboard was frozen at
+                  page-load time -- worse than showing nothing, because it
+                  looks authoritative. */}
               <div className="text-xs font-mono text-muted-foreground hidden md:block">
-                {new Date().toLocaleString('en-US', {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                  hour12: false
-                })} HRS
+                {clock} HRS
               </div>
             </div>
           </div>
@@ -151,42 +182,23 @@ const Index = () => {
         <Tabs defaultValue="overview" className="w-full">
           <div className="overflow-x-auto hide-scrollbar -mx-3 px-3 sm:mx-0 sm:px-0">
             <TabsList className="inline-flex w-max sm:grid sm:w-full sm:grid-cols-9 mb-4 sm:mb-6 bg-card border border-border min-w-full sm:min-w-0">
-              <TabsTrigger value="overview" className="data-ready gap-2 px-3 sm:px-4 py-2.5 sm:py-2">
-                <BarChart3 className="w-4 h-4" />
-                <span className="hidden sm:inline">OVERVIEW</span>
-              </TabsTrigger>
-              <TabsTrigger value="map" className="data-ready gap-2 px-3 sm:px-4 py-2.5 sm:py-2">
-                <Map className="w-4 h-4" />
-                <span className="hidden sm:inline">TERRITORY MAP</span>
-              </TabsTrigger>
-              <TabsTrigger value="intelligence" className="data-ready gap-2 px-3 sm:px-4 py-2.5 sm:py-2">
-                <Radio className="w-4 h-4" />
-                <span className="hidden sm:inline">INTEL FEED</span>
-              </TabsTrigger>
-              <TabsTrigger value="stories" className="data-ready gap-2 px-3 sm:px-4 py-2.5 sm:py-2">
-                <Layers className="w-4 h-4" />
-                <span className="hidden sm:inline">STORIES</span>
-              </TabsTrigger>
-              <TabsTrigger value="satellite" className="data-ready gap-2 px-3 sm:px-4 py-2.5 sm:py-2">
-                <Satellite className="w-4 h-4" />
-                <span className="hidden sm:inline">SATELLITE</span>
-              </TabsTrigger>
-              <TabsTrigger value="weather" className="data-ready gap-2 px-3 sm:px-4 py-2.5 sm:py-2">
-                <Cloud className="w-4 h-4" />
-                <span className="hidden sm:inline">WEATHER</span>
-              </TabsTrigger>
-              <TabsTrigger value="anomalies" className="data-ready gap-2 px-3 sm:px-4 py-2.5 sm:py-2">
-                <Brain className="w-4 h-4" />
-                <span className="hidden sm:inline">ANOMALIES</span>
-              </TabsTrigger>
-              <TabsTrigger value="analytics" className="data-ready gap-2 px-3 sm:px-4 py-2.5 sm:py-2">
-                <Activity className="w-4 h-4" />
-                <span className="hidden sm:inline">ANALYTICS</span>
-              </TabsTrigger>
-              <TabsTrigger value="accounts" className="data-ready gap-2 px-3 sm:px-4 py-2.5 sm:py-2">
-                <Link2 className="w-4 h-4" />
-                <span className="hidden sm:inline">ACCOUNTS</span>
-              </TabsTrigger>
+              {TABS.map(({ value, label, Icon }) => (
+                <TabsTrigger
+                  key={value}
+                  value={value}
+                  /* The label used to be `hidden sm:inline`, which left nine
+                     40x36 icon buttons on mobile with no accessible name and
+                     nothing to tell them apart -- unusable with a screen
+                     reader and unlearnable without one. The list already
+                     scrolls horizontally, so there is room to just show it.
+                     aria-label stays as the belt-and-braces for the icon. */
+                  aria-label={label}
+                  className="gap-2 px-3 sm:px-4 min-h-[44px] sm:min-h-0 sm:py-2"
+                >
+                  <Icon className="w-4 h-4 shrink-0" />
+                  <span>{label}</span>
+                </TabsTrigger>
+              ))}
             </TabsList>
           </div>
 

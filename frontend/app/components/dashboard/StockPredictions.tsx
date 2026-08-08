@@ -110,8 +110,9 @@ const StockPredictions = () => {
           <div className="flex items-center gap-2">
             <button
               onClick={fetchPredictions}
-              className="p-1.5 rounded-lg bg-muted/20 hover:bg-muted/40 transition-colors"
+              className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg bg-muted/20 hover:bg-muted/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
               title="Refresh predictions"
+              aria-label="Refresh stock predictions"
             >
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             </button>
@@ -166,7 +167,7 @@ const StockPredictions = () => {
             <p className="text-destructive">{error}</p>
             <button
               onClick={fetchPredictions}
-              className="mt-4 px-4 py-2 bg-muted rounded-lg hover:bg-muted/80"
+              className="mt-4 px-4 py-2 min-h-[44px] bg-muted rounded-lg hover:bg-muted/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             >
               Retry
             </button>

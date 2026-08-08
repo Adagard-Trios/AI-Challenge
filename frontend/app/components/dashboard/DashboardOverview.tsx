@@ -1,5 +1,5 @@
 import { Card } from "../ui/card";
-import { AlertTriangle, TrendingUp, Cloud, Zap, Users, Building, Wifi, WifiOff, Waves } from "lucide-react";
+import { AlertTriangle, TrendingUp, Zap, Wifi, WifiOff, Waves } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { useRogerData } from "../../hooks/use-roger-data";
 import { motion } from "framer-motion";
@@ -18,7 +18,6 @@ const DashboardOverview = () => {
     dashboard,
     events,
     isConnected,
-    status,
     riverData,
     powerData,
     fuelData,
@@ -55,7 +54,27 @@ const DashboardOverview = () => {
     (e.summary && e.summary.toLowerCase().includes('flood'))
   );
 
-  const metrics = [
+  // Tone -> literal class strings.
+  //
+  // These were built at runtime as `bg-${metric.status}/20` and
+  // `text-${metric.status}`. Tailwind's scanner cannot see an interpolated
+  // class name, so those only rendered because the same literals happened to
+  // appear in other files -- delete an unrelated component that uses
+  // `bg-info/20` and this card silently loses its colour, with no error
+  // anywhere. Written out, they are scannable and cannot rot.
+  const TONE = {
+    success: { bg: "bg-success/20", fg: "text-success" },
+    warning: { bg: "bg-warning/20", fg: "text-warning" },
+    info: { bg: "bg-info/20", fg: "text-info" },
+  } as const;
+
+  const metrics: Array<{
+    label: string;
+    value: string;
+    change: string;
+    icon: typeof AlertTriangle;
+    status: keyof typeof TONE;
+  }> = [
     {
       label: "Risk Events",
       value: riskEvents.length.toString(),
@@ -65,22 +84,29 @@ const DashboardOverview = () => {
     },
     {
       label: "Opportunities",
+      // "+Growth" used to sit here. It was a hardcoded string dressed as a
+      // delta -- it never varied, and there is no previous cycle stored to
+      // compute a real one against.
       value: opportunityEvents.length.toString(),
-      change: "+Growth",
+      change: opportunityEvents.length > 0 ? "this cycle" : "—",
       icon: TrendingUp,
       status: "success"
     },
     {
-      label: "Data Sources",
+      // Labelled "Data Sources" while counting Object.keys(domainCounts) --
+      // the number of DOMAINS present in the current feed, which is at most 6.
+      // The platform has 25 sources, so the card read as "19 of your 25
+      // sources are down". It is a domain count; say so.
+      label: "Active Domains",
       value: Object.keys(domainCounts).length.toString(),
-      change: "Active",
+      change: `${sortedEvents.length} events`,
       icon: Zap,
       status: "info"
     },
     {
       label: "Flood Alerts",
       value: floodEvents.length.toString(),
-      change: riverData ? "Monitoring" : "Offline",
+      change: riverData ? "Monitoring" : "No river data",
       icon: Waves,
       status: floodEvents.length > 0 ? "warning" : "success"
     },
@@ -127,10 +153,12 @@ const DashboardOverview = () => {
             >
               <Card className="p-4 bg-card border-border hover:border-primary/50 transition-all">
                 <div className="flex items-start justify-between mb-2">
-                  <div className={`p-2 rounded bg-${metric.status}/20`}>
-                    <Icon className={`w-5 h-5 text-${metric.status}`} />
+                  <div className={`p-2 rounded ${TONE[metric.status].bg}`}>
+                    <Icon className={`w-5 h-5 ${TONE[metric.status].fg}`} />
                   </div>
-                  <span className="text-xs font-mono text-success">{metric.change}</span>
+                  {/* Was hardcoded text-success, which painted "No river data"
+                      and "—" green as if they were good news. */}
+                  <span className="text-xs font-mono text-muted-foreground">{metric.change}</span>
                 </div>
                 <div>
                   <p className="text-2xl font-bold">{metric.value}</p>
@@ -221,43 +249,34 @@ const DashboardOverview = () => {
         </div>
       </Card>
 
-      {/* Operational Risk Indicators - Computed from Events */}
-      {sortedEvents.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <Card className="p-6 bg-card border-border">
-            <Cloud className="w-8 h-8 text-warning mb-3" />
-            <p className="text-2xl font-bold">
-              {Math.min(100, Math.round(
-                (sortedEvents.filter(e => e.domain === 'meteorological' || e.summary?.toLowerCase().includes('weather')).length / Math.max(sortedEvents.length, 1)) * 100 * 3
-              ))}%
-            </p>
-            <p className="text-xs text-muted-foreground uppercase">Weather Impact</p>
-          </Card>
-          <Card className="p-6 bg-card border-border">
-            <AlertTriangle className="w-8 h-8 text-destructive mb-3" />
-            <p className="text-2xl font-bold">
-              {Math.round((criticalEvents.length / Math.max(sortedEvents.length, 1)) * 100)}%
-            </p>
-            <p className="text-xs text-muted-foreground uppercase">Critical Risk Level</p>
-          </Card>
-          <Card className="p-6 bg-card border-border">
-            <TrendingUp className="w-8 h-8 text-info mb-3" />
-            <p className="text-2xl font-bold">
-              {Math.min(100, Math.round(
-                (sortedEvents.filter(e => e.domain === 'economical' || e.domain === 'market').length / Math.max(sortedEvents.length, 1)) * 100 * 3
-              ))}%
-            </p>
-            <p className="text-xs text-muted-foreground uppercase">Market Activity</p>
-          </Card>
-          <Card className="p-6 bg-card border-border">
-            <Building className="w-8 h-8 text-success mb-3" />
-            <p className="text-2xl font-bold">
-              {Math.round((opportunityEvents.length / Math.max(sortedEvents.length, 1)) * 100)}%
-            </p>
-            <p className="text-xs text-muted-foreground uppercase">Opportunity Index</p>
-          </Card>
-        </div>
-      )}
+      {/*
+        REMOVED: four "Operational Risk Indicators" cards.
+
+        They rendered "Weather Impact", "Critical Risk Level", "Market
+        Activity" and "Opportunity Index" as large percentages, immediately
+        above <RiskIndices />, which renders genuinely calibrated indices under
+        overlapping names. On one screen, roughly 40px apart, the dashboard
+        showed:
+
+          Opportunity Index  21%   (this block, opportunityEvents / total)
+          Opportunity index  33%   (RiskIndices, from the aggregator)
+
+        Same label, same screen, two numbers, no indication they measured
+        different things. A reader who notices that stops trusting every other
+        figure on the page -- including the correct ones.
+
+        Two of the four were not metrics at all:
+
+          Math.min(100, Math.round((matching / total) * 100 * 3))
+
+        A proportion multiplied by three and clamped. That is what produced
+        "MARKET ACTIVITY 100%" from 6 economic events out of 24.
+
+        RiskIndices already does this job properly: real aggregator values,
+        an explanation per index, and a drill-down to the events behind it.
+        Nothing is lost by deleting this block, and the contradiction goes
+        with it.
+      */}
     </div>
   );
 };

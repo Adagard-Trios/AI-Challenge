@@ -66,6 +66,23 @@
   body {
     @apply bg-background text-foreground antialiased;
   }
+
+  /* This dashboard runs several animations permanently -- pulsing connection
+     dots, the scan line, animate-pulse on status badges -- and they never
+     stop, because the page never navigates away. For a vestibular-sensitive
+     user that is a page they cannot look at. Honour the OS setting rather than
+     asking them to. */
+  @media (prefers-reduced-motion: reduce) {
+
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 }
 
 /* =========================================================

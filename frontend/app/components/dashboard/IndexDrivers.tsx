@@ -40,8 +40,8 @@ const SEVERITY_TONE: Record<string, string> = {
 interface IndexDriversProps {
     /** Human label for the index, e.g. "Compliance volatility". */
     label: string;
-    /** The index value itself, 0-1. */
-    value: number;
+    /** The index value itself, 0-1 — or null when nothing has scored it yet. */
+    value: number | null;
     /** What the index measures, in one sentence. */
     explanation: string;
     drivers?: Driver[];
@@ -53,18 +53,26 @@ const IndexDrivers = ({ label, value, explanation, drivers }: IndexDriversProps)
 
     return (
         <div className="mt-1.5">
+            {/* min-h-[44px] on touch, and a focus ring.
+                This was a 71x16px tap target with no focus style — the
+                smallest interactive control on the page, and the one that
+                delivers the "interrogate the score" idea the whole component
+                exists for. */}
             <button
                 onClick={() => setOpen(!open)}
-                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                className="flex items-center gap-1 min-h-[44px] sm:min-h-0 sm:py-1 text-xs text-muted-foreground hover:text-foreground transition-colors rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                 aria-expanded={open}
                 title={`What moved ${label.toLowerCase()}`}
             >
                 {open ? (
-                    <ChevronDown className="w-3 h-3" />
+                    <ChevronDown className="w-3 h-3 shrink-0" />
                 ) : (
-                    <ChevronRight className="w-3 h-3" />
+                    <ChevronRight className="w-3 h-3 shrink-0" />
                 )}
-                Why {formatPercent(value)}?
+                {/* "Why —?" is nonsense, so an unscored index asks the question
+                    it can actually answer: what this measures, and why there is
+                    no number yet. */}
+                {value === null ? "Why no data?" : `Why ${formatPercent(value)}?`}
             </button>
 
             {open && (
@@ -74,7 +82,13 @@ const IndexDrivers = ({ label, value, explanation, drivers }: IndexDriversProps)
                         <span>{explanation}</span>
                     </div>
 
-                    {rows.length === 0 ? (
+                    {value === null ? (
+                        <p className="text-xs text-muted-foreground">
+                            Not scored yet. No collection cycle has reported a value for
+                            this index — that is different from a measured low, so no
+                            number is shown.
+                        </p>
+                    ) : rows.length === 0 ? (
                         <p className="text-xs text-muted-foreground">
                             No contributing events this cycle — nothing landed in this
                             bucket, so the index is an average of nothing rather than a

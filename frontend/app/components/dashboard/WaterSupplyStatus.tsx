@@ -2,7 +2,7 @@
 
 import { Card } from "../ui/card";
 import { Badge } from "../ui/badge";
-import { Droplets, AlertTriangle, CheckCircle } from "lucide-react";
+import { Droplets, AlertTriangle, CheckCircle, HelpCircle } from "lucide-react";
 import DataProvenance from "./DataProvenance";
 
 interface WaterDisruption {
@@ -24,6 +24,13 @@ const WaterSupplyStatus = ({ waterData }: WaterSupplyStatusProps) => {
 
     const hasDisruptions = status === "disruptions_reported" || disruptions.length > 0;
 
+    // Same three-state rule as PowerOutageStatus: "no reading from NWSDB" is
+    // not "normal water supply across most areas". The `||` fallback on
+    // overallSupply meant an absent field printed a reassuring sentence
+    // nobody had measured.
+    const known = waterData != null && status !== "unknown";
+    const isNormal = known && !hasDisruptions;
+
     return (
         <Card className="p-4 bg-card border-border">
             <div className="flex items-center justify-between mb-3">
@@ -37,8 +44,16 @@ const WaterSupplyStatus = ({ waterData }: WaterSupplyStatusProps) => {
                     </div>
                 </div>
                 <div className="flex items-center gap-1">
-                    <Badge className={hasDisruptions ? "bg-warning/20 text-warning" : "bg-success/20 text-success"}>
-                        {hasDisruptions ? "⚠ DISRUPTIONS" : "✓ NORMAL"}
+                    <Badge
+                        className={
+                            hasDisruptions
+                                ? "bg-warning/20 text-warning"
+                                : isNormal
+                                    ? "bg-success/20 text-success"
+                                    : "bg-muted/20 text-muted-foreground"
+                        }
+                    >
+                        {hasDisruptions ? "⚠ DISRUPTIONS" : isNormal ? "✓ NORMAL" : "○ NO DATA"}
                     </Badge>
                     <DataProvenance
                         status={waterData?.scrape_status as string}
@@ -61,12 +76,21 @@ const WaterSupplyStatus = ({ waterData }: WaterSupplyStatusProps) => {
                         </div>
                     ))}
                 </div>
-            ) : (
+            ) : isNormal ? (
                 <div className="p-3 rounded-lg bg-success/10 border border-success/30">
                     <div className="flex items-center gap-2">
                         <CheckCircle className="w-4 h-4 text-success" />
                         <span className="text-sm text-success">
                             {overallSupply || "Normal water supply across most areas"}
+                        </span>
+                    </div>
+                </div>
+            ) : (
+                <div className="p-3 rounded-lg bg-muted/30 border border-border">
+                    <div className="flex items-center gap-2">
+                        <HelpCircle className="w-4 h-4 text-muted-foreground" />
+                        <span className="text-sm text-muted-foreground">
+                            No reading from NWSDB — status unknown
                         </span>
                     </div>
                 </div>

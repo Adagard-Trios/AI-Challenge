@@ -9,13 +9,32 @@ import { useState, useEffect, useCallback, useRef, createContext, useContext } f
 import type { ReactNode } from 'react';
 import { API_BASE, apiFetch, websocketUrl } from "@/app/lib/api";
 
-const WS_URL = API_BASE.replace('http', 'ws') + '/ws';
-
-// Timeouts for resilient connection
-const RECONNECT_DELAY = 1000;  // Reduced from 3s to 1s for faster recovery
+// Reconnect backoff.
+//
+// This used to be a flat 1000ms with no growth and no ceiling, so a backend
+// that was down got one connection attempt per second forever. A Render free
+// instance takes ~50s to cold-start, which meant ~50 failed attempts (and, with
+// auth on, ~50 redeemed single-use WebSocket tickets) before it could answer --
+// the client hammering the server it is waiting for.
+//
+// Exponential with full jitter: 1s, 2s, 4s ... capped at 30s, each actual delay
+// drawn uniformly from [0, computed]. The jitter matters when a server restarts
+// and every open tab reconnects at once; without it they retry in lockstep and
+// arrive as a thundering herd.
+const RECONNECT_BASE_DELAY = 1000;
+const RECONNECT_MAX_DELAY = 30000;
 const MAX_LOADING_TIME = 120000; // 2 minutes max loading time
 const INITIAL_FETCH_DELAY = 1000; // Fetch from REST after 1s if no WS data
-const FALLBACK_POLL_INTERVAL = 2000; // Poll REST every 2s when WS disconnected
+const FALLBACK_POLL_INTERVAL = 5000; // Poll REST every 5s when WS disconnected
+
+/** Full-jitter exponential backoff: uniform draw from [0, base * 2^attempt]. */
+function reconnectDelay(attempt: number): number {
+  const ceiling = Math.min(
+    RECONNECT_MAX_DELAY,
+    RECONNECT_BASE_DELAY * 2 ** Math.min(attempt, 10),
+  );
+  return Math.random() * ceiling;
+}
 
 // A real-world thing an event is about, canonicalised through the taxonomy so
 // that five spellings of "Colombo Port" join to one exposure entry.
@@ -66,14 +85,20 @@ export interface IndexDriver {
 }
 
 export interface RiskDashboard {
-  logistics_friction: number;
-  compliance_volatility: number;
-  market_instability: number;
-  opportunity_index: number;
-  avg_confidence: number;
+  // null means NOT SCORED -- no cycle has completed, or the backend is
+  // unreachable. That is a different statement from 0.0 ("scored, and it is
+  // low"), and the difference is the whole point on a warning system: these
+  // used to be seeded to 0, which the UI then coloured green and labelled
+  // "LOW". A backend outage rendered as "everything is fine".
+  logistics_friction: number | null;
+  compliance_volatility: number | null;
+  market_instability: number | null;
+  opportunity_index: number | null;
+  avg_confidence: number | null;
   high_priority_count: number;
   total_events: number;
-  last_updated: string;
+  /** null until a cycle has actually reported one. */
+  last_updated: string | null;
   // Absent on an older backend, so optional rather than defaulted -- an empty
   // driver list means "nothing contributed", which is a different statement
   // from "this backend does not send drivers".
@@ -146,15 +171,21 @@ export interface RogerState {
   last_update?: string;
 }
 
+// Nothing has been measured yet, and this says so.
+//
+// `last_updated` was `new Date().toISOString()` -- the empty dashboard claimed
+// it had been updated at the moment the page loaded, which is the one thing it
+// definitely had not been. (It was also a module-level `new Date()`, an
+// impurity the React Compiler flags.)
 const DEFAULT_DASHBOARD: RiskDashboard = {
-  logistics_friction: 0,
-  compliance_volatility: 0,
-  market_instability: 0,
-  opportunity_index: 0,
-  avg_confidence: 0,
+  logistics_friction: null,
+  compliance_volatility: null,
+  market_instability: null,
+  opportunity_index: null,
+  avg_confidence: null,
   high_priority_count: 0,
   total_events: 0,
-  last_updated: new Date().toISOString()
+  last_updated: null
 };
 
 // The implementation. NOT exported directly -- see the provider below.
@@ -177,7 +208,8 @@ function useRogerDataInternal() {
   const wsRef = useRef<WebSocket | null>(null);
   const loadingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const initialFetchDoneRef = useRef(false);
-  const lastDataTimeRef = useRef<number>(Date.now()); // Track when we last got data
+  // (lastDataTimeRef was here: never read anywhere, and `useRef(Date.now())`
+  // is an impure call during render that the React Compiler flags.)
 
   // Fetch rivernet data
   const fetchRiverData = useCallback(async () => {
@@ -221,6 +253,19 @@ function useRogerDataInternal() {
   useEffect(() => {
     let websocket: WebSocket;
     let reconnectTimeout: NodeJS.Timeout;
+    let attempt = 0;
+    let disposed = false;
+
+    /** Schedule the next attempt, backing off further each consecutive failure. */
+    const scheduleReconnect = () => {
+      if (disposed) return;
+      const delay = reconnectDelay(attempt);
+      attempt += 1;
+      console.log(`[Roger] Reconnecting in ${Math.round(delay)}ms (attempt ${attempt})`);
+      reconnectTimeout = setTimeout(() => {
+        void connect();
+      }, delay);
+    };
 
     // websocketUrl() attaches a single-use ticket when auth is enforced.
     // Browsers cannot set headers on `new WebSocket()`, and a JWT in the query
@@ -235,6 +280,9 @@ function useRogerDataInternal() {
 
         websocket.onopen = () => {
           console.log('[Roger] WebSocket connected');
+          // A successful connection resets the backoff, so a brief blip does
+          // not leave the next one waiting 30s.
+          attempt = 0;
           setIsConnected(true);
         };
 
@@ -301,24 +349,23 @@ function useRogerDataInternal() {
         };
 
         websocket.onclose = () => {
-          console.log('[Roger] WebSocket disconnected. Reconnecting in 1s...');
           setIsConnected(false);
 
-          // IMMEDIATELY fetch from REST to prevent blank UI
+          // Fetch from REST so the UI is not blank while we retry.
+          //
+          // Guarded by initialFetchDoneRef inside fetchInitialData -- it used
+          // to fire on EVERY close, so a 1s reconnect loop against a down
+          // backend also produced one /api/feeds request per second on top of
+          // the fallback poll. That is why /api/feeds was measured at 5/s.
           fetchInitialData();
 
-          // Reconnect after delay
-          reconnectTimeout = setTimeout(() => {
-            void connect();
-          }, RECONNECT_DELAY);
+          scheduleReconnect();
         };
 
         wsRef.current = websocket;
       } catch (err) {
         console.error('[Roger] Connection failed:', err);
-        reconnectTimeout = setTimeout(() => {
-          void connect();
-        }, RECONNECT_DELAY);
+        scheduleReconnect();
       }
     };
 
@@ -345,6 +392,9 @@ function useRogerDataInternal() {
     }, MAX_LOADING_TIME);
 
     return () => {
+      // Set before closing: onclose fires during teardown and would otherwise
+      // schedule a reconnect for a hook that is going away.
+      disposed = true;
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
       if (initialFetchTimeout) clearTimeout(initialFetchTimeout);
       if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
@@ -354,9 +404,26 @@ function useRogerDataInternal() {
     };
   }, [fetchInitialData]);
 
+  // `isConnected` read through a ref so that fetchData below can have a STABLE
+  // identity.
+  //
+  // It previously closed over isConnected directly, so useCallback rebuilt it
+  // whenever that changed -- and the polling effect depends on fetchData, so
+  // every rebuild tore down the interval, started a new one, AND fired an
+  // immediate fetch. Measured with the backend down that produced ~34 API
+  // calls per 10s against a 5s interval that should produce 4.
+  const isConnectedRef = useRef(isConnected);
+  isConnectedRef.current = isConnected;
+
   // REST API fallback polling (when WebSocket disconnected)
   const fetchData = useCallback(async () => {
-    if (isConnected) return; // Don't fetch if WebSocket is active
+    if (isConnectedRef.current) return; // Don't fetch if WebSocket is active
+
+    // Nobody is looking. A backgrounded tab polling a warning dashboard
+    // forever is pure cost -- and these dashboards get left open for days.
+    // The visibilitychange listener below re-fetches the moment it returns,
+    // so nothing is stale by the time it is seen again.
+    if (typeof document !== 'undefined' && document.hidden) return;
 
     try {
       const [dashboardRes, feedRes] = await Promise.all([
@@ -377,17 +444,29 @@ function useRogerDataInternal() {
     } catch (err) {
       console.error('[Roger] REST API fetch failed:', err);
     }
-  }, [isConnected]);
+  }, []);
 
-  // Fallback polling if WebSocket fails - more aggressive when disconnected
+  // Fallback polling if WebSocket fails.
+  //
+  // Depends on isConnected alone -- fetchData is now identity-stable, so this
+  // runs once per real connect/disconnect transition rather than once per
+  // render.
   useEffect(() => {
     if (isConnected) return;
 
-    console.log('[Roger] WebSocket disconnected - starting aggressive REST polling');
+    console.log('[Roger] WebSocket disconnected - starting REST fallback polling');
     const interval = setInterval(fetchData, FALLBACK_POLL_INTERVAL);
     fetchData(); // Initial fetch immediately
 
-    return () => clearInterval(interval);
+    // Catch up immediately on return to the tab, rather than waiting out the
+    // interval that was skipped while hidden.
+    const onVisible = () => { if (!document.hidden) void fetchData(); };
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      clearInterval(interval);
+    };
   }, [isConnected, fetchData]);
 
   // Fetch rivernet data periodically

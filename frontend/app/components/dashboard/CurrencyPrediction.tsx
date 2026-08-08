@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { RefreshCw } from "lucide-react";
 import { API_BASE, apiFetch } from "@/app/lib/api";
 import ModelStaleness, { type TrainingInfo } from "./ModelStaleness";
 import ModelUnavailable from "./ModelUnavailable";
@@ -109,12 +110,15 @@ export default function CurrencyPrediction() {
                         </p>
                     )}
                 </div>
+                {/* Was an emoji with no accessible name: a screen reader read
+                    it as "counterclockwise arrows button" or nothing at all. */}
                 <button
                     onClick={fetchPrediction}
-                    className="p-2 rounded-lg bg-slate-700 hover:bg-slate-600 transition-colors"
+                    className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg bg-slate-700 hover:bg-slate-600 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                     title="Refresh"
+                    aria-label="Refresh USD/LKR prediction"
                 >
-                    🔄
+                    <RefreshCw className="w-4 h-4" />
                 </button>
             </div>
 
@@ -131,7 +135,7 @@ export default function CurrencyPrediction() {
                     <p className="text-red-400 mb-4">{error}</p>
                     <button
                         onClick={fetchPrediction}
-                        className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg transition-colors"
+                        className="px-4 py-2 min-h-[44px] bg-blue-600 hover:bg-blue-500 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                     >
                         Retry
                     </button>

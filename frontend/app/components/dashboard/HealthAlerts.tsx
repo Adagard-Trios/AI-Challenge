@@ -4,6 +4,7 @@ import { Card } from "../ui/card";
 import { Badge } from "../ui/badge";
 import { Heart, AlertTriangle, Bug, Activity } from "lucide-react";
 import DataProvenance from "./DataProvenance";
+import { EMPTY } from "@/app/lib/format";
 
 interface HealthAlert {
     type: string;
@@ -23,12 +24,19 @@ const HealthAlerts = ({ healthData }: HealthAlertsProps) => {
 
     const hasActiveAlerts = alerts.length > 0 || advisories.length > 0;
 
+    // Same three-state rule as the power and water cards: no reading from the
+    // Ministry is not a clean bill of health. "✓ NORMAL" on an empty response
+    // is the claim this dashboard is least entitled to make.
+    const known = healthData != null;
+    const isNormal = known && !hasActiveAlerts;
+    const weeklyCases = dengue.weekly_cases as number | undefined;
+
     return (
         <Card className="p-4 bg-card border-border">
             <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
-                    <div className={`p-2 rounded-lg ${hasActiveAlerts ? 'bg-warning/20' : 'bg-success/20'}`}>
-                        <Heart className={`w-5 h-5 ${hasActiveAlerts ? 'text-warning' : 'text-success'}`} />
+                    <div className={`p-2 rounded-lg ${hasActiveAlerts ? 'bg-warning/20' : isNormal ? 'bg-success/20' : 'bg-muted/30'}`}>
+                        <Heart className={`w-5 h-5 ${hasActiveAlerts ? 'text-warning' : isNormal ? 'text-success' : 'text-muted-foreground'}`} />
                     </div>
                     <div>
                         <h3 className="font-bold text-sm">🏥 HEALTH STATUS</h3>
@@ -36,8 +44,16 @@ const HealthAlerts = ({ healthData }: HealthAlertsProps) => {
                     </div>
                 </div>
                 <div className="flex items-center gap-1">
-                    <Badge className={hasActiveAlerts ? "bg-warning/20 text-warning" : "bg-success/20 text-success"}>
-                        {hasActiveAlerts ? "⚠ ADVISORIES" : "✓ NORMAL"}
+                    <Badge
+                        className={
+                            hasActiveAlerts
+                                ? "bg-warning/20 text-warning"
+                                : isNormal
+                                    ? "bg-success/20 text-success"
+                                    : "bg-muted/20 text-muted-foreground"
+                        }
+                    >
+                        {hasActiveAlerts ? "⚠ ADVISORIES" : isNormal ? "✓ NORMAL" : "○ NO DATA"}
                     </Badge>
                     <DataProvenance
                         status={healthData?.scrape_status as string}
@@ -54,7 +70,12 @@ const HealthAlerts = ({ healthData }: HealthAlertsProps) => {
                         <span className="text-sm font-medium">Dengue Cases</span>
                     </div>
                     <div className="text-right">
-                        <p className="text-lg font-bold">{dengue.weekly_cases as number || 0}</p>
+                        {/* `|| 0` printed a confident "0" for "we did not get a
+                            number". Zero dengue cases nationally would be
+                            extraordinary news; an em-dash is the truth. */}
+                        <p className={`text-lg font-bold ${weeklyCases == null ? "text-muted-foreground" : ""}`}>
+                            {weeklyCases ?? EMPTY}
+                        </p>
                         <p className="text-xs text-muted-foreground">weekly avg</p>
                     </div>
                 </div>

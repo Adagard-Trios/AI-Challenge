@@ -2,7 +2,7 @@
 
 import { Card } from "../ui/card";
 import { Badge } from "../ui/badge";
-import { Zap, AlertTriangle, CheckCircle } from "lucide-react";
+import { Zap, AlertTriangle, CheckCircle, HelpCircle } from "lucide-react";
 import DataProvenance from "./DataProvenance";
 import { formatTime } from "@/app/lib/format";
 
@@ -16,16 +16,28 @@ const PowerOutageStatus = ({ powerData }: PowerStatusProps) => {
     const announcements = (powerData?.announcements as string[]) || [];
     const fetchedAt = powerData?.fetched_at as string;
 
+    // Three states, not two.
+    //
+    // The card used to branch on `isActive` alone, so anything that was not
+    // load shedding -- INCLUDING no response from the backend at all --
+    // rendered a green panel with a tick reading "Normal power supply across
+    // the island". The small "○ CHECKING..." badge said otherwise, and lost:
+    // a large green panel with a checkmark is what a reader actually takes
+    // away. On a situational-awareness dashboard, silence must never render
+    // as an all-clear.
+    const known = powerData != null && status !== "unknown";
+    const isNormal = known && (status === "operational" || status === "no_load_shedding");
+
     const getStatusColor = () => {
         if (status === "load_shedding") return "bg-destructive/20 text-destructive";
-        if (status === "operational" || status === "no_load_shedding") return "bg-success/20 text-success";
+        if (isNormal) return "bg-success/20 text-success";
         return "bg-muted/20 text-muted-foreground";
     };
 
     const getStatusLabel = () => {
         if (status === "load_shedding") return "⚡ LOAD SHEDDING";
-        if (status === "operational" || status === "no_load_shedding") return "✓ NORMAL";
-        return "○ CHECKING...";
+        if (isNormal) return "✓ NORMAL";
+        return "○ NO DATA";
     };
 
     return (
@@ -59,11 +71,20 @@ const PowerOutageStatus = ({ powerData }: PowerStatusProps) => {
                     </div>
                     <p className="text-xs text-destructive/80">Power cuts may be in effect in various areas</p>
                 </div>
-            ) : (
+            ) : isNormal ? (
                 <div className="p-3 rounded-lg bg-success/10 border border-success/30 mb-2">
                     <div className="flex items-center gap-2">
                         <CheckCircle className="w-4 h-4 text-success" />
                         <span className="text-sm text-success">Normal power supply across the island</span>
+                    </div>
+                </div>
+            ) : (
+                <div className="p-3 rounded-lg bg-muted/30 border border-border mb-2">
+                    <div className="flex items-center gap-2">
+                        <HelpCircle className="w-4 h-4 text-muted-foreground" />
+                        <span className="text-sm text-muted-foreground">
+                            No reading from CEB — status unknown
+                        </span>
                     </div>
                 </div>
             )}

@@ -127,18 +127,54 @@ def test_sources_overdue_by_different_amounts_still_order(monkeypatch):
 
 # --- the budget gate ---------------------------------------------------------
 
-def test_an_llm_source_is_deferred_not_attempted_when_the_budget_is_short():
+@pytest.mark.parametrize("remaining", [0, 300, 500, 1199])
+def test_an_llm_source_is_deferred_not_attempted_when_the_budget_is_short(remaining):
     """
     THE anti-413 test. Today the limit is discovered by hitting it; here a
     source whose estimate exceeds what is left is never planned.
+
+    Parametrised across the boundary because an off-by-one here is the
+    difference between "refused" and "413": the summarisers estimate 1200, so
+    anything below that must defer.
     """
     from src.blackboard.knowledge_sources import build_agenda
 
-    digest = _digest(severity_by_domain={"social": 0.9}, tokens_remaining=300)
+    digest = _digest(severity_by_domain={"social": 0.9},
+                     tokens_remaining=remaining)
     planned = {a.ks_name for a in build_agenda(digest)}
 
     assert not any(name.endswith(".summarise") for name in planned), (
-        f"an LLM source was planned with 300 tokens left: {planned}"
+        f"an LLM source was planned with {remaining} tokens left: {planned}"
+    )
+
+
+def test_a_source_whose_trigger_never_fires_still_runs():
+    """
+    The plan's exact criterion, and distinct from the "never ran" case.
+
+    A trigger returning None means the source never reaches the agenda on its
+    own merits. The max_interval floor must override that, or a source with a
+    condition that happens never to be true goes silent forever -- which is
+    indistinguishable from it being broken.
+    """
+    from datetime import timedelta
+
+    from src.blackboard import knowledge_sources as ks
+
+    never = ks.KnowledgeSource(
+        name="test.never", domain="social", est_tokens=0,
+        min_interval=timedelta(minutes=1), max_interval=timedelta(minutes=10),
+        trigger=lambda digest: None,        # never fires on its own
+    )
+
+    # Under 2x max_interval: correctly absent.
+    fresh = _digest(last_run={"test.never": 60})
+    assert ks.is_starving(fresh, never) is False
+
+    # Past 2x max_interval: the floor must promote it.
+    overdue = _digest(last_run={"test.never": 10 * 60 * 3})
+    assert ks.is_starving(overdue, never) is True, (
+        "a source whose trigger never fires would never run again"
     )
 
 

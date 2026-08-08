@@ -238,6 +238,43 @@ def test_chromadb_can_delete_individual_events():
     assert hasattr(ChromaDBStore, "delete_events")
 
 
+def test_the_chromadb_document_count_actually_falls():
+    """
+    THE test that proves eviction reaches the layer that consumes disk.
+
+    Asserting the method EXISTS is not the same as asserting it works. The
+    corpus is the largest thing this system keeps, so "we added a delete" is
+    worth nothing unless the count goes down -- and a delete that silently
+    no-ops would look identical to one that works.
+    """
+    import uuid
+
+    from src.storage.chromadb_store import ChromaDBStore
+
+    store = ChromaDBStore()
+    if not store.client:
+        pytest.skip("ChromaDB unavailable")
+
+    before = store.get_stats().get("total_documents", 0)
+
+    ids = [f"evict-{uuid.uuid4().hex[:10]}" for _ in range(3)]
+    for event_id in ids:
+        store.add_event(event_id, f"Test flood event {event_id}")
+
+    after_add = store.get_stats().get("total_documents", 0)
+    assert after_add == before + 3, (
+        f"expected {before + 3} documents after adding 3, got {after_add}"
+    )
+
+    store.delete_events(ids)
+
+    after_delete = store.get_stats().get("total_documents", 0)
+    assert after_delete == before, (
+        f"documents did not fall back to {before} after eviction "
+        f"(got {after_delete}); the semantic corpus still grows forever"
+    )
+
+
 def test_the_trending_cleanup_is_finally_called():
     """
     trending_detector.cleanup_old_data(days=7) has always existed and never

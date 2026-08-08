@@ -52,7 +52,7 @@ const EconomicIndicators = ({ economyData }: EconomicIndicatorsProps) => {
                         <Landmark className="w-5 h-5 text-info" />
                     </div>
                     <div>
-                        <h3 className="font-bold text-sm">🏛️ ECONOMY</h3>
+                        <h3 className="font-bold text-base">ECONOMY</h3>
                         <p className="text-xs text-muted-foreground">CBSL Indicators</p>
                     </div>
                 </div>
@@ -70,7 +70,7 @@ const EconomicIndicators = ({ economyData }: EconomicIndicatorsProps) => {
                         <span className="text-xs text-muted-foreground">CCPI Inflation</span>
                     </div>
                     <div className="flex items-center gap-1">
-                        <span className={`text-lg font-bold ${ccpi === null ? "text-muted-foreground" : ""}`}>
+                        <span className={`text-xl font-bold ${ccpi === null ? "text-muted-foreground" : ""}`}>
                             {ccpi === null ? EMPTY : `${ccpi}%`}
                         </span>
                         {getTrendIcon(inflation.trend as string)}
@@ -84,7 +84,7 @@ const EconomicIndicators = ({ economyData }: EconomicIndicatorsProps) => {
                         <span className="text-xs text-muted-foreground">USD/LKR</span>
                     </div>
                     <div className="flex items-center gap-1">
-                        <span className={`text-lg font-bold ${usdLkr === null ? "text-muted-foreground" : ""}`}>
+                        <span className={`text-xl font-bold ${usdLkr === null ? "text-muted-foreground" : ""}`}>
                             {usdLkr === null ? EMPTY : usdLkr.toFixed(2)}
                         </span>
                         {getTrendIcon(exchangeRate.trend as string)}
@@ -104,7 +104,7 @@ const EconomicIndicators = ({ economyData }: EconomicIndicatorsProps) => {
                         <Landmark className="w-3 h-3 text-muted-foreground" />
                         <span className="text-xs text-muted-foreground">Policy Rate</span>
                     </div>
-                    <span className={`text-lg font-bold ${policyRate === null ? "text-muted-foreground" : ""}`}>
+                    <span className={`text-xl font-bold ${policyRate === null ? "text-muted-foreground" : ""}`}>
                         {policyRate === null ? EMPTY : `${policyRate}%`}
                     </span>
                 </div>
@@ -116,7 +116,7 @@ const EconomicIndicators = ({ economyData }: EconomicIndicatorsProps) => {
                         <span className="text-xs text-muted-foreground">Reserves</span>
                     </div>
                     <div className="flex items-center gap-1">
-                        <span className={`text-lg font-bold ${reserves === null ? "text-muted-foreground" : ""}`}>
+                        <span className={`text-xl font-bold ${reserves === null ? "text-muted-foreground" : ""}`}>
                             {reserves === null ? EMPTY : `$${reserves}B`}
                         </span>
                         {getTrendIcon(forexReserves.trend as string)}

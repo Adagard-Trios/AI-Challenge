@@ -21,10 +21,10 @@ const FuelPriceMonitor = ({ fuelData }: FuelMonitorProps) => {
     const fetchedAt = fuelData?.fetched_at as string;
 
     const fuelTypes = [
-        { key: "petrol_92", label: "Petrol 92", icon: "⛽" },
-        { key: "petrol_95", label: "Petrol 95", icon: "⛽" },
-        { key: "auto_diesel", label: "Diesel", icon: "🚛" },
-        { key: "kerosene", label: "Kerosene", icon: "🔥" },
+        { key: "petrol_92", label: "Petrol 92" },
+        { key: "petrol_95", label: "Petrol 95" },
+        { key: "auto_diesel", label: "Diesel" },
+        { key: "kerosene", label: "Kerosene" },
     ];
 
     return (
@@ -32,10 +32,10 @@ const FuelPriceMonitor = ({ fuelData }: FuelMonitorProps) => {
             <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
                     <div className="p-2 rounded-lg bg-amber-500/20">
-                        <Fuel className="w-5 h-5 text-amber-500" />
+                        <Fuel className="w-5 h-5 text-severity-high" />
                     </div>
                     <div>
-                        <h3 className="font-bold text-sm">⛽ FUEL PRICES</h3>
+                        <h3 className="font-bold text-base">FUEL PRICES</h3>
                         <p className="text-xs text-muted-foreground">CEYPETCO / LIOC</p>
                     </div>
                 </div>
@@ -46,14 +46,14 @@ const FuelPriceMonitor = ({ fuelData }: FuelMonitorProps) => {
             </div>
 
             <div className="grid grid-cols-2 gap-2">
-                {fuelTypes.map(({ key, label, icon }) => {
+                {fuelTypes.map(({ key, label }) => {
                     const fuel = prices[key];
                     if (!fuel) return null;
 
                     return (
                         <div key={key} className="p-2 rounded-lg bg-muted/30 border border-border">
                             <div className="flex items-center justify-between mb-1">
-                                <span className="text-xs text-muted-foreground">{icon} {label}</span>
+                                <span className="text-xs text-muted-foreground">{label}</span>
                             </div>
                             <p className="text-lg font-bold text-foreground">
                                 Rs. {fuel.price?.toFixed(0) || "-"}

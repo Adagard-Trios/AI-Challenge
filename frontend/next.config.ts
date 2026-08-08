@@ -36,6 +36,33 @@ const nextConfig: NextConfig = {
   // serves HTML with no CSS or JS — which reads as a broken build rather than
   // a missing COPY.
   output: "standalone",
+
+  /**
+   * Serve the app shell for client-only routes.
+   *
+   * The app is a react-router SPA mounted at "/", so `/login` exists only once
+   * the JavaScript at "/" has booted. Reaching it any other way -- a hard
+   * refresh while on the login screen, a bookmark, a shared link -- asked the
+   * Next server for a route it does not have, and got the bare
+   * "404: This page could not be found." The build emits exactly two routes,
+   * `/` and `/_not-found`, so this was reproducible every time.
+   *
+   * `fallback` is the right bucket rather than `beforeFiles`: it runs only
+   * AFTER filesystem and dynamic routes have been checked, so a real route
+   * always wins. If `/login` later becomes an actual App Router page, this
+   * entry stops applying on its own rather than shadowing it.
+   *
+   * The browser keeps the `/login` URL; Next just serves the shell, and
+   * BrowserRouter reads location.pathname and renders LoginRoute. Any future
+   * client-only path needs adding here too -- which is the argument for real
+   * routes eventually, not for a catch-all: a catch-all would answer 200 for
+   * genuinely missing pages.
+   */
+  async rewrites() {
+    return {
+      fallback: [{ source: "/login", destination: "/" }],
+    };
+  },
 };
 
 export default nextConfig;

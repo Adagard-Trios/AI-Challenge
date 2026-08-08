@@ -6,6 +6,8 @@ import sriLanka from "@svg-maps/sri-lanka";
 
 // ------------ Types ------------
 
+type GeoJsonCoordinates = number | GeoJsonCoordinates[];
+
 interface LocationShape {
   id?: string;
   name?: string;
@@ -14,7 +16,10 @@ interface LocationShape {
   paths?: string;
   d?: string;
   geometry?: {
-    coordinates?: any;
+    // GeoJSON coordinates nest to an arbitrary depth (Point through
+    // MultiPolygon). Only checked for presence here, never indexed, so the
+    // recursive shape is enough and `any` was never needed.
+    coordinates?: GeoJsonCoordinates;
   };
 }
 
@@ -211,7 +216,7 @@ const SriLankaMap: React.FC<SriLankaMapProps> = ({
       {/* Legend */}
       <div className="absolute top-3 right-3 bg-card/95 border border-border rounded p-2 text-xs text-center">
         <div className="text-lg font-bold text-destructive">{totalAlerts}</div>
-        <div className="text-[10px] text-muted-foreground uppercase">
+        <div className="text-xs text-muted-foreground uppercase">
           Total Alerts
         </div>
       </div>

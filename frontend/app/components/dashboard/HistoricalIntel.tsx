@@ -205,7 +205,7 @@ export default function HistoricalIntel() {
 
                 {/* Key Findings */}
                 <div className="mt-4 p-3 bg-warning/10 border border-warning/30 rounded-lg">
-                    <p className="text-sm font-medium text-warning mb-2">📊 Key Finding</p>
+                    <p className="text-sm font-medium text-warning mb-2">Key Finding</p>
                     <p className="text-sm">{data.key_findings[0]}</p>
                 </div>
             </Card>

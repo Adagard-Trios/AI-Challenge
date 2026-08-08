@@ -3,6 +3,7 @@ import { Badge } from "../ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { Button } from "../ui/button";
 import { Newspaper, Cloud, TrendingUp, FileText, Radio, Globe, MapPin, Settings, Target } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { useRogerData, RogerEvent } from "../../hooks/use-roger-data";
 import { motion, AnimatePresence } from "framer-motion";
 import { useState } from "react";
@@ -68,7 +69,7 @@ const IntelligenceFeed = () => {
     // in the colour that means "no warning in force".
     const tone = severityStyle(item.severity);
 
-    const domainIconMap: Record<string, React.ComponentType<any>> = {
+    const domainIconMap: Record<string, LucideIcon> = {
       social: Newspaper,
       political: FileText,
       weather: Cloud,
@@ -101,7 +102,7 @@ const IntelligenceFeed = () => {
                 </Badge>
 
                 <Badge className={isRisk ? "bg-destructive/20 text-destructive" : "bg-success/20 text-success"}>
-                  {isRisk ? "⚠️ RISK" : "✨ OPP"}
+                  {isRisk ? "RISK" : "OPPORTUNITY"}
                 </Badge>
 
                 <Badge className="border border-border">{item.domain}</Badge>
@@ -214,7 +215,7 @@ const IntelligenceFeed = () => {
               }`}
           >
             <MapPin className="w-4 h-4" />
-            🇱🇰 <span className="hidden sm:inline">Sri Lanka</span>
+            <span className="hidden sm:inline">Sri Lanka</span>
             <Badge variant="secondary" className="ml-1">
               {safeEvents.filter(e => (e?.region || "sri_lanka") === "sri_lanka").length}
             </Badge>
@@ -227,7 +228,7 @@ const IntelligenceFeed = () => {
               }`}
           >
             <Globe className="w-4 h-4" />
-            🌍 <span className="hidden sm:inline">World</span>
+            <span className="hidden sm:inline">World</span>
             <Badge variant="secondary" className="ml-1">
               {safeEvents.filter(e => e?.region === "world").length}
             </Badge>

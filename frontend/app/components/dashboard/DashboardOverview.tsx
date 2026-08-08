@@ -123,7 +123,7 @@ const DashboardOverview = () => {
               <Wifi className="w-5 h-5 text-success" />
               <div className="flex-1">
                 <h3 className="font-bold text-success">Live</h3>
-                <p className="text-xs text-muted-foreground">Receiving updates as they arrive • {dashboard.total_events} events this cycle</p>
+                <p className="text-sm text-muted-foreground">Receiving updates as they arrive • {dashboard.total_events} events this cycle</p>
               </div>
             </>
           ) : (
@@ -131,7 +131,7 @@ const DashboardOverview = () => {
               <WifiOff className="w-5 h-5 text-warning" />
               <div className="flex-1">
                 <h3 className="font-bold text-warning">Reconnecting</h3>
-                <p className="text-xs text-muted-foreground">Showing the last data received; retrying in the background</p>
+                <p className="text-sm text-muted-foreground">Showing the last data received; retrying in the background</p>
               </div>
             </>
           )}
@@ -162,7 +162,7 @@ const DashboardOverview = () => {
                   <span className="text-xs font-mono text-muted-foreground">{metric.change}</span>
                 </div>
                 <div>
-                  <p className="text-2xl font-bold">{metric.value}</p>
+                  <p className="text-3xl font-bold tracking-tight">{metric.value}</p>
                   <p className="text-xs text-muted-foreground uppercase tracking-wide">{metric.label}</p>
                 </div>
               </Card>
@@ -217,9 +217,9 @@ const DashboardOverview = () => {
                         <Badge className={tone.badge} title={tone.label}>
                           {event.severity.toUpperCase()}
                         </Badge>
-                        {/* "✨ OPPORTUNITY" sat on the same row as landslide and
-                            flood alerts. The distinction still matters; the
-                            sparkle did not. */}
+                        {/* The sparkle that used to sit here shared a row with landslide
+                            and flood alerts. The distinction still matters; the
+                            decoration did not. */}
                         <Badge className={isRisk ? "bg-destructive/20 text-destructive" : "bg-success/20 text-success"}>
                           {isRisk ? "RISK" : "OPPORTUNITY"}
                         </Badge>

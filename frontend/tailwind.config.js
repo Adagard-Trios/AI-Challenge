@@ -29,6 +29,35 @@ module.exports = {
         sans: ["var(--font-geist-sans)", ...defaultTheme.fontFamily.sans],
         mono: ["var(--font-geist-mono)", ...defaultTheme.fontFamily.mono],
       },
+
+      // The type ramp.
+      //
+      // Measured on the populated dashboard, the default ramp produced 249 of
+      // 354 text nodes (70%) at 12px, with 24px as the largest thing on a
+      // 1400px-wide page. With no size contrast nothing recedes and nothing
+      // advances, so weight was doing the job size should -- 156 elements at
+      // font-weight >= 600, which is why bold had stopped meaning anything.
+      //
+      // Two changes, both here rather than across 237 call sites:
+      //
+      //   * The floor comes up. `xs` 12 -> 13 and `sm` 14 -> 15, so the text
+      //     most of the interface is set in is readable at arm's length on a
+      //     phone, outdoors -- which is where flood warnings get read.
+      //   * The top opens up. xl/2xl/3xl go 20/24/30 -> 22/28/36, so a panel's
+      //     one important number can actually dominate its own card.
+      //
+      // Line heights are set per step: the defaults are tuned for prose, and
+      // a dashboard's dense label/value pairs need tighter leading than a
+      // paragraph does.
+      fontSize: {
+        xs: ["0.8125rem", { lineHeight: "1.125rem" }],   // 13/18 captions, units, timestamps
+        sm: ["0.9375rem", { lineHeight: "1.375rem" }],   // 15/22 body — the default
+        base: ["1rem", { lineHeight: "1.5rem" }],        // 16/24 card headings
+        lg: ["1.125rem", { lineHeight: "1.625rem" }],    // 18/26 section headings
+        xl: ["1.375rem", { lineHeight: "1.75rem" }],     // 22/28
+        "2xl": ["1.75rem", { lineHeight: "2.125rem" }],  // 28/34
+        "3xl": ["2.25rem", { lineHeight: "2.5rem" }],    // 36/40 one number per panel
+      },
       colors: {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",

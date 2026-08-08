@@ -3,7 +3,7 @@ import { Badge } from "../ui/badge";
 import { Separator } from "../ui/separator";
 import { Cloud, Newspaper, TrendingUp, Users, AlertTriangle, MapPin } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { useRogerData } from "../../hooks/use-roger-data";
+import { useRogerData, type RogerEvent } from "../../hooks/use-roger-data";
 
 interface DistrictInfoPanelProps {
   district: string | null;
@@ -39,7 +39,7 @@ const DistrictInfoPanel = ({ district }: DistrictInfoPanelProps) => {
   };
 
   // Helper: Check if an event relates to a specific district
-  const eventMatchesDistrict = (event: any, targetDistrict: string): boolean => {
+  const eventMatchesDistrict = (event: RogerEvent, targetDistrict: string): boolean => {
     const summary = (event.summary ?? '').toLowerCase();
     const districtLower = targetDistrict.toLowerCase();
 
@@ -267,7 +267,7 @@ const DistrictInfoPanel = ({ district }: DistrictInfoPanelProps) => {
                 <p className="text-lg font-bold text-success">{info.growth}</p>
               </div>
             </div>
-            <p className="text-xs text-muted-foreground mt-2 text-center text-[10px] leading-tight opacity-70">
+            <p className="text-xs text-muted-foreground mt-2 text-center leading-tight opacity-70">
               Sources: Population (Census 2024) | GDP Share (CBSL 2023) | Growth (WB/IMF 2025 Est)
             </p>
           </div>

@@ -35,9 +35,9 @@ const PowerOutageStatus = ({ powerData }: PowerStatusProps) => {
     };
 
     const getStatusLabel = () => {
-        if (status === "load_shedding") return "⚡ LOAD SHEDDING";
-        if (isNormal) return "✓ NORMAL";
-        return "○ NO DATA";
+        if (status === "load_shedding") return "LOAD SHEDDING";
+        if (isNormal) return "NORMAL";
+        return "NO DATA";
     };
 
     return (
@@ -48,7 +48,7 @@ const PowerOutageStatus = ({ powerData }: PowerStatusProps) => {
                         <Zap className={`w-5 h-5 ${isActive ? 'text-destructive' : 'text-success'}`} />
                     </div>
                     <div>
-                        <h3 className="font-bold text-sm">⚡ POWER STATUS</h3>
+                        <h3 className="font-bold text-base">POWER STATUS</h3>
                         <p className="text-xs text-muted-foreground">CEB Sri Lanka</p>
                     </div>
                 </div>

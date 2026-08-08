@@ -47,7 +47,7 @@ const CommodityPrices = ({ commodityData }: CommodityPricesProps) => {
                         <ShoppingBasket className="w-5 h-5 text-success" />
                     </div>
                     <div>
-                        <h3 className="font-bold text-sm">🛒 COMMODITIES</h3>
+                        <h3 className="font-bold text-base">COMMODITIES</h3>
                         <p className="text-xs text-muted-foreground">Essential goods prices</p>
                     </div>
                 </div>

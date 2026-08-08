@@ -39,7 +39,7 @@ const HealthAlerts = ({ healthData }: HealthAlertsProps) => {
                         <Heart className={`w-5 h-5 ${hasActiveAlerts ? 'text-warning' : isNormal ? 'text-success' : 'text-muted-foreground'}`} />
                     </div>
                     <div>
-                        <h3 className="font-bold text-sm">🏥 HEALTH STATUS</h3>
+                        <h3 className="font-bold text-base">HEALTH STATUS</h3>
                         <p className="text-xs text-muted-foreground">Ministry of Health</p>
                     </div>
                 </div>
@@ -53,7 +53,7 @@ const HealthAlerts = ({ healthData }: HealthAlertsProps) => {
                                     : "bg-muted/20 text-muted-foreground"
                         }
                     >
-                        {hasActiveAlerts ? "⚠ ADVISORIES" : isNormal ? "✓ NORMAL" : "○ NO DATA"}
+                        {hasActiveAlerts ? "ADVISORIES" : isNormal ? "NORMAL" : "NO DATA"}
                     </Badge>
                     <DataProvenance
                         status={healthData?.scrape_status as string}
@@ -73,7 +73,7 @@ const HealthAlerts = ({ healthData }: HealthAlertsProps) => {
                         {/* `|| 0` printed a confident "0" for "we did not get a
                             number". Zero dengue cases nationally would be
                             extraordinary news; an em-dash is the truth. */}
-                        <p className={`text-lg font-bold ${weeklyCases == null ? "text-muted-foreground" : ""}`}>
+                        <p className={`text-xl font-bold ${weeklyCases == null ? "text-muted-foreground" : ""}`}>
                             {weeklyCases ?? EMPTY}
                         </p>
                         <p className="text-xs text-muted-foreground">weekly avg</p>

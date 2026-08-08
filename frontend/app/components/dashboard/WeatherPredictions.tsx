@@ -1,5 +1,7 @@
 "use client";
 
+import { Sun, CloudSun, CloudLightning, Waves, RefreshCw } from "lucide-react";
+
 import React, { useState, useEffect } from "react";
 import { API_BASE, apiFetch } from "@/app/lib/api";
 import ModelStaleness, { type TrainingInfo } from "./ModelStaleness";
@@ -37,11 +39,14 @@ const SEVERITY_COLORS = {
     critical: "bg-destructive/20 text-destructive border-destructive/50",
 };
 
+// lucide rather than emoji: these inherit currentColor, so they take the
+// severity tone, and they scale with the type ramp instead of rendering at
+// whatever size the platform's emoji font decides.
 const SEVERITY_ICONS = {
-    normal: "☀️",
-    advisory: "🌤️",
-    warning: "⛈️",
-    critical: "🌊",
+    normal: Sun,
+    advisory: CloudSun,
+    warning: CloudLightning,
+    critical: Waves,
 };
 
 export default function WeatherPredictions() {
@@ -130,7 +135,7 @@ export default function WeatherPredictions() {
             <div className="flex items-center justify-between mb-6">
                 <div>
                     <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
-                        🌦️ Weather Predictions
+                        Weather Predictions
                     </h2>
                     {predictions && (
                         <p className="text-sm text-foreground mt-1">
@@ -143,7 +148,7 @@ export default function WeatherPredictions() {
                     className="p-2 rounded-lg bg-muted hover:bg-muted/80 transition-colors"
                     title="Refresh predictions"
                 >
-                    🔄
+                    
                 </button>
             </div>
 
@@ -176,7 +181,7 @@ export default function WeatherPredictions() {
                                 className={`p-3 rounded-lg border transition-all ${filter === sev ? "ring-2 ring-white/30" : ""
                                     } ${SEVERITY_COLORS[sev]}`}
                             >
-                                <div className="text-2xl">{SEVERITY_ICONS[sev]}</div>
+                                {(() => { const I = SEVERITY_ICONS[sev]; return <I className="w-6 h-6" aria-hidden="true" />; })()}
                                 <div className="text-lg font-bold">{sevCounts[sev]}</div>
                                 <div className="text-xs capitalize">{sev}</div>
                             </button>
@@ -194,7 +199,7 @@ export default function WeatherPredictions() {
                             >
                                 <div className="flex items-center justify-between mb-2">
                                     <h3 className="font-semibold text-foreground">{district}</h3>
-                                    <span className="text-xl">{SEVERITY_ICONS[pred.severity]}</span>
+                                    {(() => { const I = SEVERITY_ICONS[pred.severity]; return <I className="w-5 h-5 shrink-0" aria-hidden="true" />; })()}
                                 </div>
 
                                 <div className="grid grid-cols-2 gap-2 text-sm">
@@ -214,7 +219,7 @@ export default function WeatherPredictions() {
 
                                 {pred.flood_risk > 0 && (
                                     <div className="mt-2 text-sm">
-                                        <span className="text-destructive">⚠️ Flood Risk: </span>
+                                        <span className="text-destructive">Flood Risk: </span>
                                         <span className="text-foreground">{(pred.flood_risk * 100).toFixed(0)}%</span>
                                     </div>
                                 )}

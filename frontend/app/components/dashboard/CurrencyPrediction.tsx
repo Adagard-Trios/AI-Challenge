@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { API_BASE, apiFetch } from "@/app/lib/api";
 import ModelStaleness, { type TrainingInfo } from "./ModelStaleness";
 import ModelUnavailable from "./ModelUnavailable";
@@ -23,6 +23,12 @@ interface CurrencyPrediction {
 }
 
 
+/** One day on the 7-day sparkline. Only these two fields are read. */
+interface RateHistoryPoint {
+    date: string;
+    close: number;
+}
+
 const VOLATILITY_COLORS = {
     low: "bg-success/20 text-success border-success/50",
     medium: "bg-severity-medium/20 text-severity-medium border-severity-medium/50",
@@ -32,7 +38,7 @@ const VOLATILITY_COLORS = {
 export default function CurrencyPrediction() {
     const [prediction, setPrediction] = useState<CurrencyPrediction | null>(null);
     const [training, setTraining] = useState<TrainingInfo | null>(null);
-    const [history, setHistory] = useState<any[]>([]);
+    const [history, setHistory] = useState<RateHistoryPoint[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [unavailable, setUnavailable] = useState(false);
@@ -102,7 +108,7 @@ export default function CurrencyPrediction() {
             <div className="flex items-center justify-between mb-6">
                 <div>
                     <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
-                        💱 USD/LKR Prediction
+                        USD/LKR Prediction
                     </h2>
                     {prediction && (
                         <p className="text-sm text-foreground mt-1">
@@ -158,9 +164,18 @@ export default function CurrencyPrediction() {
                                 <div className="text-xs text-muted-foreground">LKR/USD</div>
                             </div>
                             <div className="flex items-center justify-center">
-                                <div className="text-4xl">
-                                    {prediction.direction_emoji}
-                                </div>
+                                {/* direction_emoji comes from the API as a raw
+                                    emoji string, which renders at whatever size
+                                    and style the OS font decides and cannot take
+                                    the surrounding colour. Derived from the
+                                    number instead. */}
+                                {prediction.expected_change_pct < 0 ? (
+                                    <TrendingDown className="w-10 h-10 text-success" aria-label="Rupee strengthening" />
+                                ) : prediction.expected_change_pct > 0 ? (
+                                    <TrendingUp className="w-10 h-10 text-destructive" aria-label="Rupee weakening" />
+                                ) : (
+                                    <Minus className="w-10 h-10 text-muted-foreground" aria-label="No change" />
+                                )}
                             </div>
                             <div>
                                 <div className="text-foreground text-sm">Predicted</div>

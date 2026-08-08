@@ -71,7 +71,6 @@ const statusConfig = {
         borderColor: "border-destructive",
         textColor: "text-destructive",
         icon: AlertTriangle,
-        emoji: "🔴",
         label: "CRITICAL"
     },
     alert: {
@@ -80,7 +79,6 @@ const statusConfig = {
         borderColor: "border-destructive/70",
         textColor: "text-destructive",
         icon: AlertTriangle,
-        emoji: "🟠",
         label: "ALERT"
     },
     no_data: {
@@ -89,7 +87,6 @@ const statusConfig = {
         borderColor: "border-muted",
         textColor: "text-muted-foreground",
         icon: Clock,
-        emoji: "⚫",
         label: "NO DATA"
     },
     warning: {
@@ -98,7 +95,6 @@ const statusConfig = {
         borderColor: "border-warning",
         textColor: "text-warning",
         icon: AlertTriangle,
-        emoji: "🟠",
         label: "WARNING"
     },
     rising: {
@@ -107,7 +103,6 @@ const statusConfig = {
         borderColor: "border-primary",
         textColor: "text-primary",
         icon: TrendingUp,
-        emoji: "🟡",
         label: "RISING"
     },
     normal: {
@@ -116,7 +111,6 @@ const statusConfig = {
         borderColor: "border-success",
         textColor: "text-success",
         icon: CheckCircle,
-        emoji: "🟢",
         label: "NORMAL"
     },
     unknown: {
@@ -125,7 +119,6 @@ const statusConfig = {
         borderColor: "border-muted",
         textColor: "text-muted-foreground",
         icon: Clock,
-        emoji: "⚪",
         label: "UNKNOWN"
     },
     error: {
@@ -134,7 +127,6 @@ const statusConfig = {
         borderColor: "border-destructive/50",
         textColor: "text-destructive/70",
         icon: AlertTriangle,
-        emoji: "❌",
         label: "ERROR"
     }
 };
@@ -186,7 +178,7 @@ const RiverNetStatus = ({ riverData, compact = false }: RiverNetStatusProps) => 
                     </div>
                     <div>
                         <h3 className="font-bold flex items-center gap-2">
-                            🌊 FLOOD MONITORING
+                            FLOOD MONITORING
                             {floodAlerts > 0 && (
                                 <Badge className="bg-warning text-warning-foreground">
                                     {floodAlerts} ALERT{floodAlerts === 1 ? '' : 'S'}
@@ -203,7 +195,7 @@ const RiverNetStatus = ({ riverData, compact = false }: RiverNetStatusProps) => 
                 <div className="text-right">
                     <div className="flex items-center gap-1 justify-end">
                         <Badge className={`${statusInfo.bgColor} ${statusInfo.textColor}`}>
-                            {statusInfo.emoji} {statusInfo.label}
+                            {statusInfo.label}
                         </Badge>
                         <DataProvenance
                             status={(riverData as { scrape_status?: string })?.scrape_status}
@@ -236,7 +228,7 @@ const RiverNetStatus = ({ riverData, compact = false }: RiverNetStatusProps) => 
             {alerts && alerts.length > 0 && (
                 <div className="mb-4 p-3 rounded-lg bg-warning/10 border border-warning/30">
                     <p className="text-sm font-semibold text-warning mb-2">
-                        {floodAlerts > 0 ? "⚠️ Active Alerts" : "Stations Not Reporting"}
+                        {floodAlerts > 0 ? "Active Alerts" : "Stations Not Reporting"}
                     </p>
                     {alerts.slice(0, 3).map((alert, idx) => (
                         <p key={`${alert.river}-${idx}`} className="text-xs text-warning/80 mb-1">
@@ -286,7 +278,7 @@ const RiverNetStatus = ({ riverData, compact = false }: RiverNetStatusProps) => 
                                         )}
                                     </div>
                                     <Badge className={`${config.bgColor} ${config.textColor} text-xs`}>
-                                        {config.emoji} {config.label}
+                                        {config.label}
                                     </Badge>
                                 </div>
                             </Card>

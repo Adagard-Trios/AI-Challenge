@@ -140,7 +140,7 @@ const FloatingChatBox = () => {
                 className={`${isOpen ? 'translate-y-[100px]' : 'translate-y-0 delay-300'} select-none transition-transform duration-500 ease-in-out absolute bottom-[15px] right-[15px] sm:bottom-[20px] sm:right-[30px] flex items-center justify-center w-fit bg-card ring-[0.5px] ring-border rounded-full cursor-pointer px-[25px] sm:px-[30px] min-h-[44px] shadow-lg hover:bg-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background`}
             >
                 <Radio className="w-5 h-5 mr-2 text-primary" />
-                <span className="select-none text-card-foreground text-[18px] sm:text-[18px] font-semibold">Roger</span>
+                <span className="select-none text-card-foreground text-lg sm:text-lg font-semibold">Roger</span>
             </button>
 
             {/* Chat Container.
@@ -163,8 +163,8 @@ const FloatingChatBox = () => {
                             <Brain className="w-5 h-5 text-primary" />
                         </div>
                         <div>
-                            <p className="text-[20px] sm:text-[18px] font-semibold">Roger</p>
-                            <p className="text-[12px] text-muted-foreground">Intelligence Assistant</p>
+                            <p className="text-lg sm:text-lg font-semibold">Roger</p>
+                            <p className="text-xs text-muted-foreground">Intelligence Assistant</p>
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -181,7 +181,7 @@ const FloatingChatBox = () => {
                             type="button"
                             onClick={toggleChat}
                             aria-label="Close Roger assistant"
-                            className="cursor-pointer bg-card hover:bg-muted active:bg-muted min-h-[44px] px-[14px] sm:px-[12px] rounded-[8px] sm:rounded-[6px] transition-colors touch-manipulation text-[14px] sm:text-[13px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            className="cursor-pointer bg-card hover:bg-muted active:bg-muted min-h-[44px] px-[14px] sm:px-[12px] rounded-[8px] sm:rounded-[6px] transition-colors touch-manipulation text-sm sm:text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         >
                             Close
                         </button>
@@ -228,7 +228,7 @@ const FloatingChatBox = () => {
                     >
                         {/* Today Badge */}
                         <div className="flex justify-center mt-1 mb-4">
-                            <div className="bg-card text-[11px] px-3 py-1 rounded-full border border-border">
+                            <div className="bg-card text-xs px-3 py-1 rounded-full border border-border">
                                 <p className="text-muted-foreground">Today</p>
                             </div>
                         </div>
@@ -239,7 +239,7 @@ const FloatingChatBox = () => {
                                 key={msg.id}
                             >
                                 <div
-                                    className={`max-w-[85%] rounded-[10px] py-[10px] px-[14px] text-[14px] leading-relaxed ${msg.role === 'user'
+                                    className={`max-w-[85%] rounded-[10px] py-[10px] px-[14px] text-sm leading-relaxed ${msg.role === 'user'
                                         ? 'bg-primary text-primary-foreground'
                                         : 'bg-muted text-foreground border border-border'
                                         }`}
@@ -257,12 +257,12 @@ const FloatingChatBox = () => {
                                     {/* Sources */}
                                     {msg.sources && msg.sources.length > 0 && (
                                         <div className="mt-2 pt-2 border-t border-border">
-                                            <p className="text-[11px] text-muted-foreground mb-1">Sources:</p>
+                                            <p className="text-xs text-muted-foreground mb-1">Sources:</p>
                                             <div className="flex flex-wrap gap-1">
                                                 {msg.sources.slice(0, 3).map((src, i) => (
                                                     <span
                                                         key={i}
-                                                        className="text-[10px] bg-muted text-muted-foreground px-2 py-0.5 rounded"
+                                                        className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded"
                                                     >
                                                         {src.domain} ({Math.round(src.similarity * 100)}%)
                                                     </span>
@@ -289,16 +289,16 @@ const FloatingChatBox = () => {
                             <Radio className="w-12 h-12 text-primary opacity-50" />
                         </div>
                         <div className="text-muted-foreground text-center max-w-[280px]">
-                            <p className="text-[16px] mb-3 leading-relaxed">
+                            <p className="text-base mb-3 leading-relaxed">
                                 Hello! I&apos;m <strong>Roger</strong>, your intelligence assistant.
                             </p>
-                            <p className="text-[14px] text-muted-foreground leading-relaxed">
+                            <p className="text-sm text-muted-foreground leading-relaxed">
                                 Ask me anything about Sri Lanka&apos;s political, economic, weather, or social intelligence data.
                             </p>
                             {/* Was text-gray-500 on #101010: 3.9:1, below WCAG
                                 AA, at 12px. --muted-foreground is tuned to pass
                                 in both themes. */}
-                            <div className="mt-4 space-y-2 text-[12px] text-muted-foreground">
+                            <div className="mt-4 space-y-2 text-xs text-muted-foreground">
                                 <p>Try asking:</p>
                                 <p className="italic">&ldquo;What are the latest political events?&rdquo;</p>
                                 <p className="italic">&ldquo;Any weather warnings today?&rdquo;</p>
@@ -315,7 +315,7 @@ const FloatingChatBox = () => {
                             onChange={(e) => setInput(e.target.value)}
                             value={input}
                             disabled={isLoading}
-                            className="w-full focus:outline-none focus:ring-2 focus:ring-ring min-h-[50px] max-h-[100px] leading-[22px] rounded-[10px] bg-background text-foreground py-[12px] px-[14px] pr-[60px] resize-none text-[15px] placeholder:text-muted-foreground disabled:opacity-50"
+                            className="w-full focus:outline-none focus:ring-2 focus:ring-ring min-h-[50px] max-h-[100px] leading-[22px] rounded-[10px] bg-background text-foreground py-[12px] px-[14px] pr-[60px] resize-none text-sm placeholder:text-muted-foreground disabled:opacity-50"
                             placeholder="Ask Roger..."
                             rows={2}
                             style={{ fontSize: '16px' }}
@@ -333,7 +333,7 @@ const FloatingChatBox = () => {
                             <Send className={`w-5 h-5 ml-[2px] ${input.trim() && !isLoading ? 'text-primary-foreground' : 'text-muted-foreground'}`} />
                         </button>
                     </div>
-                    <p className="text-[11px] text-muted-foreground mt-2 text-center sm:hidden">
+                    <p className="text-xs text-muted-foreground mt-2 text-center sm:hidden">
                         Press Enter to send • Shift+Enter for new line
                     </p>
                 </div>

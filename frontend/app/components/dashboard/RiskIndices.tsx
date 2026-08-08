@@ -85,7 +85,7 @@ const RiskIndices = () => {
             <div className="flex items-start justify-between gap-3 mb-4">
                 <div>
                     <h3 className="font-bold text-foreground">RISK INDICES</h3>
-                    <p className="text-xs text-muted-foreground mt-0.5">
+                    <p className="text-sm text-muted-foreground mt-0.5">
                         Derived from this cycle&apos;s events. Open any index to see the
                         events that moved it.
                     </p>

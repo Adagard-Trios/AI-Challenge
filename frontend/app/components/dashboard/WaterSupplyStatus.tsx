@@ -39,7 +39,7 @@ const WaterSupplyStatus = ({ waterData }: WaterSupplyStatusProps) => {
                         <Droplets className={`w-5 h-5 ${hasDisruptions ? 'text-warning' : 'text-info'}`} />
                     </div>
                     <div>
-                        <h3 className="font-bold text-sm">💧 WATER SUPPLY</h3>
+                        <h3 className="font-bold text-base">WATER SUPPLY</h3>
                         <p className="text-xs text-muted-foreground">NWSDB Status</p>
                     </div>
                 </div>
@@ -53,7 +53,7 @@ const WaterSupplyStatus = ({ waterData }: WaterSupplyStatusProps) => {
                                     : "bg-muted/20 text-muted-foreground"
                         }
                     >
-                        {hasDisruptions ? "⚠ DISRUPTIONS" : isNormal ? "✓ NORMAL" : "○ NO DATA"}
+                        {hasDisruptions ? "DISRUPTIONS" : isNormal ? "NORMAL" : "NO DATA"}
                     </Badge>
                     <DataProvenance
                         status={waterData?.scrape_status as string}

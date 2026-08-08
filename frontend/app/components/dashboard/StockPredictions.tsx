@@ -2,7 +2,7 @@
 
 import { Card } from "../ui/card";
 import { Badge } from "../ui/badge";
-import { TrendingUp, TrendingDown, Activity, AlertCircle, RefreshCw } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, Activity, AlertCircle, RefreshCw } from "lucide-react";
 import { motion } from "framer-motion";
 import { useRogerData } from "../../hooks/use-roger-data";
 import { useState, useEffect } from "react";
@@ -105,7 +105,7 @@ const StockPredictions = () => {
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <Activity className="w-5 h-5 text-success" />
-            <h2 className="text-lg font-bold">CSE STOCK PREDICTIONS 🇱🇰</h2>
+            <h2 className="text-lg font-bold">CSE STOCK PREDICTIONS</h2>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -136,15 +136,15 @@ const StockPredictions = () => {
             </div>
             <div className="p-2 rounded-lg bg-success/10 text-center">
               <div className="text-lg font-bold text-success">{predictions.summary.bullish}</div>
-              <div className="text-xs text-success">Bullish 📈</div>
+              <div className="text-xs text-success flex items-center justify-center gap-1"><TrendingUp className="w-3 h-3" />Bullish</div>
             </div>
             <div className="p-2 rounded-lg bg-destructive/10 text-center">
               <div className="text-lg font-bold text-destructive">{predictions.summary.bearish}</div>
-              <div className="text-xs text-destructive">Bearish 📉</div>
+              <div className="text-xs text-destructive flex items-center justify-center gap-1"><TrendingDown className="w-3 h-3" />Bearish</div>
             </div>
             <div className="p-2 rounded-lg bg-muted text-center">
               <div className="text-lg font-bold text-foreground">{predictions.summary.neutral}</div>
-              <div className="text-xs text-foreground">Neutral ➡️</div>
+              <div className="text-xs text-foreground flex items-center justify-center gap-1"><Minus className="w-3 h-3" />Neutral</div>
             </div>
           </div>
         )}
@@ -225,7 +225,7 @@ const StockPredictions = () => {
 
         <div className="mt-4 p-3 bg-muted/20 rounded border border-border">
           <p className="text-xs text-muted-foreground font-mono">
-            <span className="text-warning font-bold">⚠ DISCLAIMER:</span> AI-generated predictions using BiLSTM models. Not financial advice.
+            <span className="text-warning font-bold">DISCLAIMER:</span> AI-generated predictions using BiLSTM models. Not financial advice.
           </p>
         </div>
       </Card>

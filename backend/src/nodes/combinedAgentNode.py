@@ -213,6 +213,55 @@ def _shadow_write_assessment(snapshot: Dict[str, Any]) -> None:
         logger.warning("[Blackboard] could not record the assessment: %s", exc)
 
 
+def _write_foci(snapshot: Dict[str, Any]) -> None:
+    """
+    Turn the cheap signals this cycle already computed into board foci.
+
+    NOTHING CONSUMES THESE YET, on purpose. This is the stage that answers
+    whether opportunistic control is worth building: foci are written from real
+    signals, the log records what a controller WOULD have prioritised, and that
+    can be compared against what the fixed schedule actually collected. If the
+    foci turn out to be uninformative, the right answer is to stop here -- and
+    finding that out before building a scheduler is much cheaper than after.
+    """
+    if not _blackboard_enabled():
+        return
+
+    try:
+        from src.blackboard import sensors
+    except Exception:  # noqa: BLE001
+        return
+
+    written = 0
+    try:
+        written += len(sensors.from_trending(snapshot.get("spike_alerts") or []))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[Blackboard] trending sensor failed: %s", exc)
+
+    # RiverNet is read directly rather than from the snapshot: the snapshot
+    # carries derived indices, not the station-level alerts, and the station
+    # severity is the whole signal.
+    try:
+        from src.utils.utils import tool_rivernet_status
+
+        written += len(sensors.from_rivernet(tool_rivernet_status()))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[Blackboard] rivernet sensor failed: %s", exc)
+
+    try:
+        # recent() already carries the DERIVED state -- developing, escalating,
+        # quiet, resolved -- computed from the timeline rather than stored, so
+        # there is nothing to recompute here.
+        tracker = get_story_tracker()
+        written += len(sensors.from_stories(tracker.recent(limit=10) if tracker else []))
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[Blackboard] story sensor unavailable: %s", exc)
+
+    if written:
+        logger.info("[Blackboard] %d foci written or reinforced", written)
+    sensors.report_what_control_would_do()
+
+
 def _run_decay_pass() -> None:
     """
     Age the board and delete what has stopped describing the present.
@@ -1257,6 +1306,7 @@ JSON array only:"""
         # the graph to express "and then tidy up", which is not a stage of the
         # pipeline.
         _shadow_write_assessment(snapshot)
+        _write_foci(snapshot)
         _run_decay_pass()
 
         return {"risk_dashboard_snapshot": snapshot}

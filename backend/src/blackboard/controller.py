@@ -209,6 +209,8 @@ def tick() -> Dict[str, Any]:
     budget = digest.tokens_remaining
     reserve = int(TOKENS_PER_MINUTE * CLASSIFY_RESERVE)
 
+    from .knowledge_sources import REGISTRY
+
     records = []
     for activation in agenda:
         skipped = None
@@ -217,6 +219,15 @@ def tick() -> Dict[str, Any]:
                 skipped = "budget"
             else:
                 budget -= activation.est_tokens
+
+        # Claim only when this would actually run. Claiming in shadow mode
+        # would hold slots against a controller that executes nothing, and
+        # starve the real one if both were ever enabled at once.
+        if skipped is None and mode() == "active":
+            source = REGISTRY.get(activation.ks_name)
+            interval = (source.min_interval.total_seconds() if source else 60.0)
+            if not claim(activation.ks_name, interval_seconds=interval):
+                skipped = "claimed_elsewhere"
 
         if skipped:
             result["deferred"] += 1
@@ -234,6 +245,57 @@ def tick() -> Dict[str, Any]:
             result["deferred"], top,
         )
     return result
+
+
+def replica_id() -> str:
+    """
+    Who this process is, for the claim record.
+
+    HOSTNAME is what Kubernetes sets to the pod name, so in a cluster this is
+    already meaningful and needs no configuration.
+    """
+    return (os.getenv("REPLICA_ID") or os.getenv("HOSTNAME")
+            or f"pid-{os.getpid()}")[:64]
+
+
+def claim(ks_name: str, *, interval_seconds: float) -> bool:
+    """
+    Take the right to run this source, or return False because someone else
+    has it.
+
+    Needed because the controller runs in every replica that collects. Without
+    a claim, three replicas each decide `met.district_social` is due and all
+    three scrape it -- which is the same class of mistake as the unshared
+    pacing gate, and against social sources it is the same consequence.
+
+    Redis when available: SET NX PX is atomic in one round trip, so the
+    check-then-set race cannot happen. Note this could NOT be done by comparing
+    stored timestamps -- the deciding process and the claiming process may be
+    different, and their clocks are not comparable.
+
+    FAILS OPEN, unlike the social pacing gate, and the difference is
+    deliberate. If the claim is unavailable the cost is a duplicated scrape;
+    if the PACING gate were unavailable the cost is a banned account. Refusing
+    to collect at all because a coordination hint is down would trade a real
+    outage for a hypothetical duplicate.
+    """
+    try:
+        from src.runtime.redis_client import configured, get_client
+
+        if not configured():
+            return True     # single process; nothing to coordinate with
+        client = get_client()
+        if client is None:
+            logger.debug("[controller] no claim store; proceeding unclaimed")
+            return True
+
+        key = f"roger:ks:{ks_name}"
+        acquired = client.set(key, replica_id(), nx=True,
+                              px=int(max(1.0, interval_seconds) * 1000))
+        return bool(acquired)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[controller] claim failed for %s: %s", ks_name, exc)
+        return True
 
 
 def _record(tick_id: str, records) -> None:

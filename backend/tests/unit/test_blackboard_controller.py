@@ -223,6 +223,87 @@ def test_triggers_perform_no_io():
         )
 
 
+# --- multi-replica claim -----------------------------------------------------
+
+def test_only_one_replica_gets_to_run_a_source(monkeypatch):
+    """
+    The controller runs in every replica that collects. Without a claim, three
+    replicas each decide met.district_social is due and all three scrape it --
+    the same class of mistake as the unshared pacing gate, and against social
+    sources the same consequence.
+    """
+    import uuid
+
+    from src.blackboard import controller
+    from src.runtime import redis_client
+
+    try:
+        import redis
+
+        redis.Redis.from_url("redis://localhost:6379/0",
+                             socket_connect_timeout=2).ping()
+    except Exception:
+        pytest.skip("no Redis (docker compose up -d redis)")
+
+    ks_name = f"test.ks.{uuid.uuid4().hex[:8]}"
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+
+    redis_client.reset()
+    assert controller.claim(ks_name, interval_seconds=30) is True
+
+    redis_client.reset()      # a different replica
+    assert controller.claim(ks_name, interval_seconds=30) is False, (
+        "two replicas both claimed the same source"
+    )
+    redis_client.reset()
+
+
+def test_the_claim_fails_open(monkeypatch):
+    """
+    Deliberately the OPPOSITE of the social pacing gate, and the difference
+    matters: an unavailable claim costs a duplicated scrape, while an
+    unavailable pacing gate costs a banned account. Refusing to collect at all
+    because a coordination hint is down trades a real outage for a
+    hypothetical duplicate.
+    """
+    from src.blackboard import controller
+    from src.runtime import redis_client
+
+    monkeypatch.setenv("REDIS_URL", "redis://127.0.0.1:6399/0")   # nothing there
+    redis_client.reset()
+    assert controller.claim("anything", interval_seconds=30) is True
+    redis_client.reset()
+
+
+def test_a_single_process_needs_no_claim(monkeypatch):
+    from src.blackboard import controller
+    from src.runtime import redis_client
+
+    monkeypatch.delenv("REDIS_URL", raising=False)
+    redis_client.reset()
+    assert controller.claim("anything", interval_seconds=30) is True
+    redis_client.reset()
+
+
+def test_shadow_mode_takes_no_claims():
+    """
+    Claiming in shadow would hold slots against a controller that executes
+    nothing, and starve the real one if both were ever enabled at once.
+    """
+    import ast
+
+    source = (PROJECT_ROOT / "src" / "blackboard" / "controller.py").read_text(
+        encoding="utf-8")
+    tick = next(
+        n for n in ast.walk(ast.parse(source))
+        if isinstance(n, ast.FunctionDef) and n.name == "tick"
+    )
+    body = ast.get_source_segment(source, tick) or ""
+    assert 'mode() == "active"' in body, (
+        "tick() claims without checking the mode, so shadow would hold slots"
+    )
+
+
 def test_shadow_is_the_default():
     """
     Handing collection to an unproven scheduler by default would skip the

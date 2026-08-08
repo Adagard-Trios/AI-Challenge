@@ -53,9 +53,9 @@ def test_the_graph_loop_captures_the_snapshot_it_is_sent():
         "snapshot DataRefresherAgent computes is discarded and /api/dashboard "
         "serves its zeroed initial value forever"
     )
-    assert 'current_state["risk_dashboard_snapshot"]' in body, (
-        "the snapshot is read from the node output but never written into "
-        "current_state, which is what /api/dashboard actually serves"
+    assert "shared_state.update" in body, (
+        "the snapshot is read from the node output but never written into the "
+        "shared state, which is what /api/dashboard actually serves"
     )
 
 
@@ -73,7 +73,7 @@ def test_the_snapshot_is_merged_not_replaced():
     )
     body = ast.get_source_segment(source, loop) or ""
 
-    assert '**current_state.get("risk_dashboard_snapshot", {})' in body, (
+    assert '**shared_state.get("risk_dashboard_snapshot", {})' in body, (
         "the snapshot is assigned wholesale rather than merged over what is "
         "already there"
     )
@@ -82,7 +82,7 @@ def test_the_snapshot_is_merged_not_replaced():
 def test_the_dashboard_route_still_serves_that_key():
     """The two halves must agree on the key; renaming one silently breaks it."""
     source = MAIN.read_text(encoding="utf-8")
-    assert 'current_state.get("risk_dashboard_snapshot", {})' in source, (
+    assert 'shared_state.get("risk_dashboard_snapshot", {})' in source, (
         "/api/dashboard no longer reads risk_dashboard_snapshot"
     )
 

@@ -291,7 +291,19 @@ except Exception:  # noqa: BLE001
         yield None
 
 # Global state
-current_state: Dict[str, Any] = {
+# The live dashboard state.
+#
+# This used to be a module-level dict, which is correct for one process and
+# quietly wrong for more than one: only the WORKER runs the agent loop and the
+# poller, so only the worker writes. Every API replica would serve its own
+# untouched copy -- an empty feed and an "initializing" status forever, on two
+# pods out of three, while the worker collected into a dict nobody could read.
+#
+# src/runtime/shared_state keeps it in Redis when configured and in a process
+# dict when not, so a single local process is unchanged.
+from src.runtime import shared_state  # noqa: E402
+
+shared_state.install_defaults({
     "final_ranked_feed": [],
     "risk_dashboard_snapshot": {
         "logistics_friction": 0.0,
@@ -306,7 +318,7 @@ current_state: Dict[str, Any] = {
     "run_count": 0,
     "status": "initializing",
     "first_run_complete": False  # Track first graph execution
-}
+})
 
 # Thread-safe communication
 feed_update_queue = asyncio.Queue()
@@ -634,10 +646,12 @@ def run_graph_loop():
                     elif isinstance(node_output, dict):
                         snapshot = node_output.get("risk_dashboard_snapshot")
                     if snapshot:
-                        current_state["risk_dashboard_snapshot"] = {
-                            **current_state.get("risk_dashboard_snapshot", {}),
-                            **snapshot,
-                        }
+                        shared_state.update({
+                            "risk_dashboard_snapshot": {
+                                **shared_state.get("risk_dashboard_snapshot", {}),
+                                **snapshot,
+                            }
+                        })
                         logger.info(
                             "[GRAPH] %s updated the risk snapshot "
                             "(%d events, %d high priority)",
@@ -697,15 +711,17 @@ def run_graph_loop():
                                     logger.warning(f"[GRAPH] Storage error (continuing): {storage_error}")
 
                             # DIRECT_BROADCAST_FIX: Set first_run_complete and broadcast
-                            if not current_state.get('first_run_complete'):
-                                current_state['first_run_complete'] = True
-                                current_state['status'] = 'operational'
+                            if not shared_state.get('first_run_complete'):
+                                shared_state.update({
+                                    'first_run_complete': True,
+                                    'status': 'operational',
+                                })
                                 logger.info("[GRAPH] FIRST RUN COMPLETE - Broadcasting to frontend!")
 
                                 # Trigger broadcast from sync thread to async loop
                                 if main_event_loop:
                                     asyncio.run_coroutine_threadsafe(
-                                        manager.broadcast(current_state),
+                                        manager.broadcast(shared_state.snapshot()),
                                         main_event_loop
                                     )
 
@@ -738,7 +754,6 @@ async def database_polling_loop():
     Polls database for new feeds and broadcasts via WebSocket.
     Runs concurrently with graph thread.
     """
-    global current_state
     last_check = utc_now()
 
     logger.info("[DB_POLLER] Starting database polling loop")
@@ -775,19 +790,27 @@ async def database_polling_loop():
                         unique_feeds.append(feed)
 
                 if unique_feeds:
-                    # Update current state
-                    current_state['final_ranked_feed'] = unique_feeds + current_state.get('final_ranked_feed', [])
-                    current_state['final_ranked_feed'] = current_state['final_ranked_feed'][:100]  # Keep last 100
-                    current_state['status'] = 'operational'
-                    current_state['last_update'] = utc_now().isoformat()
+                    # Update the shared state. Read once, write once: reading
+                    # per field would let the 1s read cache serve a stale feed
+                    # into the very write that is meant to extend it.
+                    state = shared_state.snapshot()
+                    merged = (unique_feeds + state.get('final_ranked_feed', []))[:100]
+
+                    fields = {
+                        'final_ranked_feed': merged,   # newest first, last 100
+                        'status': 'operational',
+                        'last_update': utc_now().isoformat(),
+                    }
 
                     # Mark first run as complete (frontend loading screen can now hide)
-                    if not current_state.get('first_run_complete'):
-                        current_state['first_run_complete'] = True
+                    if not state.get('first_run_complete'):
+                        fields['first_run_complete'] = True
                         logger.info("[DB_POLLER] First graph run complete! Frontend loading screen can now hide.")
 
+                    shared_state.update(fields)
+
                     # Broadcast to WebSocket clients
-                    await manager.broadcast(current_state)
+                    await manager.broadcast(shared_state.snapshot())
                     logger.info(f"[DB_POLLER] Broadcasted {len(unique_feeds)} unique feeds")
 
         except Exception as e:
@@ -866,7 +889,7 @@ async def startup_event():
 def read_root():
     return {
         "service": "Roger Intelligence Platform",
-        "status": current_state.get("status"),
+        "status": shared_state.get("status"),
         "version": "2.0.0 (Database-Driven)"
     }
 
@@ -942,11 +965,11 @@ def get_status():
     present, never the value itself.
     """
     body = {
-        "status": current_state.get("status"),
-        "run_count": current_state.get("run_count"),
-        "last_update": current_state.get("last_update"),
+        "status": shared_state.get("status"),
+        "run_count": shared_state.get("run_count"),
+        "last_update": shared_state.get("last_update"),
         "active_connections": len(manager.active_connections),
-        "total_events": len(current_state.get("final_ranked_feed", []))
+        "total_events": len(shared_state.get("final_ranked_feed", []))
     }
 
     if _preflight is not None:
@@ -960,7 +983,7 @@ def get_status():
 
 @app.get("/api/dashboard")
 def get_dashboard(_user=Depends(require_user)):
-    return current_state.get("risk_dashboard_snapshot", {})
+    return shared_state.get("risk_dashboard_snapshot", {})
 
 
 @app.get("/api/feed")
@@ -976,7 +999,7 @@ def get_feed(
     order, with relevance null on every event -- explicitly "not scored", never
     a score of zero.
     """
-    events = list(current_state.get("final_ranked_feed", []))
+    events = list(shared_state.get("final_ranked_feed", []))
 
     exposure = feed_relevance.load_exposure(db, _user)
     events = feed_relevance.annotate(events, exposure, only_relevant=only_relevant)
@@ -2937,7 +2960,7 @@ async def websocket_endpoint(websocket: WebSocket, ticket: str = None):
     try:
         # Send initial state
         try:
-            await websocket.send_text(json.dumps(current_state, default=str))
+            await websocket.send_text(json.dumps(shared_state.snapshot(), default=str))
         except Exception as e:
             logger.debug(f"[WS] Initial send failed: {e}")
             await manager.disconnect(websocket)

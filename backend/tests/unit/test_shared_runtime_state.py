@@ -190,6 +190,141 @@ def test_the_local_fallback_is_bounded(monkeypatch):
     redis_client.reset()
 
 
+# --- the live dashboard state -----------------------------------------------
+
+def test_an_api_replica_sees_what_the_worker_wrote(monkeypatch):
+    """
+    THE failure this prevents, and it is a silent one.
+
+    Only the worker runs the agent loop and the poller, so only the worker
+    writes. With a module-level dict, every API replica serves its own
+    untouched copy -- an empty feed and an "initializing" status forever, on
+    two pods out of three, while the worker collects into a dict nobody can
+    read. Nothing crashes; the dashboard is just permanently empty.
+    """
+    _needs_redis()
+    from src.runtime import shared_state, redis_client
+
+    _as_new_process(monkeypatch)
+    redis_client.get_client().delete(shared_state.STATE_KEY)
+    shared_state.reset()
+    shared_state.update({
+        "status": "operational",
+        "run_count": 7,
+        "final_ranked_feed": [{"event_id": "e1", "summary": "flood"}],
+    })
+
+    _as_new_process(monkeypatch)      # a different replica
+    shared_state.reset()              # with its own empty local view
+    snap = shared_state.snapshot()
+
+    assert snap["status"] == "operational"
+    assert snap["run_count"] == 7
+    assert len(snap["final_ranked_feed"]) == 1
+
+    redis_client.get_client().delete(shared_state.STATE_KEY)
+
+
+def test_a_caller_mutating_the_snapshot_cannot_corrupt_the_store(monkeypatch):
+    """
+    main.py mutates what it reads. Handing out the cached object would let one
+    request's edits leak into what every later request sees -- and with a
+    one-second read cache, leak for a second across every route.
+    """
+    _needs_redis()
+    from src.runtime import shared_state, redis_client
+
+    _as_new_process(monkeypatch)
+    redis_client.get_client().delete(shared_state.STATE_KEY)
+    shared_state.reset()
+    shared_state.update({"final_ranked_feed": [{"event_id": "real"}]})
+
+    snap = shared_state.snapshot()
+    snap["final_ranked_feed"].append({"event_id": "BOGUS"})
+    snap["status"] = "tampered"
+
+    fresh = shared_state.snapshot()
+    assert len(fresh["final_ranked_feed"]) == 1
+    assert fresh.get("status") != "tampered"
+
+    redis_client.get_client().delete(shared_state.STATE_KEY)
+
+
+def test_a_starting_replica_does_not_blank_a_running_workers_state(monkeypatch):
+    """
+    install_defaults seeds only the LOCAL view. If it wrote to Redis, every API
+    pod starting during a deploy would overwrite the worker's live state with
+    its own blank initial values -- blanking the dashboard on every rollout.
+    """
+    _needs_redis()
+    from src.runtime import shared_state, redis_client
+
+    _as_new_process(monkeypatch)
+    shared_state.reset()
+    shared_state.update({"status": "operational", "run_count": 42})
+
+    _as_new_process(monkeypatch)      # a replica booting up
+    shared_state.install_defaults({"status": "initializing", "run_count": 0})
+
+    assert shared_state.snapshot()["run_count"] == 42, (
+        "a starting replica overwrote the worker's state with its defaults"
+    )
+    redis_client.get_client().delete(shared_state.STATE_KEY)
+
+
+def test_reads_fail_open_and_writes_never_raise(monkeypatch):
+    """
+    Opposite choice to the pacing gate, on purpose. A stale dashboard is
+    cosmetic; refusing to serve one is not. The pacing gate fails CLOSED
+    because its downside is a banned account.
+    """
+    from src.runtime import shared_state, redis_client
+
+    monkeypatch.setenv("REDIS_URL", "redis://127.0.0.1:6399/0")  # nothing there
+    redis_client.reset()
+    shared_state.reset()
+
+    snap = shared_state.snapshot()          # must not raise
+    assert isinstance(snap, dict)
+    shared_state.update({"status": "x"})    # must not raise
+    redis_client.reset()
+
+
+def test_state_still_works_without_redis(monkeypatch):
+    from src.runtime import shared_state, redis_client
+
+    monkeypatch.delenv("REDIS_URL", raising=False)
+    redis_client.reset()
+    shared_state.reset()
+
+    shared_state.update({"status": "local-only", "run_count": 3})
+    assert shared_state.get("status") == "local-only"
+    assert shared_state.snapshot()["run_count"] == 3
+    redis_client.reset()
+
+
+def test_main_no_longer_holds_the_state_dict():
+    """
+    Asserted with AST for the same reason as the seen-set below: the comment
+    explaining the change necessarily names the old binding.
+    """
+    import ast
+
+    source = (PROJECT_ROOT / "main.py").read_text(encoding="utf-8")
+    for node in ast.parse(source).body:
+        targets = []
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        elif isinstance(node, ast.AnnAssign):
+            targets = [node.target]
+        for target in targets:
+            assert not (isinstance(target, ast.Name)
+                        and target.id == "current_state"), (
+                "main.py still binds a module-level current_state; API "
+                "replicas would each serve their own copy"
+            )
+
+
 def test_main_no_longer_keeps_an_unbounded_set():
     """
     Asserted with AST, not a string search.

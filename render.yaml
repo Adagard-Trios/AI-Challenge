@@ -1,7 +1,10 @@
 # Render Blueprint — Roger Intelligence Platform backend
 # Docs: https://render.com/docs/blueprint-spec
 #
-# The frontend is NOT defined here; it deploys to Vercel (see DEPLOY.md).
+# The frontend has its OWN blueprint at frontend/render.yaml (service
+# "slac2026-frontend"). Apply both. Set NEXT_PUBLIC_API_URL *and*
+# NEXT_PUBLIC_API_BASE there to this service's URL -- they are inlined at build
+# time, so changing them needs a redeploy rather than a restart.
 #
 # Apply with: Render Dashboard -> New -> Blueprint -> pick this repo.
 
@@ -75,15 +78,30 @@ services:
       - key: AUTH_ENFORCED
         value: "1"
 
-      # There is no self-registration, so the FIRST user can only come from
-      # here. With these unset, _seed_admin() returns early and nobody can ever
-      # log in -- the whole authenticated surface is unreachable.
+      # The first ADMIN can only come from here -- self-registration creates
+      # viewers, never admins. With these unset, _seed_admin() returns early
+      # and there is no admin at all, so the accounts surface is unreachable.
       # Seeded once, only into an empty user table; change the password after
       # the first login.
+      #
+      # The password must be at least 10 characters. The seeder rejects
+      # anything shorter, and a rejected seed leaves you locked out.
       - key: BOOTSTRAP_ADMIN_EMAIL
         sync: false
       - key: BOOTSTRAP_ADMIN_PASSWORD
         sync: false
+
+      # Whether strangers may create their own accounts. Declared explicitly
+      # because the code default is "1" (on), and on a public URL that is a
+      # decision, not a detail: anyone with the link can sign up and read the
+      # intelligence feed.
+      #
+      # They land as "viewer" and every social route requires admin, so a new
+      # account cannot reach your connected Instagram session or trigger a
+      # collection. Set to "0" to close signups -- it is read per request, so
+      # it takes effect without a redeploy.
+      - key: ALLOW_SELF_REGISTRATION
+        value: "1"
 
       # --- Deployment safety ---
       # Do NOT train inside the web service: it OOMs even a 2 GB instance (let

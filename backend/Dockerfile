@@ -4,10 +4,21 @@ WORKDIR /app
 
 # No browser, and none of Chromium's ~20 shared libraries.
 #
-# Social collection runs in the user's connector on their own machine, so the
-# server never drives a browser. That removes roughly 300 MB from the image and,
-# more importantly, removes Chromium's 100-300 MB resident footprint from a
-# 512 MB instance -- which is what the agent loop used to tip over.
+# This used to say "collection runs in the user's connector". The connector was
+# merged into the backend, so that reason is gone -- but the conclusion is not,
+# for two reasons that outlive it:
+#
+#   1. Chromium is 100-300 MB resident on top of a ~210 MB base. On a 512 MB
+#      free instance that is what the agent loop tips over.
+#   2. Connecting an account opens a VISIBLE browser for a human to complete
+#      2FA (browser_login.py launches with headless=False), and sessions are
+#      encrypted to the OS keyring of the machine that created them. A
+#      container has neither a display nor that keyring, so social login cannot
+#      work here however much RAM it is given.
+#
+# Social collection therefore belongs on the user's own machine -- see
+# HOSTING.md. Browser-backed tools report themselves unavailable rather than
+# crashing (utils.py guards the import via PLAYWRIGHT_AVAILABLE).
 #
 # curl is kept solely for the container health check.
 RUN apt-get update && apt-get install -y --no-install-recommends \

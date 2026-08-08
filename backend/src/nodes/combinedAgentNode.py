@@ -30,6 +30,102 @@ try:
 except ImportError:
     TRENDING_ENABLED = False
 
+
+# --- trending topics ---------------------------------------------------------
+#
+# A "topic" used to be the first five words of the event summary, lowercased:
+#
+#     words = summary.split()[:5]
+#
+# That is not a topic, it is a prefix, and the dashboard showed what you would
+# expect from one. "Sri Lanka Economy (Sri Lanka" trended at 50x -- five words
+# ending inside a parenthesis it never closed -- alongside "passed", "social"
+# and "presence", which are the incidental words that happened to sit in
+# position four of some summary.
+#
+# Two better sources, in order. The pipeline already extracts entities and
+# canonicalises them through the taxonomy, so five spellings of "Colombo Port"
+# are one entry; those ARE topics and cost nothing to reuse. Where the
+# extractor did not run, capitalised phrases are a far better guess than a
+# prefix, because what trends in news is named things.
+
+# Anything shorter is an abbreviation or noise once stopwords are gone.
+_MIN_TOPIC_CHARS = 4
+_MAX_TOPICS_PER_EVENT = 4
+
+# Leading "Sri Lanka Economy (Sri Lanka Economy):" style labels the scrapers
+# prepend. They are the source, not the subject, and they produced the
+# unbalanced parenthesis in the trending list.
+_SOURCE_LABEL = re.compile(r"^[^:]{0,60}?\([^)]{0,60}\)\s*:\s*")
+# Runs of capitalised words: "Ministry of Education", "Asiri Hospitals".
+_PROPER_NOUN = re.compile(
+    r"\b([A-Z][\w’'-]+(?:\s+(?:of|and|for|the)\s+[A-Z][\w’'-]+|\s+[A-Z][\w’'-]+){0,3})"
+)
+# "The Gazette" and "Gazette" are the same topic and must not be counted twice.
+_ARTICLE = re.compile(r"^(?:The|A|An)\s+")
+
+
+def topics_from_event(item: dict) -> List[str]:
+    """
+    Topics worth counting for a trending signal.
+
+    Deliberately returns fewer topics rather than filling a quota: a bad topic
+    does not merely fail to be useful, it competes with real ones for the five
+    slots the dashboard shows.
+    """
+    from src.utils.trending_detector import TRENDING_STOPWORDS
+
+    def acceptable(candidate: str) -> bool:
+        cleaned = candidate.strip(" .,:;()[]\"'").strip()
+        if len(cleaned) < _MIN_TOPIC_CHARS:
+            return False
+        lowered = cleaned.lower()
+        if lowered in TRENDING_STOPWORDS:
+            return False
+        # A phrase made entirely of stopwords is still noise.
+        parts = [p for p in lowered.split() if p not in TRENDING_STOPWORDS]
+        return bool(parts)
+
+    out: List[str] = []
+    seen = set()
+
+    def add(candidate: str) -> None:
+        cleaned = candidate.strip(" .,:;()[]\"'").strip()
+        key = cleaned.lower()
+        if key and key not in seen and acceptable(cleaned):
+            seen.add(key)
+            out.append(cleaned)
+
+    # 1. Canonicalised entities, when the extractor ran on this event.
+    for entity in item.get("entities") or []:
+        if isinstance(entity, dict) and entity.get("name"):
+            add(str(entity["name"]))
+        if len(out) >= _MAX_TOPICS_PER_EVENT:
+            return out
+
+    # 2. Otherwise, the named things in the summary.
+    summary = _SOURCE_LABEL.sub("", str(item.get("summary") or ""), count=1)
+
+    # Where a sentence begins. A capital letter there is grammar, not a name --
+    # it is why "What", "Correction" and "Limited" were being counted as
+    # trending topics.
+    sentence_starts = {0}
+    for boundary in re.finditer(r"[.!?]\s+", summary):
+        sentence_starts.add(boundary.end())
+
+    for match in _PROPER_NOUN.finditer(summary):
+        phrase = match.group(1)
+        # Multi-word phrases survive at a sentence start ("Ministry of Lands
+        # has ruled..."); a lone capitalised word there does not.
+        if match.start() in sentence_starts and len(phrase.split()) == 1:
+            continue
+        add(_ARTICLE.sub("", phrase, count=1))
+        if len(out) >= _MAX_TOPICS_PER_EVENT:
+            break
+
+    return out
+
+
 logger = logging.getLogger("combined_node")
 logger.setLevel(logging.INFO)
 if not logger.handlers:
@@ -995,14 +1091,11 @@ JSON array only:"""
 
                 # Record topics from feed
                 for item in feed:
-                    summary = item.get("summary", "")
                     domain = item.get("domain", item.get("target_agent", "unknown"))
-
-                    # Extract key topic words (simplified - just use first 3 words)
-                    words = summary.split()[:5]
-                    if words:
-                        topic = " ".join(words).lower()
-                        record_topic_mention(topic, source="roger_feed", domain=domain)
+                    for topic in topics_from_event(item):
+                        record_topic_mention(
+                            topic, source="roger_feed", domain=domain
+                        )
 
                 # Get trending topics and spike alerts
                 snapshot["trending_topics"] = detector.get_trending_topics(limit=5)

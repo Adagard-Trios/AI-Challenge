@@ -60,12 +60,22 @@ lxml
 
 # NOTE: playwright is deliberately absent.
 #
-# Social collection runs in the user's connector, so the server drives no
-# browser. Dropping the package and Chromium removes ~400 MB from the image and
-# Chromium's 100-300 MB resident footprint from a 512 MB instance.
+# The original reason was "collection runs in the user's connector". The
+# connector has since been merged into the backend, so that sentence is no
+# longer true -- but omitting playwright still is, for reasons that do not
+# depend on it:
 #
-# utils.py guards the import (PLAYWRIGHT_AVAILABLE), so the server boots fine
-# and browser-backed tools report themselves unavailable rather than crashing.
+#   - ~400 MB of image and Chromium's 100-300 MB resident footprint, against a
+#     512 MB instance with a ~210 MB base.
+#   - Connecting an account cannot work on a server at all. browser_login.py
+#     launches with headless=False so a human can complete 2FA, and sessions
+#     are encrypted to the OS keyring of the machine that created them. A
+#     container has no display and no such keyring.
+#
+# So social collection runs on the user's own machine (HOSTING.md), and the
+# deployed API serves everything else. utils.py guards the import
+# (PLAYWRIGHT_AVAILABLE), so the server boots fine and browser-backed tools
+# report themselves unavailable rather than crashing.
 #
 # Both session-free scrapers that needed a browser (rivernet, weather nowcast)
 # have been rewritten as plain HTTP calls. Nothing here needs a browser.

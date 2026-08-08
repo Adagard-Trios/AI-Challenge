@@ -9,6 +9,36 @@ Production-Ready Real-Time Intelligence Platform Backend
 
 Updated: Resilient WebSocket handling for long scraping operations (60s+ cycles)
 """
+# --- console encoding, BEFORE anything logs -----------------------------------
+#
+# On Windows sys.stdout defaults to cp1252, and the agent nodes print progress
+# lines containing emoji. Encoding one raises UnicodeEncodeError, which the
+# per-agent wrapper in combinedAgentGraph catches as "agent FAILED" and turns
+# into zero insights.
+#
+# Measured on a real cycle before this existed -- FOUR of five agents died
+# every single cycle:
+#
+#   [CombinedGraph] SocialAgent FAILED: 'charmap' codec can't encode
+#       character '\U0001f4dd' in position 2
+#   ... EconomicalAgent FAILED ... IntelligenceAgent FAILED ...
+#   ... MeteorologicalAgent FAILED ...
+#
+# Only PoliticalAgent survived, so the platform collected almost nothing on the
+# machine it is developed on. It went unnoticed because the containers are
+# Linux (UTF-8 by default) and every backend started for testing had
+# DISABLE_AGENT_LOOP=1, so the agents never ran.
+#
+# errors="replace" as well as utf-8: a character that still cannot be encoded
+# must cost a mangled log line, never a collection cycle.
+import sys as _sys
+
+for _stream in (_sys.stdout, _sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:  # noqa: BLE001
+        pass
+
 from fastapi import Depends, FastAPI, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel

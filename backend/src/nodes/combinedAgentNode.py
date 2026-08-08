@@ -127,6 +127,67 @@ def topics_from_event(item: dict) -> List[str]:
     return out
 
 
+def _salvage_json_objects(content: str) -> List[Dict[str, Any]]:
+    """
+    Every complete top-level object in a possibly-truncated JSON array.
+
+    Scans with a brace counter rather than a regex, because the objects contain
+    nested objects (entities) and a regex cannot match balanced braces. Strings
+    are tracked so a brace inside a summary -- which happens -- does not
+    unbalance the count.
+
+    Returns [] when nothing complete is present, so the caller can re-raise and
+    fall back to unfiltered rather than silently reporting success.
+    """
+    objects: List[Dict[str, Any]] = []
+    malformed = 0
+    depth = 0
+    start = None
+    in_string = False
+    escaped = False
+
+    for index, char in enumerate(content):
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            if depth == 0:
+                start = index
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0 and start is not None:
+                try:
+                    objects.append(json.loads(content[start:index + 1]))
+                except json.JSONDecodeError:
+                    # Counted, not swallowed. Skipping a malformed object IS
+                    # the intent here -- salvage takes the complete ones -- but
+                    # a bare `pass` would make "the model emitted garbage" and
+                    # "there was nothing to salvage" produce identical
+                    # evidence, which is this project's recurring failure.
+                    malformed += 1
+                start = None
+            elif depth < 0:
+                depth = 0        # stray brace; resynchronise
+
+    if malformed:
+        # One line per salvage attempt, not per object: a badly truncated reply
+        # can contain many fragments and a log per fragment is a log nobody
+        # reads.
+        logger.debug("[LLM_FILTER] salvage skipped %d malformed object(s)",
+                     malformed)
+
+    return objects
+
+
 def _blackboard_enabled() -> bool:
     """
     Whether to mirror events onto the board.
@@ -475,7 +536,34 @@ JSON array only:"""
             content = re.sub(r"^```\w*\n?", "", content)
             content = re.sub(r"\n?```$", "", content)
 
-        parsed = json.loads(content)
+        try:
+            parsed = json.loads(content)
+        except json.JSONDecodeError:
+            # Salvage whatever completed.
+            #
+            # agent_model() is a REASONING model with no max_tokens set, so it
+            # spends budget thinking before it writes and the array is
+            # regularly cut off mid-object:
+            #
+            #   [LLM_FILTER] intelligence batch of 6 failed
+            #       (Expecting value: line 58 column 18 (char 2244))
+            #
+            # json.loads on the whole string then loses EVERY verdict in the
+            # batch, including the ones the model finished perfectly. Measured
+            # on a real cycle: 6 of 15 events came through unclassified, with
+            # no entities -- and entities are what relevance scoring joins on,
+            # so those events could never match anyone's exposure.
+            #
+            # Parsing the complete objects out of a truncated array turns
+            # "lose twelve" into "lose the one that was cut".
+            parsed = _salvage_json_objects(content)
+            if not parsed:
+                raise
+            logger.warning(
+                "[LLM_FILTER] reply was not valid JSON; salvaged %d complete "
+                "object(s) from it", len(parsed),
+            )
+
         if isinstance(parsed, dict):
             # Tolerate {"results": [...]} as well as a bare array.
             parsed = parsed.get("results") or parsed.get("posts") or [parsed]

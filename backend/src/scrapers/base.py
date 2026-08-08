@@ -47,10 +47,11 @@ class _DailyBudget:
     """
     In-process daily counters.
 
-    Deliberately simple: the connector is a single long-lived process, so this
-    is sufficient there. The server does not scrape at all. If collection ever
-    moves somewhere multi-process, this needs to become a shared counter --
-    it is isolated here so that change is one class.
+    Deliberately simple: this is sufficient for a single long-lived process.
+    Its original note said "if collection ever moves somewhere multi-process,
+    this needs to become a shared counter" -- collection HAS since moved into
+    the backend, so see the shared counters below. This remains the fallback
+    when REDIS_URL is unset, which is the ordinary laptop case.
     """
     day: date
     requests: int = 0
@@ -67,6 +68,84 @@ def _budget(account_key: str) -> _DailyBudget:
         b = _DailyBudget(day=today)
         _budgets[account_key] = b
     return b
+
+
+# --- shared daily counters --------------------------------------------------
+#
+# The dict above is per-process. Two replicas each get a full daily allowance
+# against the SAME account, so the cap that is supposed to be, say, 60 requests
+# a day for LinkedIn silently becomes 60 x replicas. This is the daily half of
+# the same hazard the pacing gate covers per-collection, and it has the same
+# consequence: a personal account behaving like several.
+#
+# UTC deliberately. The in-process path uses date.today() (local) and is
+# unchanged, but a shared counter must agree across replicas that may not share
+# a timezone, and containers run UTC anyway.
+
+
+def _utc_today() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).date().isoformat()
+
+
+def _budget_key(account_key: str, field: str) -> str:
+    return f"roger:budget:{account_key}:{_utc_today()}:{field}"
+
+
+def _shared_budget_client():
+    try:
+        from src.runtime.redis_client import configured, get_client
+
+        return get_client() if configured() else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _seconds_to_utc_midnight() -> int:
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    tomorrow = (now + timedelta(days=1)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    return max(60, int((tomorrow - now).total_seconds()))
+
+
+def _charge(account_key: str, field: str, n: int = 1) -> Optional[int]:
+    """
+    Add to a shared counter and return its new value, or None when there is no
+    shared counter (so the caller uses the in-process one).
+
+    INCR then compare, rather than compare then INCR. The check-then-act order
+    lets two replicas both read "under the cap" and both proceed; charging
+    first can overshoot by at most the number of concurrent callers, which for
+    a DAILY cap is the safe direction to be wrong in.
+    """
+    client = _shared_budget_client()
+    if client is None:
+        return None
+    try:
+        key = _budget_key(account_key, field)
+        value = int(client.incrby(key, n))
+        if value == n:  # first write today -- give the key a lifetime
+            client.expire(key, _seconds_to_utc_midnight())
+        return value
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[budget] shared counter unavailable (%s); "
+                       "falling back to this process only", exc)
+        return None
+
+
+def _read_shared(account_key: str, field: str) -> Optional[int]:
+    client = _shared_budget_client()
+    if client is None:
+        return None
+    try:
+        raw = client.get(_budget_key(account_key, field))
+        return int(raw) if raw is not None else 0
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def reset_budgets() -> None:
@@ -93,6 +172,17 @@ def budget_snapshot(account_key: str, platform: str) -> Dict[str, object]:
     # A stale entry is last UTC day's, which is spent-nothing for today.
     used_requests = entry.requests if entry and entry.day == today else 0
     used_posts = entry.posts if entry and entry.day == today else 0
+
+    # Prefer the shared counters when they exist: with replicas, this process's
+    # own tally is a fraction of what the account has actually spent, and
+    # reporting the fraction is how a user ends up surprised by an exhausted
+    # budget they were told was nearly untouched.
+    shared_requests = _read_shared(account_key, "requests")
+    shared_posts = _read_shared(account_key, "posts")
+    if shared_requests is not None:
+        used_requests = shared_requests
+    if shared_posts is not None:
+        used_posts = shared_posts
 
     return {
         "platform": platform,
@@ -174,13 +264,25 @@ class ScrapeContext:
         BudgetExhausted when the account has done enough for one day.
         """
         if kind == "nav":
-            b = _budget(self._account_key)
             cap = budget_for(self.platform)["requests"]
-            if b.requests >= cap:
-                raise BudgetExhausted(
-                    f"{self.platform}: daily request cap reached ({b.requests}/{cap})"
-                )
-            b.requests += 1
+            # Shared first, so N replicas draw on ONE daily allowance rather
+            # than N. Returns None when Redis is not configured, and then the
+            # in-process counter below is authoritative exactly as before.
+            used = _charge(self._account_key, "requests")
+            if used is not None:
+                if used > cap:
+                    raise BudgetExhausted(
+                        f"{self.platform}: daily request cap reached "
+                        f"({used}/{cap})"
+                    )
+            else:
+                b = _budget(self._account_key)
+                if b.requests >= cap:
+                    raise BudgetExhausted(
+                        f"{self.platform}: daily request cap reached "
+                        f"({b.requests}/{cap})"
+                    )
+                b.requests += 1
 
         limiter = get_rate_limiter()
         with limiter.acquire(self.platform, account_key=self._account_key):
@@ -195,13 +297,15 @@ class ScrapeContext:
 
     def count_posts(self, n: int) -> None:
         """Charge the daily post budget. Caps output rather than erroring."""
-        b = _budget(self._account_key)
-        b.posts += n
+        if _charge(self._account_key, "posts", n) is None:
+            _budget(self._account_key).posts += n
         self._posts_seen += n
 
     def posts_remaining(self) -> int:
-        b = _budget(self._account_key)
-        return max(0, budget_for(self.platform)["posts"] - b.posts)
+        cap = budget_for(self.platform)["posts"]
+        shared = _read_shared(self._account_key, "posts")
+        used = shared if shared is not None else _budget(self._account_key).posts
+        return max(0, cap - used)
 
     # -- health ------------------------------------------------------------
 

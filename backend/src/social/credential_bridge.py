@@ -80,6 +80,36 @@ class SessionStoreCredentialStore:
         self._last_served: Dict[str, float] = {}
         self._gate = threading.Lock()
 
+    # --- shared pacing ------------------------------------------------------
+    #
+    # The in-process gate below is correct for exactly one process. Two
+    # replicas each keep their own _last_served dict, so an account gated to
+    # one collection per 15 minutes gets two -- and N replicas get N. The whole
+    # purpose of this gate is that a personal account should not look like a
+    # bot, so multiplying it is the one failure here with a lasting
+    # consequence.
+    #
+    # When REDIS_URL is set, the deadline moves to a Redis key with a TTL:
+    #
+    #     SET roger:pace:{platform} <token> NX PX <interval_ms>
+    #
+    # atomic in one round trip, so the check-then-set race across replicas
+    # cannot happen. Note this could NOT be done by storing the existing
+    # value: time.monotonic() is process-relative, its zero point differs per
+    # process, and comparing one process's monotonic clock against another's is
+    # meaningless. Redis owning the expiry is what makes it comparable at all.
+
+    def _pace_key(self, platform: str) -> str:
+        return f"roger:pace:{platform}"
+
+    def _shared(self):
+        """The Redis client, or None when shared pacing is not in play."""
+        from src.runtime.redis_client import configured, get_client
+
+        if not configured():
+            return None
+        return get_client()
+
     def is_paced(self, platform: str) -> bool:
         """
         Whether this account is inside its cooling-off window, WITHOUT
@@ -92,14 +122,55 @@ class SessionStoreCredentialStore:
         something that is not broken, and tells the agent there is no account
         to collect from. On a 60-second loop against a 15-minute gate that was
         the answer 14 times out of 15.
+
+        FAILS CLOSED. If REDIS_URL is configured but Redis cannot be reached,
+        this returns True -- paced -- and nothing collects. Losing an hour of
+        posts costs nothing and is recoverable; failing open means every
+        replica collects at once, unpaced, against one account, which is not.
         """
         if MIN_COLLECTION_INTERVAL <= 0:
             return False
+
+        from src.runtime.redis_client import configured
+
+        if configured():
+            client = self._shared()
+            if client is None:
+                logger.warning(
+                    "[credentials] Redis is configured but unreachable; "
+                    "treating %s as paced. Collection is suspended rather "
+                    "than run without a shared gate.", platform,
+                )
+                return True
+            try:
+                return bool(client.exists(self._pace_key(platform)))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "[credentials] could not read the shared pacing gate "
+                    "(%s); treating %s as paced", exc, platform,
+                )
+                return True
+
         with self._gate:
             due = self._last_served.get(platform)
             return due is not None and time.monotonic() < due
 
     def seconds_until_ready(self, platform: str) -> int:
+        from src.runtime.redis_client import configured
+
+        if configured():
+            client = self._shared()
+            if client is None:
+                # Unknown, and the honest answer is "not yet". Reporting 0
+                # would tell the dashboard to retry immediately.
+                return int(MIN_COLLECTION_INTERVAL)
+            try:
+                ttl_ms = client.pttl(self._pace_key(platform))
+                # -2 = no key, -1 = key with no expiry. Neither is a wait.
+                return max(0, int(ttl_ms // 1000)) if ttl_ms and ttl_ms > 0 else 0
+            except Exception:  # noqa: BLE001
+                return int(MIN_COLLECTION_INTERVAL)
+
         with self._gate:
             due = self._last_served.get(platform)
             if due is None:
@@ -117,9 +188,40 @@ class SessionStoreCredentialStore:
 
         Consumes the slot when it allows one through, which is why is_paced()
         exists separately for callers that only want to ask.
+
+        Across replicas this is one SET NX PX: the winner creates the key, and
+        everyone else sees it already exists. Check-then-set as two operations
+        would let two replicas both read "free" and both collect.
         """
         if MIN_COLLECTION_INTERVAL <= 0:
             return False
+
+        from src.runtime.redis_client import configured
+
+        if configured():
+            client = self._shared()
+            if client is None:
+                # Same reasoning as is_paced: no shared gate means no
+                # collection, not unpaced collection.
+                logger.warning(
+                    "[credentials] Redis unreachable; refusing to serve %s "
+                    "rather than collect without a shared gate", platform,
+                )
+                return True
+            try:
+                interval_ms = int(_next_allowed(MIN_COLLECTION_INTERVAL) * 1000)
+                acquired = client.set(
+                    self._pace_key(platform), "1", nx=True, px=interval_ms
+                )
+                # set(nx=True) returns True on success and None when the key
+                # already exists.
+                return not bool(acquired)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "[credentials] could not take the shared pacing slot "
+                    "(%s); refusing %s", exc, platform,
+                )
+                return True
 
         now = time.monotonic()
         with self._gate:

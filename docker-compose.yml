@@ -23,6 +23,52 @@
 # For the production stack with Neo4j, see docker-compose.prod.yml.
 
 services:
+  # ---------------------------------------------------------------------------
+  # Shared state. Bring these up alone with:
+  #     docker compose up -d redis postgres
+  # which is all the backend needs to run from the host venv.
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    # appendonly is not optional here.
+    #
+    # Almost everything Redis holds for this app is reconstructible -- cached
+    # state, the seen-event set, WebSocket tickets. The social pacing deadline
+    # is NOT. It is the 15-minute gate that keeps a personal Instagram account
+    # from looking like a bot, and it exists as a key with a TTL. A Redis
+    # restart with an empty dataset releases every gate at once, and every
+    # replica collects simultaneously.
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: roger
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-roger-local-dev}
+      POSTGRES_DB: roger
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      # -U matters: without it pg_isready checks the OS user (root) rather than
+      # the database user, and reports ready before roger/roger exists.
+      test: ["CMD-SHELL", "pg_isready -U roger -d roger"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
   backend:
     build:
       # Context MUST be the repo root: the image needs models/, which is a
@@ -36,6 +82,10 @@ services:
       - GROQ_API_KEY=${GROQ_API_KEY:?set GROQ_API_KEY in .env or the environment}
       - PYTHONUNBUFFERED=1
       - PORT=8000
+      # Service names, not localhost: these resolve on the compose network.
+      # From the HOST venv use localhost:5432 / localhost:6379 instead.
+      - DATABASE_URL=postgresql+psycopg://roger:${POSTGRES_PASSWORD:-roger-local-dev}@postgres:5432/roger
+      - REDIS_URL=redis://redis:6379/0
       # Training inside the API container delays the port bind past the health
       # check and OOMs small instances. Artefacts are committed under
       # models/*/artifacts.
@@ -51,6 +101,11 @@ services:
       # the container runs what was built, and a source mount hides the fact
       # that the image is stale.
       - ./backend/data:/app/backend/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
     # No `command:` override. The image's CMD runs scripts/start_backend.sh,
     # which honours $PORT and binds 0.0.0.0 -- both required here.
     healthcheck:
@@ -84,3 +139,7 @@ services:
       backend:
         condition: service_started
     restart: unless-stopped
+
+volumes:
+  redis-data:
+  postgres-data:

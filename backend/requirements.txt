@@ -86,6 +86,12 @@ plotly
 # ---------------------------------------------------------
 # Database & Vector Stores
 # ---------------------------------------------------------
+# Shared process state (src/runtime). Optional at runtime -- unset REDIS_URL
+# means in-process state, which is correct for a single process. Required for
+# more than one replica, because the social pacing gate and the daily request
+# budgets are per-process otherwise.
+redis>=5.0
+psycopg[binary]>=3.2
 neo4j
 langchain-neo4j
 chromadb

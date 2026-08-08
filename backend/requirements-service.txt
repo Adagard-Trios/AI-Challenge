@@ -120,6 +120,14 @@ cryptography>=44,<46
 sqlalchemy>=2.0          # present transitively via langchain-community; pinned
 bcrypt>=4.1              # present transitively via chromadb; pinned
 psycopg[binary]>=3.2     # Postgres driver (Neon). SQLite needs nothing.
+
+# Shared process state. Only needed when REDIS_URL is set -- src/runtime
+# degrades to in-process state without it, which is correct for one process.
+#
+# It is REQUIRED for more than one replica: the social pacing gate and the
+# daily request budgets are otherwise per-process, so N replicas touch one
+# personal account N times as often. See src/runtime/redis_client.py.
+redis>=5.0
 # Deliberately NOT pydantic[email]: auth/routes.py validates addresses inline
 # rather than pull email-validator in for an invite-only tool.
 

@@ -72,54 +72,20 @@ def _isset(name: str) -> bool:
 
 
 def validate(host: str) -> list[str]:
-    """Blocking problems. Empty list means it is safe to serve."""
-    problems: list[str] = []
+    """
+    Blocking problems. Empty list means it is safe to serve.
 
-    if not _flag("AUTH_ENFORCED"):
-        problems.append(
-            "AUTH_ENFORCED is not 1.\n"
-            "      Every route would be publicly writable, including the "
-            "connector pairing\n"
-            "      endpoints -- anyone with the URL could attach their own "
-            "connector."
-        )
+    Delegates to src/config/public_guard.py rather than implementing the checks
+    here. They used to live in this file, which meant they ran only when this
+    script launched the server -- and this script is NOT the container
+    entrypoint, so containerising the API silently dropped every one of them at
+    the exact moment it became internet-facing. The module is now called from
+    application startup too, and this stays a thin CLI over it so the two
+    cannot drift apart.
+    """
+    from src.config.public_guard import validate as _validate
 
-    secret = (os.getenv("AUTH_SECRET") or "").strip()
-    if not secret:
-        problems.append(
-            "AUTH_SECRET is unset.\n"
-            "      A random key would be minted per boot, logging everyone out "
-            "on restart.\n"
-            '      python -c "import secrets; print(secrets.token_urlsafe(48))"'
-        )
-    elif len(secret) < 32:
-        problems.append(f"AUTH_SECRET is {len(secret)} chars; HS256 needs >= 32.")
-
-    if not _isset("CORS_ALLOW_ORIGINS"):
-        problems.append(
-            "CORS_ALLOW_ORIGINS is unset, so CORS falls back to '*'.\n"
-            "      Set it to your frontend origin."
-        )
-
-    if not _isset("BOOTSTRAP_ADMIN_EMAIL") or not _isset("BOOTSTRAP_ADMIN_PASSWORD"):
-        problems.append(
-            "BOOTSTRAP_ADMIN_EMAIL / BOOTSTRAP_ADMIN_PASSWORD are not both set.\n"
-            "      There is no self-registration, so with an empty user table "
-            "nobody can log in\n"
-            "      and every authenticated route stays 401."
-        )
-
-    if host == "0.0.0.0":
-        problems.append(
-            "Binding 0.0.0.0 exposes this API to every device on the local "
-            "network.\n"
-            "      A tunnel does not need it -- it connects outward from this "
-            "machine.\n"
-            "      Pass --host 0.0.0.0 --i-mean-it if you really want LAN "
-            "access."
-        )
-
-    return problems
+    return _validate(host)
 
 
 def report_config() -> None:

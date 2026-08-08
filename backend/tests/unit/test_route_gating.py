@@ -24,7 +24,13 @@ pytestmark = pytest.mark.slow
 
 # Public by design.
 #   /api/status is render.yaml's healthCheckPath -- gating it kills every deploy.
-PUBLIC = ["/", "/api/status", "/api/models/health"]
+#   /healthz and /readyz are orchestrator probes. A kubelet presents no
+#     credentials, so gating them means every probe 401s and the pod is killed
+#     as unhealthy while being perfectly fine. They are also deliberately
+#     information-free for exactly this reason: /healthz returns {"ok": true}
+#     and nothing else, and /readyz returns booleans about reachability, never
+#     a hostname, DSN or version.
+PUBLIC = ["/", "/api/status", "/api/models/health", "/healthz", "/readyz"]
 
 # Representative gated routes across the surface.
 GATED = ["/api/dashboard", "/api/feed", "/api/rivernet", "/api/anomalies",

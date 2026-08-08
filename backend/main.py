@@ -9,7 +9,7 @@ Production-Ready Real-Time Intelligence Platform Backend
 
 Updated: Resilient WebSocket handling for long scraping operations (60s+ cycles)
 """
-from fastapi import Depends, FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Dict, Any, List, Set, Optional
@@ -526,7 +526,29 @@ def run_graph_loop():
     UPDATED: Graph now runs single cycles and this loop handles the 60s interval
     externally, making the pattern non-blocking and interruptible.
     """
-    REFRESH_INTERVAL_SECONDS = 60
+    # Seconds between cycles. Configurable because 60 is not a safe default
+    # everywhere and there was no way to change it without editing this file.
+    #
+    # A cycle spends the Groq allowance five times over -- one LLM summary per
+    # domain plus batched filter calls -- against a free tier of 8,000 tokens
+    # per MINUTE, which this project already hits (HTTP 413). Adding replicas
+    # does not help: they add zero tokens. Lengthening this does.
+    #
+    # It is also the wrong knob to reach for if the feed looks thin; that is
+    # what the collection sources are for.
+    try:
+        REFRESH_INTERVAL_SECONDS = float(
+            os.getenv("AGENT_LOOP_INTERVAL_SECONDS", "60")
+        )
+    except ValueError:
+        logger.warning("[GRAPH] AGENT_LOOP_INTERVAL_SECONDS is not a number; "
+                       "using 60")
+        REFRESH_INTERVAL_SECONDS = 60.0
+    if REFRESH_INTERVAL_SECONDS < 10:
+        logger.warning("[GRAPH] AGENT_LOOP_INTERVAL_SECONDS=%.0f is below the "
+                       "10s floor; using 10", REFRESH_INTERVAL_SECONDS)
+        REFRESH_INTERVAL_SECONDS = 10.0
+
     shutdown_event = threading.Event()
 
     # Hold off the first cycle so the platform health check can pass first.
@@ -771,6 +793,38 @@ async def startup_event():
 
     logger.info("[API] Starting Roger API...")
 
+    # Refuse to come up misconfigured when this instance is internet-facing.
+    #
+    # These checks used to live only in scripts/serve_public.py, which is a CLI
+    # and is NOT the container entrypoint -- the image runs start_backend.sh.
+    # So every check was bypassed exactly when it mattered most, which is the
+    # moment the API is containerised and put behind a public URL.
+    #
+    # No-op unless PUBLIC_HOSTING=1. Raising here means a misconfigured public
+    # deployment crash-loops with the reason in its logs, which is the right
+    # outcome -- it should not serve.
+    from src.config.public_guard import enforce_at_startup
+
+    enforce_at_startup()
+
+    # Which half of the system is this process?
+    #
+    # "worker" collects: it runs the agent loop and the storage poller. "api"
+    # only serves HTTP. Unset means "both", which is exactly today's behaviour
+    # and what a single local process wants.
+    #
+    # This exists so the same image can be deployed twice -- N api replicas and
+    # exactly ONE worker. The collection side is single-writer by design: two
+    # workers means two agent cycles spending the same Groq allowance (already
+    # at its 8,000 tokens/minute ceiling at one replica) and two schedules
+    # hitting one personal social account.
+    role = (os.getenv("ROLE") or "").strip().lower()
+    if role not in ("", "api", "worker"):
+        logger.warning("[API] ROLE=%r is not one of api|worker; treating as "
+                       "unset (this process will do both)", role)
+        role = ""
+    collects = role in ("", "worker")
+
     # Start graph execution in separate thread.
     #
     # DISABLE_AGENT_LOOP=1 serves the API without the scraping agents. Useful on
@@ -779,14 +833,24 @@ async def startup_event():
     if os.getenv("DISABLE_AGENT_LOOP", "").lower() in ("1", "true", "yes"):
         logger.warning("[API] Agent loop disabled (DISABLE_AGENT_LOOP set) — "
                        "serving cached/stored feeds only, no live collection")
+    elif not collects:
+        logger.info("[API] ROLE=api — no agent loop here; the worker collects")
     else:
         graph_thread = threading.Thread(target=run_graph_loop, daemon=True)
         graph_thread.start()
         logger.info("[API] Graph thread started")
 
-    # Start database polling loop
-    asyncio.create_task(database_polling_loop())
-    logger.info("[API] Database polling started")
+    # Start database polling loop.
+    #
+    # Gated on ROLE rather than DISABLE_AGENT_LOOP: they are different
+    # questions. An api replica with the agent loop off still must not poll and
+    # broadcast, or every replica broadcasts the same events to its own
+    # WebSocket clients and each keeps a private seen-set.
+    if collects:
+        asyncio.create_task(database_polling_loop())
+        logger.info("[API] Database polling started")
+    else:
+        logger.info("[API] ROLE=api — not polling storage; the worker does")
 
 
 @app.get("/")
@@ -798,10 +862,69 @@ def read_root():
     }
 
 
+@app.get("/healthz")
+async def healthz():
+    """
+    Liveness. Deliberately async, and deliberately does nothing.
+
+    THIS MUST NOT BECOME A SYNC DEF, and orchestrators must not probe
+    /api/status instead.
+
+    Most routes in this file are sync `def`, which FastAPI runs in AnyIO's
+    threadpool -- 40 threads by default. rag_chat blocks on Groq for seconds
+    and predict_anomaly blocks on joblib, so a modest burst of either
+    saturates the pool and every remaining sync route QUEUES BEHIND IT,
+    including a health check.
+
+    Point a Kubernetes livenessProbe at a queued endpoint and the failure is
+    self-amplifying: load -> probe times out -> kubelet kills a perfectly
+    healthy pod -> its traffic shifts to the survivors -> they saturate too.
+    Scaling up then causes the outage it was meant to prevent, and it presents
+    as "Kubernetes keeps restarting my pods under load".
+
+    Being async means this runs on the event loop and cannot queue behind
+    threadpool work, whatever the API is doing.
+    """
+    return {"ok": True}
+
+
+@app.get("/readyz")
+async def readyz(response: Response):
+    """
+    Readiness: should this replica receive traffic right now?
+
+    Distinct from liveness on purpose. A pod whose database is briefly
+    unreachable should be taken OUT OF THE LOAD BALANCER, not killed and
+    restarted -- restarting it does not fix the database and throws away a warm
+    process.
+
+    Returns 503 rather than raising so it stays cheap under failure.
+    """
+    checks: Dict[str, Any] = {}
+    ok = True
+
+    try:
+        from auth.db import ping as _db_ping
+
+        checks["database"] = bool(_db_ping())
+    except Exception as exc:  # noqa: BLE001
+        # Booleans only. This endpoint is unauthenticated by necessity -- a
+        # kubelet presents no credentials -- and a SQLAlchemy connection error
+        # embeds the DSN, which carries the database password. The reason goes
+        # to the log, where it is useful and not world-readable.
+        logger.warning("[readyz] database check failed: %s", exc)
+        checks["database"] = False
+    ok = ok and checks.get("database", False)
+
+    if not ok:
+        response.status_code = 503
+    return {"ready": ok, "checks": checks}
+
+
 @app.get("/api/status")
 def get_status():
     """
-    Liveness plus a configuration report.
+    Configuration report. NOT a probe -- see /healthz for why.
 
     Render's health check hits this, so it stays cheap and never raises. The
     `configuration` block exists because the deployed instance has no shell:

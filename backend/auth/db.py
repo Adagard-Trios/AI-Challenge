@@ -142,6 +142,30 @@ def get_db() -> Iterator[Session]:
         db.close()
 
 
+def ping() -> bool:
+    """
+    Can we reach the database right now?
+
+    For readiness probes, so a replica whose database is briefly unreachable is
+    taken out of the load balancer rather than killed -- restarting a pod does
+    not fix a database and discards a warm process.
+
+    Returns False rather than raising: a probe that raises turns a degraded
+    dependency into a 500, and the caller wants a boolean either way. Kept
+    deliberately cheap -- SELECT 1 on a pooled connection -- because it runs
+    every few seconds per replica forever.
+    """
+    from sqlalchemy import text
+
+    try:
+        with engine().connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return True
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[db] readiness ping failed: %s", exc)
+        return False
+
+
 def reset_engine() -> None:
     """Tests."""
     global _engine, _SessionFactory

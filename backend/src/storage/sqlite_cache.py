@@ -1,16 +1,46 @@
 """
 src/storage/sqlite_cache.py
-Fast hash-based cache for first-tier deduplication
+Fast hash-based cache for first-tier deduplication.
+
+TWO BACKENDS, ONE API
+---------------------
+The name is now half a lie: when DATABASE_URL is set this stores rows in that
+database instead of a local SQLite file, and every method below routes to
+whichever backend is in play. The class keeps its name and its signatures
+because StorageManager and six call sites depend on both, and renaming it would
+be a larger change than the one that matters.
+
+The file backend is correct for a single process and is what a laptop runs.
+It is wrong in two ways once deployed:
+
+  - Per-replica. Every API pod reads its own copy through
+    StorageManager.get_feeds_since(), so the same event is "new" to each one and
+    what a user sees depends on which pod answered.
+  - Ephemeral. Render's free tier has no persistent disk, so the file dies on
+    every deploy, restart and spin-down -- and the first cycle afterwards
+    re-emits events it had already suppressed.
 """
 
 import sqlite3
 import hashlib
 import logging
-from datetime import datetime, timedelta
+import os
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 from .config import config
 
 logger = logging.getLogger("sqlite_cache")
+
+
+def _shared_enabled() -> bool:
+    """
+    Whether to use the shared database rather than a local file.
+
+    Keyed on DATABASE_URL because that is what already decides where accounts,
+    stories and entities live; splitting dedup across a different store would
+    let the two disagree about what exists.
+    """
+    return bool((os.getenv("DATABASE_URL") or "").strip())
 
 
 class SQLiteCache:
@@ -21,8 +51,38 @@ class SQLiteCache:
 
     def __init__(self, db_path: Optional[str] = None):
         self.db_path = db_path or config.SQLITE_DB_PATH
-        self._init_db()
-        logger.info(f"[SQLiteCache] Initialized at {self.db_path}")
+        # An explicit db_path forces the file backend. Tests pass one, and a
+        # test that silently wrote to the shared database would be worse than
+        # useless.
+        self._shared = _shared_enabled() and db_path is None
+
+        if self._shared:
+            logger.info("[SQLiteCache] using the shared database "
+                        "(DATABASE_URL); dedup is visible to every replica")
+        else:
+            self._init_db()
+            logger.info(f"[SQLiteCache] Initialized at {self.db_path}")
+
+    # -- shared backend ------------------------------------------------------
+
+    def _session(self):
+        from auth.db import session_scope
+
+        return session_scope()
+
+    @staticmethod
+    def _row_to_dict(row) -> dict:
+        """
+        Same shape the file backend returns, including ISO strings for the
+        timestamps -- callers serialise these straight to JSON.
+        """
+        return {
+            "content_hash": row.content_hash,
+            "first_seen": row.first_seen.isoformat() if row.first_seen else None,
+            "last_seen": row.last_seen.isoformat() if row.last_seen else None,
+            "event_id": row.event_id,
+            "summary_preview": row.summary_preview,
+        }
 
     def _init_db(self):
         """Initialize database schema"""
@@ -63,8 +123,28 @@ class SQLiteCache:
 
         retention_hours = retention_hours or config.SQLITE_RETENTION_HOURS
         content_hash = self._get_hash(summary)
-        cutoff = datetime.utcnow() - timedelta(hours=retention_hours)
 
+        if self._shared:
+            from .seen_hashes_model import SeenHash
+
+            cutoff = datetime.now(timezone.utc) - timedelta(hours=retention_hours)
+            try:
+                with self._session() as session:
+                    row = (
+                        session.query(SeenHash)
+                        .filter(SeenHash.content_hash == content_hash,
+                                SeenHash.last_seen > cutoff)
+                        .one_or_none()
+                    )
+                    return (True, row.event_id) if row else (False, None)
+            except Exception as exc:  # noqa: BLE001
+                # Never let a dedup lookup take the cycle down. Reporting "not
+                # a duplicate" risks a repeat; raising loses the event.
+                logger.warning("[SQLiteCache] shared lookup failed (%s); "
+                               "treating as new", exc)
+                return False, None
+
+        cutoff = datetime.utcnow() - timedelta(hours=retention_hours)
         conn = sqlite3.connect(self.db_path)
         cursor = conn.execute(
             "SELECT event_id FROM seen_hashes WHERE content_hash = ? AND last_seen > ?",
@@ -85,9 +165,35 @@ class SQLiteCache:
             return
 
         content_hash = self._get_hash(summary)
-        now = datetime.utcnow().isoformat()
         preview = summary[:2000]  # Store full summary (was 200)
 
+        if self._shared:
+            from .seen_hashes_model import SeenHash, utcnow as _utcnow
+
+            try:
+                with self._session() as session:
+                    row = session.get(SeenHash, content_hash)
+                    if row is None:
+                        session.add(SeenHash(
+                            content_hash=content_hash,
+                            first_seen=_utcnow(),
+                            last_seen=_utcnow(),
+                            event_id=event_id,
+                            summary_preview=preview,
+                        ))
+                    else:
+                        # Touch only last_seen. first_seen is when this content
+                        # was FIRST observed and is what the retention window
+                        # and the story timeline are measured from.
+                        row.last_seen = _utcnow()
+                logger.debug("[SQLiteCache] Added: %s... (%s)",
+                             content_hash[:8], event_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[SQLiteCache] shared write failed (%s); this "
+                               "event may be re-emitted next cycle", exc)
+            return
+
+        now = datetime.utcnow().isoformat()
         conn = sqlite3.connect(self.db_path)
 
         # Try update first
@@ -110,8 +216,26 @@ class SQLiteCache:
     def cleanup_old_entries(self, retention_hours: Optional[int] = None):
         """Remove entries older than retention period"""
         retention_hours = retention_hours or config.SQLITE_RETENTION_HOURS
-        cutoff = datetime.utcnow() - timedelta(hours=retention_hours)
 
+        if self._shared:
+            from .seen_hashes_model import SeenHash
+
+            cutoff = datetime.now(timezone.utc) - timedelta(hours=retention_hours)
+            try:
+                with self._session() as session:
+                    deleted = (
+                        session.query(SeenHash)
+                        .filter(SeenHash.last_seen < cutoff)
+                        .delete(synchronize_session=False)
+                    )
+                if deleted:
+                    logger.info("[SQLiteCache] Cleaned up %d old entries", deleted)
+                return deleted
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[SQLiteCache] shared cleanup failed: %s", exc)
+                return 0
+
+        cutoff = datetime.utcnow() - timedelta(hours=retention_hours)
         conn = sqlite3.connect(self.db_path)
         cursor = conn.execute(
             "DELETE FROM seen_hashes WHERE last_seen < ?", (cutoff.isoformat(),)
@@ -130,6 +254,21 @@ class SQLiteCache:
         Paginated retrieval of all cached entries.
         Returns list of dicts with event metadata.
         """
+        if self._shared:
+            from .seen_hashes_model import SeenHash
+
+            try:
+                with self._session() as session:
+                    rows = (
+                        session.query(SeenHash)
+                        .order_by(SeenHash.last_seen.desc())
+                        .limit(limit).offset(offset).all()
+                    )
+                    return [self._row_to_dict(r) for r in rows]
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[SQLiteCache] shared read failed: %s", exc)
+                return []
+
         conn = sqlite3.connect(self.db_path)
         cursor = conn.execute(
             "SELECT content_hash, first_seen, last_seen, event_id, summary_preview FROM seen_hashes ORDER BY last_seen DESC LIMIT ? OFFSET ?",
@@ -160,6 +299,25 @@ class SQLiteCache:
         """
         if not query or len(query) < 2:
             return []
+
+        if self._shared:
+            from .seen_hashes_model import SeenHash
+
+            try:
+                with self._session() as session:
+                    rows = (
+                        session.query(SeenHash)
+                        # ilike, not like: SQLite's LIKE is case-insensitive by
+                        # default and Postgres's is not, so a plain port would
+                        # have quietly made search case-sensitive.
+                        .filter(SeenHash.summary_preview.ilike(f"%{query}%"))
+                        .order_by(SeenHash.last_seen.desc())
+                        .limit(limit).all()
+                    )
+                    return [self._row_to_dict(r) for r in rows]
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[SQLiteCache] shared search failed: %s", exc)
+                return []
 
         conn = sqlite3.connect(self.db_path)
         cursor = conn.execute(
@@ -192,6 +350,27 @@ class SQLiteCache:
         Returns:
             List of entry dicts
         """
+        if self._shared:
+            from .seen_hashes_model import SeenHash
+
+            try:
+                since = datetime.fromisoformat(str(timestamp))
+                if since.tzinfo is None:
+                    # The file backend compared naive ISO strings. A naive
+                    # value here would raise against a timezone-aware column,
+                    # so assume UTC -- which is what the caller was writing.
+                    since = since.replace(tzinfo=timezone.utc)
+                with self._session() as session:
+                    rows = (
+                        session.query(SeenHash)
+                        .filter(SeenHash.last_seen > since)
+                        .order_by(SeenHash.last_seen.desc()).all()
+                    )
+                    return [self._row_to_dict(r) for r in rows]
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[SQLiteCache] shared since-query failed: %s", exc)
+                return []
+
         conn = sqlite3.connect(self.db_path)
         cursor = conn.execute(
             "SELECT content_hash, first_seen, last_seen, event_id, summary_preview FROM seen_hashes WHERE last_seen > ? ORDER BY last_seen DESC",

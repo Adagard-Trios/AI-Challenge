@@ -102,6 +102,12 @@ def init_db() -> None:
     # production, with the feature looking implemented.
     from src.intelligence import models as _intelligence_models  # noqa: F401
 
+    # Same reason: the first-tier dedup table moves off local disk when
+    # DATABASE_URL is set, and without this import it is never created --
+    # every dedup lookup would then fail against a missing table and report
+    # every event as new, which is silent and looks like a very busy news day.
+    from src.storage import seen_hashes_model as _seen_hashes  # noqa: F401
+
     Base.metadata.create_all(bind=engine())
 
     # create_all creates missing TABLES and ignores existing ones entirely, so

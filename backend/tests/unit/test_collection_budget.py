@@ -60,20 +60,39 @@ def test_asking_about_a_budget_does_not_start_charging_one():
 
 
 def test_snapshot_tracks_real_consumption():
+    """
+    Charges through the real path rather than poking the in-process dict.
+
+    This test used to set base._budget(...).requests directly. That stopped
+    describing reality once the counters could live in Redis: with a shared
+    backend the snapshot reads the shared counter, so a test writing to the
+    local one asserted against a number the code no longer consults. Charging
+    the way the scrapers do exercises whichever backend is active, which is the
+    point -- the two must agree.
+    """
     from src.scrapers import base
 
     base.reset_budgets()
-    entry = base._budget("user:linkedin")
-    entry.requests = 34
-    entry.posts = 120
+
+    def charge(field, n):
+        # _charge returns None when there is no shared backend; fall back to
+        # the in-process counter exactly as pace()/count_posts() do.
+        if base._charge("user:linkedin", field, n) is None:
+            setattr(base._budget("user:linkedin"), field,
+                    getattr(base._budget("user:linkedin"), field) + n)
+
+    charge("requests", 34)
+    charge("posts", 120)
 
     snap = base.budget_snapshot("user:linkedin", "linkedin")
     assert snap["requests_used"] == 34
     assert snap["posts_used"] == 120
     assert snap["exhausted"] is False
 
-    entry.requests = 40
+    charge("requests", 6)   # 34 + 6 = 40, the linkedin cap
     assert base.budget_snapshot("user:linkedin", "linkedin")["exhausted"] is True
+
+    base.reset_budgets()
 
 
 def test_yesterdays_counter_does_not_leak_into_today():

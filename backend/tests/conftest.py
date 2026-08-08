@@ -43,6 +43,51 @@ def configure_test_environment():
 
 
 # =============================================================================
+# SHARED-STATE ISOLATION
+# =============================================================================
+
+
+@pytest.fixture(autouse=True)
+def isolate_shared_state():
+    """
+    Clear process-shared state between tests.
+
+    Once the pacing gate and the daily budgets moved to Redis they stopped
+    being per-process -- which is the point -- but that also means they stop
+    being per-TEST, and per-RUN. A pacing key carries a fifteen-minute TTL and
+    a budget key lives until UTC midnight, so:
+
+      - a test that consumes linkedin's slot leaves the next test seeing a
+        paced account it never touched, and
+      - a suite that passes against a clean Redis fails on the second run.
+
+    That is the flakiness that gets tests deleted instead of fixed, so it is
+    handled once here rather than with a clear_pacing() call sprinkled through
+    every test that happens to need one.
+
+    Scoped to this project's own namespaces (roger:pace:*, roger:budget:*) and
+    a no-op when REDIS_URL is unset, so it never touches anything it did not
+    create.
+    """
+    def _clear():
+        try:
+            from src.runtime.redis_client import configured
+            if not configured():
+                return
+            from src.scrapers import base
+            base.reset_budgets()
+            from src.social.credential_bridge import SessionStoreCredentialStore
+            SessionStoreCredentialStore(store=object()).clear_pacing()
+        except Exception:
+            # Never let isolation housekeeping fail a test run.
+            pass
+
+    _clear()
+    yield
+    _clear()
+
+
+# =============================================================================
 # MOCK LLM FIXTURES
 # =============================================================================
 

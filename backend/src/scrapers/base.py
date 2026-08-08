@@ -149,8 +149,25 @@ def _read_shared(account_key: str, field: str) -> Optional[int]:
 
 
 def reset_budgets() -> None:
-    """Tests."""
+    """
+    Tests.
+
+    Clears the shared counters too when Redis is in play. Without that, budget
+    state survives between tests -- and worse, between whole test RUNS, since
+    the keys live until UTC midnight. A suite that passes on a clean Redis and
+    fails on the second run is the kind of flakiness that gets tests deleted.
+    """
     _budgets.clear()
+
+    client = _shared_budget_client()
+    if client is None:
+        return
+    try:
+        keys = list(client.scan_iter("roger:budget:*", count=500))
+        if keys:
+            client.delete(*keys)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[budget] could not clear shared counters: %s", exc)
 
 
 def budget_snapshot(account_key: str, platform: str) -> Dict[str, object]:

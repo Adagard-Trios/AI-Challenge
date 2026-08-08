@@ -102,6 +102,35 @@ class SessionStoreCredentialStore:
     def _pace_key(self, platform: str) -> str:
         return f"roger:pace:{platform}"
 
+    def clear_pacing(self, platform: Optional[str] = None) -> None:
+        """
+        Forget the cooling-off window. Tests only.
+
+        Needed because a shared gate outlives the process: a key with a
+        fifteen-minute TTL survives the test that created it and fails the
+        next one, and survives the whole RUN to fail the next one too. A suite
+        that passes on a clean Redis and fails on the second attempt is the
+        kind of flakiness that gets tests deleted rather than fixed.
+        """
+        with self._gate:
+            if platform:
+                self._last_served.pop(platform, None)
+            else:
+                self._last_served.clear()
+
+        client = self._shared()
+        if client is None:
+            return
+        try:
+            if platform:
+                client.delete(self._pace_key(platform))
+            else:
+                keys = list(client.scan_iter("roger:pace:*", count=500))
+                if keys:
+                    client.delete(*keys)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[credentials] could not clear pacing keys: %s", exc)
+
     def _shared(self):
         """The Redis client, or None when shared pacing is not in play."""
         from src.runtime.redis_client import configured, get_client

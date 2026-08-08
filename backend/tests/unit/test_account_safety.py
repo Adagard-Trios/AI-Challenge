@@ -299,10 +299,20 @@ def test_pacing_is_not_charged_to_an_account_that_does_not_exist():
 
 
 def test_asking_whether_an_account_is_paced_does_not_consume_it():
-    """is_paced() is a read; _too_soon() is the one that charges."""
+    """
+    is_paced() is a read; _too_soon() is the one that charges.
+
+    clear_pacing() first because the gate can now be SHARED: a Redis key with
+    a fifteen-minute TTL outlives the test that set it, so an earlier test in
+    the same run -- or the previous run entirely -- would leave linkedin paced
+    and this would fail for a reason that has nothing to do with what it
+    asserts.
+    """
     from src.social.credential_bridge import SessionStoreCredentialStore
 
     store = SessionStoreCredentialStore(store=object())
+    store.clear_pacing("linkedin")
+
     for _ in range(5):
         assert store.is_paced("linkedin") is False
     assert store.seconds_until_ready("linkedin") == 0

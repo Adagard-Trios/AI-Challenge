@@ -583,6 +583,41 @@ def run_graph_loop():
                 logger.info(f"[GRAPH] Event nodes: {list(event.keys())}")
 
                 for node_name, node_output in event.items():
+                    # The risk indices, which used to be computed and thrown
+                    # away.
+                    #
+                    # DataRefresherAgent builds a full snapshot every cycle --
+                    # logistics_friction, compliance_volatility,
+                    # market_instability, opportunity_index and the driver
+                    # events behind each -- and returns it as
+                    # risk_dashboard_snapshot. Nothing here ever read it, so
+                    # the only two mentions of that key in this file were the
+                    # zeroed literal it is initialised with and the line
+                    # /api/dashboard serves it from.
+                    #
+                    # The dashboard therefore served zeros for the entire
+                    # lifetime of the process, on every deployment, while a
+                    # perfectly good snapshot was discarded sixty seconds
+                    # apart. Merged rather than replaced so a node that
+                    # reports only part of the snapshot cannot blank the rest.
+                    snapshot = None
+                    if hasattr(node_output, "risk_dashboard_snapshot"):
+                        snapshot = node_output.risk_dashboard_snapshot
+                    elif isinstance(node_output, dict):
+                        snapshot = node_output.get("risk_dashboard_snapshot")
+                    if snapshot:
+                        current_state["risk_dashboard_snapshot"] = {
+                            **current_state.get("risk_dashboard_snapshot", {}),
+                            **snapshot,
+                        }
+                        logger.info(
+                            "[GRAPH] %s updated the risk snapshot "
+                            "(%d events, %d high priority)",
+                            node_name,
+                            snapshot.get("total_events", 0),
+                            snapshot.get("high_priority_count", 0),
+                        )
+
                     # Extract feed data
                     if hasattr(node_output, 'final_ranked_feed'):
                         feeds = node_output.final_ranked_feed

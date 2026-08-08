@@ -33,7 +33,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # HTTP, so none of that is needed — and installing it is what OOM-kills a
 # 512 MB instance. See the header of requirements-service.txt.
 COPY backend/requirements-service.txt .
-RUN pip install --no-cache-dir -r requirements-service.txt
+# --retries and --timeout are not padding. This set pulls ~40 wheels including
+# several large ones (chromadb, onnxruntime, scikit-learn), and pip's default
+# 15s socket timeout with 5 retries lost a whole ~18-minute build to a single
+# slow response from files.pythonhosted.org:
+#
+#   pip._vendor.urllib3.exceptions.ReadTimeoutError: HTTPSConnectionPool(
+#       host='files.pythonhosted.org', port=443): Read timed out.
+#
+# Losing everything already downloaded because one file was slow is a bad
+# trade at this size.
+RUN pip install --no-cache-dir --retries 10 --timeout 120 \
+    -r requirements-service.txt
 
 # Bake the ONNX sentence embedder into the image.
 #
@@ -45,7 +56,24 @@ RUN pip install --no-cache-dir -r requirements-service.txt
 # Anomaly detection depends on this embedder (src/embeddings.py), so fetching
 # it at build time is the difference between ML inference that works on the
 # first request and ML inference that works eventually.
-RUN python -c "from chromadb.utils import embedding_functions as ef; ef.ONNXMiniLM_L6_V2()(['warm the cache'])"
+# Retried, and non-fatal only after retrying.
+#
+# This downloads ~80 MB and a single dropped stream failed the whole build:
+#
+#   httpx ... map_httpcore_exceptions() -> exit code 1
+#
+# The cache is an OPTIMISATION, not a correctness requirement -- without it
+# chromadb downloads the model on first use, which costs one slow request
+# rather than a broken image. Failing an otherwise-good build on a transient
+# is the worse trade, so this tries three times and then continues with a
+# loud warning, which is honest about what the image does and does not have.
+RUN for i in 1 2 3; do \
+      python -c "from chromadb.utils import embedding_functions as ef; ef.ONNXMiniLM_L6_V2()(['warm the cache'])" \
+        && echo "[build] ONNX embedder cached" && break; \
+      echo "[build] embedder download attempt $i failed; retrying"; sleep 5; \
+    done; \
+    python -c "import os,sys; sys.exit(0 if os.path.isdir(os.path.expanduser('~/.cache/chroma')) else 1)" \
+      || echo "[build] WARNING: ONNX embedder NOT baked in; it will download on first use"
 
 # NOTE: `playwright install chromium` was here. Removed with the browser itself;
 # see the apt block above. If a future server-side scraper needs a browser, put

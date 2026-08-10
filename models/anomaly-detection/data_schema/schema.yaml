@@ -1,0 +1,133 @@
+# Data Schema for Anomaly Detection Pipeline
+# Based on the feeds dataset created by the combined graph
+
+feed_columns:
+  # Required columns
+  post_id:
+    dtype: str
+    required: true
+    description: "Unique identifier for the post"
+  
+  timestamp:
+    dtype: str  # ISO format or Unix timestamp
+    required: true
+    description: "Post timestamp"
+  
+  platform:
+    dtype: str
+    required: true
+    allowed_values: ["reddit", "facebook", "twitter", "linkedin", "instagram", "web"]
+    description: "Source platform"
+  
+  category:
+    dtype: str
+    required: true
+    description: "Post category (competitor_mention, profile_monitoring, etc.)"
+  
+  text:
+    dtype: str
+    required: true
+    min_length: 10
+    max_length: 5000
+    description: "Main text content"
+  
+  content_hash:
+    dtype: str
+    required: true
+    description: "MD5/SHA256 hash for deduplication"
+  
+  # Optional columns
+  entity:
+    dtype: str
+    required: false
+    description: "Referenced entity (Dialog, SLT, etc.)"
+  
+  poster:
+    dtype: str
+    required: false
+    description: "Author/poster username"
+  
+  post_url:
+    dtype: str
+    required: false
+    description: "URL to original post"
+  
+  title:
+    dtype: str
+    required: false
+    description: "Post title if available"
+  
+  engagement_score:
+    dtype: float
+    required: false
+    min_value: 0
+    description: "Overall engagement score"
+  
+  engagement_likes:
+    dtype: int
+    required: false
+    min_value: 0
+    description: "Number of likes"
+  
+  engagement_shares:
+    dtype: int
+    required: false
+    min_value: 0
+    description: "Number of shares"
+  
+  engagement_comments:
+    dtype: int
+    required: false
+    min_value: 0
+    description: "Number of comments"
+  
+  source_tool:
+    dtype: str
+    required: false
+    description: "Tool used for scraping (scrape_reddit, scrape_facebook_profile, etc.)"
+
+# SQLite schema for feed cache
+sqlite_schema:
+  table: seen_hashes
+  columns:
+    - content_hash: TEXT PRIMARY KEY
+    - first_seen: TIMESTAMP
+    - last_seen: TIMESTAMP
+    - event_id: TEXT
+    - summary_preview: TEXT
+
+# Feature engineering configuration
+features:
+  temporal:
+    - hour_of_day
+    - day_of_week
+    - is_weekend
+    - is_business_hours
+  
+  engagement:
+    - normalized_score
+    - log_engagement
+    - engagement_ratio
+  
+  text:
+    - language  # en, si, ta
+    - vector_embedding  # 768-dim for BERT models
+    - text_length
+    - word_count
+
+# Language detection configuration
+languages:
+  supported:
+    - code: en
+      name: English
+      model: distilbert-base-uncased
+    - code: si  
+      name: Sinhala
+      model: keshan/SinhalaBERTo
+    - code: ta
+      name: Tamil
+      model: l3cube-pune/tamil-bert
+  
+  detection:
+    method: fasttext  # or lingua-py
+    min_confidence: 0.8

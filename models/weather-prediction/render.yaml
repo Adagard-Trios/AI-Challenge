@@ -1,0 +1,36 @@
+# Render Blueprint, Weather Prediction inference service
+#
+# Apply from the Render dashboard: New -> Blueprint -> this repo, then point the
+# blueprint at models/weather-prediction/render.yaml.
+#
+# rootDir scopes the Docker build context to this folder, which is what keeps the
+# `src` package from colliding with the other three models.
+
+services:
+  - type: web
+    name: slac2026-weather
+    runtime: docker
+    rootDir: models/weather-prediction
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+
+    region: singapore
+
+    # ⚠ FREE TIER = 512 MB RAM. TensorFlow import alone is ~400-600 MB RSS, so
+    # this sits right at (or over) the ceiling before a single LSTM is loaded.
+    # Expect OOM restarts once /predict touches the models; /health stays cheap
+    # because it never imports TensorFlow. Move to 'standard' (2 GB) if it flaps.
+    plan: free
+
+    healthCheckPath: /health
+
+    # NOTE: no 'disk:', not available on the free plan. /app/output is ephemeral,
+    # so predictions are regenerated after every restart and spin-down.
+
+    envVars:
+      # Lock to the backend + Vercel origins once known, e.g.
+      # https://roger-backend.onrender.com,https://your-app.vercel.app
+      - key: CORS_ALLOW_ORIGINS
+        sync: false
+      - key: PYTHONUNBUFFERED
+        value: "1"

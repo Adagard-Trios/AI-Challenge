@@ -1,0 +1,16 @@
+# Serving-only dependencies for service.py.
+# See weather-prediction/requirements-service.txt for why this is separate from
+# requirements.txt (which is the training set and omits TensorFlow).
+
+fastapi
+uvicorn[standard]
+
+tensorflow-cpu==2.20.0
+tf-keras            # legacy .h5 loading under Keras 3
+
+joblib
+numpy
+pandas
+scikit-learn
+pyyaml
+python-dotenv

@@ -1,0 +1,34 @@
+# Render Blueprint, Stock Price Prediction inference service (JSON API)
+#
+# Apply: New -> Blueprint -> this repo, pointing at
+# models/stock-price-prediction/render.yaml.
+#
+# This deploys service.py (JSON API). The Streamlit dashboard in app.py is a
+# separate concern, see the Dockerfile header to deploy that instead.
+#
+# NOTE: the predictor looks for Artifacts/<timestamp>/model_trainer/trained_model/
+# model.pkl while the committed artifact is artifacts/models/stock_model.pkl, so
+# predictions currently come from its simulated fallback. /model/status reports
+# "predictor_artifacts_found": false when that is the case.
+
+services:
+  - type: web
+    name: slac2026-stock
+    runtime: docker
+    rootDir: models/stock-price-prediction
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+
+    region: singapore
+    # No TensorFlow here (the model is unpickled via scikit-learn), so this is the
+    # one service that genuinely fits 512 MB. Free's other constraint still
+    # applies: it spins down after ~15 min idle and cold-starts on the next call.
+    plan: free              # 512 MB
+
+    healthCheckPath: /health
+
+    envVars:
+      - key: CORS_ALLOW_ORIGINS
+        sync: false
+      - key: PYTHONUNBUFFERED
+        value: "1"

@@ -1,0 +1,24 @@
+*.h5 filter=lfs diff=lfs merge=lfs -text
+*.pkl filter=lfs diff=lfs merge=lfs -text
+*.keras filter=lfs diff=lfs merge=lfs -text
+*.joblib filter=lfs diff=lfs merge=lfs -text
+
+# Anything a Linux container executes must be LF in the WORKING TREE, not just
+# in the repository.
+#
+# git stores these with LF already, so Render -- which builds from the git
+# checkout -- has always worked. But core.autocrlf=true on Windows rewrites
+# them to CRLF on checkout, and `docker build` copies the WORKING TREE. So a
+# local container build baked a CRLF entrypoint and died with
+#
+#     /bin/bash^M: bad interpreter: No such file or directory
+#
+# or, worse, parsed far enough to pass "$PORT\r" to uvicorn. The deploy path
+# and the local path disagreed, and only the local one was broken -- which is
+# why it went unnoticed.
+#
+# After adding this, existing checkouts need `git add --renormalize .` once.
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.dockerfile text eol=lf
+.dockerignore text eol=lf

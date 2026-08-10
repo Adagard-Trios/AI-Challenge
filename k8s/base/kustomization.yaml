@@ -1,0 +1,63 @@
+# k8s/base, the shape of the deployment, without any environment's specifics.
+#
+# THE ONE THING TO UNDERSTAND BEFORE EDITING THIS
+# -----------------------------------------------
+# There are two Deployments from ONE image, and the split is not cosmetic.
+#
+#   api     N replicas   serves HTTP. Collects nothing.
+#   worker  1 replica    runs the agent loop and the storage poller.
+#
+# The collection side is single-writer BY DESIGN, not by accident:
+#
+#   - Groq's free tier allows 8,000 tokens per MINUTE, and this project already
+#     hits it at one replica (HTTP 413). A second worker does not double
+#     throughput; it halves what each gets and fails both.
+#   - Social collection touches ONE personal account with a 15-minute pacing
+#     gate and a daily cap. Two workers means two schedules against it. The
+#     gate is shared through Redis so this is now defended in depth, but the
+#     topology should not be relying on that.
+#
+# So worker replicas is 1, and worker strategy is Recreate. The default
+# RollingUpdate briefly runs TWO workers during a rollout, which is exactly the
+# situation above for the length of a deploy.
+#
+# Scaling means scaling `api`. That is the half that genuinely parallelises:
+# ~47 of main.py's routes are sync def, so each pod has a hard ceiling of 40
+# concurrent blocking requests in AnyIO's threadpool, after which everything
+# queues.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: roger
+
+resources:
+  - namespace.yaml
+  - configmap-app.yaml
+  - redis/statefulset.yaml
+  - redis/service.yaml
+  - chroma/statefulset.yaml
+  - chroma/service.yaml
+  - api/deployment.yaml
+  - api/service.yaml
+  - api/hpa.yaml
+  - api/pdb.yaml
+  - worker/deployment.yaml
+  - frontend/deployment.yaml
+  - frontend/service.yaml
+  - ingress.yaml
+
+labels:
+  - includeSelectors: true
+    pairs:
+      app.kubernetes.io/part-of: roger
+
+images:
+  # Explicit tags, never :latest. With imagePullPolicy IfNotPresent and a
+  # locally imported image, :latest would make Kubernetes try to pull from a
+  # registry that does not exist -- and the failure is ImagePullBackOff, which
+  # reads as a network problem rather than a tagging one.
+  - name: roger-backend
+    newTag: dev
+  - name: roger-frontend
+    newTag: dev

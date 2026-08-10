@@ -1,0 +1,31 @@
+# Scales the half that actually parallelises.
+#
+# ~47 of main.py's routes are sync def, so each pod has a hard ceiling of 40
+# concurrent blocking requests in AnyIO's threadpool -- rag_chat blocks on Groq
+# for seconds, predict_anomaly on joblib. Beyond that everything queues. More
+# pods raise the ceiling and isolate the blast radius.
+#
+# It does NOT increase Groq throughput. Api pods make no agent calls.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleDown:
+      # Long window on purpose: the load here is bursty (a judge opening the
+      # dashboard), and flapping replicas costs a cold start each time.
+      stabilizationWindowSeconds: 300

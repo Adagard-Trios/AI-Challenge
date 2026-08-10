@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: chroma
+spec:
+  serviceName: chroma
+  # One node. Chroma server replaces N divergent per-pod directories with one
+  # correct shared corpus -- which is the point -- but it is a SHARED service,
+  # not a scaled one, and it is a single point of failure for the read path.
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: chroma
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: chroma
+    spec:
+      # OFF, and this is not optional -- chroma CrashLoopBackOffs without it.
+      #
+      # Kubernetes injects legacy Docker-link environment variables for every
+      # Service in the namespace: a Service named "chroma" produces
+      #
+      #     CHROMA_PORT=tcp://10.96.221.70:8000
+      #
+      # and ChromaDB reads CHROMA_PORT as ITS OWN config, expecting a port
+      # number. It panics on startup:
+      #
+      #     Error loading config: invalid type: found string
+      #     "tcp://10.96.221.70:8000", expected u16 for key "PORT"
+      #
+      # The collision exists purely because the Service and the app happen to
+      # share a name prefix. Turning the links off is the general fix -- naming
+      # the Service something else would only move the trap.
+      #
+      # The api and worker pods survive the same injection only because the
+      # ConfigMap sets CHROMA_PORT=8000 explicitly, and an explicit env var
+      # wins over a service link. That is luck rather than design, so it is
+      # written down here.
+      enableServiceLinks: false
+      containers:
+        - name: chroma
+          image: chromadb/chroma:latest
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: IS_PERSISTENT
+              value: "TRUE"
+            - name: ANONYMIZED_TELEMETRY
+              value: "False"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              # v2. The v1 heartbeat returns 410 Gone on current images, so a
+              # probe against it marks a healthy pod unready forever.
+              path: /api/v2/heartbeat
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              memory: "1Gi"
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 5Gi

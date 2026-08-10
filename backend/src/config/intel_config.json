@@ -1,0 +1,96 @@
+{
+  "user_profiles": {
+    "twitter": [
+      "nivakaran",
+      "iit",
+      "Sri Lanka AI Challenge 2026"
+    ],
+    "facebook": [
+      "Nivakaran",
+      "iit",
+      "sliit"
+    ],
+    "linkedin": [
+      "nivakaran",
+      "ieee",
+      "sliit",
+      "albert"
+    ]
+  },
+  "user_keywords": [
+    "Colombo",
+    "nivakaran",
+    "Sri Lanka AI Challenge 2026",
+    "Colombo port",
+    "SLIIT"
+  ],
+  "user_products": [
+    "iphone",
+    "anchor",
+    "iphone xr",
+    "iphone 13 pro"
+  ],
+  "operational_keywords": {
+    "infrastructure": [
+      "Colombo port",
+      "Hambantota port",
+      "port strike",
+      "power outage",
+      "water shortage",
+      "fuel shortage",
+      "airport delay",
+      "customs clearance",
+      "road closure",
+      "railway disruption"
+    ],
+    "government": [
+      "cabinet decision",
+      "new policy",
+      "regulation change",
+      "tax amendment",
+      "import restriction",
+      "export ban",
+      "license requirement",
+      "central bank",
+      "budget announcement"
+    ],
+    "opportunity": [
+      "investment",
+      "expansion",
+      "new factory",
+      "job creation",
+      "export growth",
+      "tourism boost",
+      "infrastructure project",
+      "development grant",
+      "FDI",
+      "trade agreement"
+    ]
+  },
+  "alert_thresholds": {
+    "trending_momentum_min": 2.0,
+    "spike_multiplier": 3.0,
+    "high_risk_score": 0.7,
+    "high_opportunity_score": 0.6
+  },
+  "default_competitors": {
+    "telecom": {
+      "twitter": [
+        "DialogSriLanka",
+        "Mobaborang",
+        "HutchSL"
+      ],
+      "facebook": [
+        "Dialog",
+        "SLT-Mobitel",
+        "Hutch"
+      ]
+    }
+  },
+  "notes": {
+    "removed_profiles": [
+      "SLTMobitel - Twitter profile not found/restricted"
+    ],
+    "last_verified": "2025-12-08"
+  }
+}

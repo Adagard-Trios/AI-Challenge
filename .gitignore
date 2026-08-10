@@ -1,0 +1,120 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Node dependencies.
+#
+# frontend/.gitignore covers frontend/node_modules, but the repo ROOT also has a
+# stray package.json (a leftover `npm i @svg-maps/sri-lanka`; the package is a
+# real dependency of frontend/ already). That made root node_modules/ untracked
+# rather than ignored, so `git add -A` would have committed it.
+node_modules/
+
+# Environment files
+.env
+
+# LangGraph
+.langgraph_api
+
+# =============================================================================
+# BROWSER DATA (Playwright/Chromium session files - very large)
+# =============================================================================
+.browser_data/
+**/.*_browser_data/
+**/.browser_data/
+**/ShaderCache/
+**/GraphiteDawnCache/
+**/GrShaderCache/
+**/.sessions/
+**/Session Storage/
+**/Local Storage/
+**/Service Worker/
+
+# =============================================================================
+# ML MODEL ARTIFACTS (Large files - don't push to Git)
+# =============================================================================
+
+# Trained model weights (large binary files) - EXCEPT LFS tracked ones
+# Note: We use git lfs for .h5 and .joblib model files we want to push
+# *.h5
+# *.hdf5
+# *.joblib
+# *.pkl
+*.pickle
+*.pt
+*.pth
+*.onnx
+*.pb
+
+# Model output directories (training intermediates - regenerable)
+#
+# `**/Artifacts/` used to be here and has been removed. It was over-broad in a
+# way that was actively harmful: no directory in this repo is actually spelled
+# with a capital A, but git on Windows matches ignore patterns
+# case-insensitively, so it swallowed every `models/*/artifacts/` -- including
+# the trained models we deliberately ship.
+#
+# The existing .h5/.pkl/.joblib files under artifacts/models/ survive only
+# because they were force-added before the rule existed. A NEW artifact was
+# silently ignored, never committed, and therefore absent from the deployed
+# image -- which would have meant anomaly detection quietly falling back to
+# heuristic scoring in production while working perfectly on the machine that
+# trained it. Exactly the class of silent failure this codebase keeps hitting.
+#
+# The stage rules below are what was actually wanted: they name the regenerable
+# intermediates and leave model_trainer/ and models/ tracked.
+**/artifacts/data_ingestion/
+**/artifacts/data_validation/
+**/artifacts/data_transformation/
+**/artifacts/model_evaluation/
+models/*/output/
+models/*/models_cache/
+models/*/checkpoints/
+
+# Data files
+*.parquet
+*.npy
+*.csv
+
+# Airflow local state
+models/*/.astro/
+
+# MLflow artifacts (tracked separately)
+mlruns/
+mlartifacts/
+
+# =============================================================================
+# DATA FILES (Can be large)
+# =============================================================================
+data/
+datasets/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# ChromaDB persistence (can be large)
+chroma_db/
+
+# =============================================================================
+# KEEP THESE (source code, configs)
+# =============================================================================
+# The models/ folders themselves ARE tracked for:
+# - main.py, src/, dags/ (pipeline code)
+# - requirements.txt, setup.py (dependencies)
+# - data_schema/ (validation configs)
+# - README.md (documentation)
+
+# Runtime logs from local runs (models/*/logs/ are historical and intentionally kept)
+backend/logs/
+
+# Runtime logs from start-backend.sh
+logs/

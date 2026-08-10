@@ -1,0 +1,10 @@
+# Roger is a situational-awareness console behind a login. There is nothing
+# here worth indexing, and the sign-in page turning up in search results is
+# worse than neutral. Mirrors the `robots` metadata in app/layout.tsx.
+#
+# This file also keeps public/ non-empty on purpose: frontend/Dockerfile does
+# `COPY --from=build /app/public ./public`, which fails outright if the
+# directory does not exist. The five create-next-app SVGs that used to live
+# here (file/globe/next/vercel/window) were referenced by nothing.
+User-agent: *
+Disallow: /

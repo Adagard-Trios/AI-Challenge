@@ -1,0 +1,22 @@
+[project]
+name = "stock-price-prediction"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "certifi>=2025.11.12",
+    "dagshub>=0.6.3",
+    "fastapi>=0.124.0",
+    "mlflow>=3.7.0",
+    "numpy>=2.3.5",
+    "pandas>=2.3.3",
+    "pyaml>=25.7.0",
+    "pymongo[srv]>=4.15.5",
+    "python-dotenv>=1.2.1",
+    "python-multipart>=0.0.20",
+    "scikit-learn>=1.7.2",
+    "tensorflow>=2.20.0",
+    "uvicorn>=0.38.0",
+    "yfinance>=0.2.66",
+]

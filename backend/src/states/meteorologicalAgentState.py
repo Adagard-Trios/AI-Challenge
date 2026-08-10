@@ -1,0 +1,75 @@
+"""
+src/states/meteorologicalAgentState.py
+Meteorological Agent State - handles weather alerts, DMC warnings, forecasts
+FIXED: Added custom reducer for domain_insights to prevent InvalidUpdateError
+"""
+
+import operator
+from typing import Optional, List, Dict, Any, Union
+from typing_extensions import TypedDict, Annotated
+
+
+# ============================================================================
+# CUSTOM REDUCER (Fixes InvalidUpdateError for parallel node updates)
+# ============================================================================
+def reduce_domain_insights(
+    existing: List[Dict], new: Union[List[Dict], str]
+) -> List[Dict]:
+    """Custom reducer for domain_insights to handle concurrent updates"""
+    if isinstance(new, str) and new == "RESET":
+        return []
+    current = existing if isinstance(existing, list) else []
+    if isinstance(new, list):
+        return current + new
+    return current
+
+
+class MeteorologicalAgentState(TypedDict, total=False):
+    """
+    State for Meteorological Agent.
+    Monitors DMC alerts, weather forecasts, climate data, disaster warnings.
+    """
+
+    # ===== ORCHESTRATOR/WORKER BOOKKEEPING =====
+    generated_tasks: List[Dict[str, Any]]
+    current_task: Optional[Dict[str, Any]]
+    tasks_for_workers: List[Dict[str, Any]]
+    worker: Optional[List[Dict[str, Any]]]
+
+    # ===== TOOL RESULTS =====
+    worker_results: Annotated[List[Dict[str, Any]], operator.add]
+    latest_worker_results: List[Dict[str, Any]]
+
+    # ===== RIVER / FLOOD =====
+    # Written by collect_official_sources (node :176), read by the bulletin
+    # builder (node :532). It was NOT declared here, and LangGraph discards any
+    # returned key the schema does not declare -- so all 15 reads got {} and
+    # every flood insight, plus the FLOOD MONITORING ALERT block, was
+    # unreachable while the scrape still ran and still cost a round trip.
+    river_data: Dict[str, Any]
+
+    # ===== CHANGE DETECTION =====
+    last_alerts_hash: Optional[int]
+
+    # ===== SOCIAL MEDIA MONITORING =====
+    social_media_results: Annotated[List[Dict[str, Any]], operator.add]
+
+    # ===== STRUCTURED FEED OUTPUT =====
+    district_feeds: Dict[str, List[Dict[str, Any]]]  # {district: [weather posts]}
+    national_feed: List[Dict[str, Any]]  # Overall Sri Lanka weather
+    alert_feed: List[Dict[str, Any]]  # Critical weather alerts
+
+    # ===== LLM PROCESSING =====
+    llm_summary: Optional[str]
+    structured_output: Dict[str, Any]  # Final formatted output
+
+    # ===== FEED OUTPUT =====
+    final_feed: str
+    feed_history: Annotated[List[str], operator.add]
+
+    # ===== INTEGRATION WITH PARENT GRAPH =====
+    domain_insights: Annotated[List[Dict[str, Any]], reduce_domain_insights]
+
+    # ===== FEED AGGREGATOR =====
+    aggregator_stats: Dict[str, Any]
+    dataset_path: str

@@ -1,0 +1,262 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* =========================================================
+   DESIGN SYSTEM
+
+   Two themes, light first.
+
+   This used to be dark-only: `:root` held the dark palette, there was no
+   `.dark` block, and `darkMode: ["class"]` in the Tailwind config had nothing
+   to switch to. That is the wrong default for who actually uses this. A
+   district officer checks a flood warning on a phone, outdoors, in Sri Lankan
+   daylight -- a 7%-lightness background is close to unreadable there. Dark
+   stays, because the same dashboard gets watched for hours in an operations
+   room; it is now a choice rather than the only option, and the default
+   follows the device.
+
+   SEVERITY
+
+   The --severity-* ramp is the warning ladder that Sri Lanka's DMC, the WMO
+   and the Common Alerting Protocol all use: red / amber / yellow / blue.
+   See app/lib/severity.ts for why event severity deliberately has no green
+   step. Green belongs to all-clear states only, so that green on this
+   dashboard always means one thing.
+   ========================================================= */
+
+@layer base {
+
+  /* ---------- Light (default) ---------- */
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 220 15% 12%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 220 15% 12%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 15% 12%;
+
+    --primary: 142 55% 30%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 215 20% 92%;
+    --secondary-foreground: 220 15% 20%;
+
+    --muted: 220 14% 96%;
+    /* 4.7:1 on white, passes AA for body text, unlike the usual pale grey. */
+    --muted-foreground: 220 10% 42%;
+
+    --accent: 38 92% 42%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 44%;
+    --destructive-foreground: 0 0% 100%;
+
+    --info: 210 90% 42%;
+    --info-foreground: 0 0% 100%;
+
+    --success: 142 60% 30%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 25 90% 40%;
+    --warning-foreground: 0 0% 100%;
+
+    --border: 220 13% 88%;
+    --input: 220 13% 88%;
+    --ring: 142 55% 30%;
+
+    --radius: 0.25rem;
+
+    /* The warning ladder. Darkened for contrast against a white page. */
+    --severity-critical: 0 72% 44%;
+    --severity-critical-foreground: 0 0% 100%;
+    --severity-high: 25 90% 40%;
+    --severity-high-foreground: 0 0% 100%;
+    /* 28%, not 35%: yellow is the hardest step to carry white text. At 35 the
+       MEDIUM badge measured 3.44:1, under AA. */
+    --severity-medium: 45 95% 28%;
+    --severity-medium-foreground: 0 0% 100%;
+    --severity-low: 210 85% 40%;
+    --severity-low-foreground: 0 0% 100%;
+
+    --sidebar-background: 220 14% 98%;
+    --sidebar-foreground: 220 15% 20%;
+    --sidebar-primary: 142 55% 30%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 14% 94%;
+    --sidebar-accent-foreground: 220 15% 12%;
+    --sidebar-border: 220 13% 88%;
+    --sidebar-ring: 142 55% 30%;
+  }
+
+  /* ---------- Dark ---------- */
+  .dark {
+    --background: 0 0% 7%;
+    --foreground: 0 0% 95%;
+
+    --card: 0 0% 10%;
+    --card-foreground: 0 0% 95%;
+
+    --popover: 0 0% 8%;
+    --popover-foreground: 0 0% 95%;
+
+    --primary: 142 45% 45%;
+    --primary-foreground: 0 0% 5%;
+
+    --secondary: 210 20% 25%;
+    --secondary-foreground: 0 0% 95%;
+
+    --muted: 0 0% 15%;
+    --muted-foreground: 0 0% 65%;
+
+    --accent: 38 92% 50%;
+    --accent-foreground: 0 0% 5%;
+
+    /* Lifted from 51% to 62%: as TEXT this measured 3.6-3.9:1, under AA. 62
+       rather than 58 because the worst case is red text on --card (10%), which
+       is lighter than the page and costs ~0.5 of the ratio. Foregrounds go
+       dark, because at this lightness these are only ever solid chips under
+       dark labels. */
+    --destructive: 0 78% 62%;
+    --destructive-foreground: 0 0% 10%;
+
+    /* White on this blue was 3.3:1. Dark on it is 5.4:1. */
+    --info: 210 100% 56%;
+    --info-foreground: 0 0% 10%;
+
+    --success: 142 76% 45%;
+    --success-foreground: 0 0% 10%;
+
+    --warning: 25 95% 53%;
+    --warning-foreground: 0 0% 5%;
+
+    --border: 0 0% 20%;
+    --input: 0 0% 18%;
+    --ring: 142 45% 45%;
+
+    /* Same ladder, lightened to hold contrast on a near-black page.
+       Critical matches --destructive at 62%: at 58% the solid CRITICAL badge
+       measured 4.31:1 against its dark label, just under AA. */
+    --severity-critical: 0 78% 62%;
+    --severity-critical-foreground: 0 0% 10%;
+    --severity-high: 25 95% 55%;
+    --severity-high-foreground: 0 0% 10%;
+    --severity-medium: 45 95% 55%;
+    --severity-medium-foreground: 0 0% 10%;
+    --severity-low: 210 90% 62%;
+    --severity-low-foreground: 0 0% 10%;
+
+    --sidebar-background: 0 0% 5%;
+    --sidebar-foreground: 0 0% 85%;
+    --sidebar-primary: 142 45% 45%;
+    --sidebar-primary-foreground: 0 0% 5%;
+    --sidebar-accent: 0 0% 12%;
+    --sidebar-accent-foreground: 0 0% 95%;
+    --sidebar-border: 0 0% 15%;
+    --sidebar-ring: 142 45% 45%;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+
+  /* This dashboard runs several animations permanently -- pulsing connection
+     dots, the scan line, animate-pulse on status badges -- and they never
+     stop, because the page never navigates away. For a vestibular-sensitive
+     user that is a page they cannot look at. Honour the OS setting rather than
+     asking them to. */
+  @media (prefers-reduced-motion: reduce) {
+
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+/* =========================================================
+   UTILITIES
+   ========================================================= */
+
+@layer utilities {
+
+  /* Removed: .tactical-grid, .scan-line, .pulse-border, .status-active and
+     .data-display.
+
+     All five were defined here and used by nothing -- verified against every
+     component. They were the CSS half of a mission-control aesthetic that does
+     not fit a civilian early-warning tool for district offices, and a scan-line
+     sweeping across a flood warning is decoration pretending to be
+     instrumentation. The scrollbar and touch utilities below are kept: those do
+     real work. */
+
+  /* Hide scrollbar utility for mobile horizontal scroll */
+  .hide-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .hide-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Sleek custom scrollbar for Intel Feed */
+  .intel-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--primary) / 0.5) transparent;
+  }
+
+  .intel-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .intel-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+    border-radius: 3px;
+  }
+
+  .intel-scrollbar::-webkit-scrollbar-thumb {
+    background: hsl(var(--primary) / 0.3);
+    border-radius: 3px;
+    transition: background 0.2s ease;
+  }
+
+  .intel-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--primary) / 0.6);
+  }
+
+  /* Roger dark scrollbar for chatbox */
+  .roger-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(0 0% 40%) transparent;
+  }
+
+  .roger-scrollbar::-webkit-scrollbar {
+    width: 5px;
+  }
+
+  .roger-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .roger-scrollbar::-webkit-scrollbar-thumb {
+    background: hsl(0 0% 35%);
+    border-radius: 2.5px;
+  }
+
+  .roger-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: hsl(0 0% 50%);
+  }
+
+  /* Mobile touch optimization */
+  .touch-manipulation {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+}

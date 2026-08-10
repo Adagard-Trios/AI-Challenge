@@ -1,0 +1,540 @@
+"""
+src/social/service.py
+Connect and collect social accounts from the dashboard.
+
+The interesting problem here is that logging in takes a human a minute or two,
+and an HTTP request cannot wait that long. The old connector CLI solved it with
+`input("Press Enter once you are signed in...")`, which is fine in a terminal
+and impossible in a web request.
+
+So login runs in a background thread and reports progress through a job record
+the dashboard polls. Completion is detected by watching for the platform's
+required auth cookies to appear -- `missing_required()` already knows which
+those are per platform -- which is strictly better than asking the user to
+confirm: it cannot be answered "yes" before the login actually finished, and it
+notices the moment it does.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import logging
+import threading
+import time
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger("Roger.social")
+
+# Which platforms the search scrapers can collect from with a session.
+#
+# Deliberately NOT the vault's list, which also includes reddit. Reddit has no
+# session scraper -- r/srilanka is read through its public JSON API and needs no
+# account -- so offering a reddit login here would let someone save a password,
+# complete a browser sign-in, click Collect, and get "unsupported". A dead end
+# built out of a list that was copied rather than derived.
+COLLECTORS = {
+    "twitter": "scrape_twitter",
+    "linkedin": "scrape_linkedin",
+    "facebook": "scrape_facebook",
+    "instagram": "scrape_instagram",
+}
+
+SUPPORTED_PLATFORMS = tuple(COLLECTORS)
+
+# How long to leave the login window open before giving up. Long enough for a
+# password manager, a 2FA code from a phone, and a mistyped password; short
+# enough that a forgotten window does not hold a browser open all day.
+LOGIN_TIMEOUT_SECONDS = 300
+
+# How often to check whether the auth cookies have appeared.
+LOGIN_POLL_SECONDS = 2.0
+
+DEFAULT_QUERY = "Sri Lanka"
+
+
+@dataclass
+class Job:
+    """
+    A connect attempt in progress.
+
+    Exists because the dashboard needs to show something during the ~2 minutes
+    a human spends logging in, and "the request is still open" is not something
+    a browser will tolerate for that long.
+    """
+
+    platform: str
+    state: str = "starting"        # starting|awaiting_login|saving|done|failed
+    message: str = ""
+    handle: Optional[str] = None
+    started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    finished_at: Optional[datetime] = None
+
+    def as_dict(self) -> dict:
+        return {
+            "platform": self.platform,
+            "state": self.state,
+            "message": self.message,
+            "handle": self.handle,
+            "started_at": self.started_at.isoformat(),
+            "finished_at": self.finished_at.isoformat() if self.finished_at else None,
+            "running": self.state in ("starting", "awaiting_login", "saving"),
+        }
+
+
+class SocialService:
+    """
+    One instance per process. Holds the vault, the session store, and any
+    in-flight login.
+    """
+
+    def __init__(self, user_id: Optional[str] = None) -> None:
+        """
+        One instance per user. `user_id` is what makes the whole thing tenanted.
+
+        The vault, the session store and the backoff state all take a directory,
+        so pointing them at users/<id>/ separates the encrypted passwords, the
+        browser cookies AND the encryption keys themselves -- each user's vault
+        is sealed with its own key, so possession of one tells you nothing about
+        another. _jobs is per-instance, so an in-flight login is scoped too.
+
+        Passing None keeps the old shared directory. That is only for tests and
+        for the collector, which runs as the machine rather than as a user.
+        """
+        self._lock = threading.Lock()
+        self._user_id = user_id
+        self._jobs: Dict[str, Job] = {}
+        self._vault = None
+        self._sessions = None
+        self._backoff = None
+
+    def _store_dir(self):
+        """users/<id>/ per user, or the install-wide directory when unscoped."""
+        from .storage import config_dir
+
+        base = config_dir()
+        if not self._user_id:
+            return base
+        # Hashed, not the raw id: the id reaches a filesystem path, and emails
+        # or anything else identifying should not be readable from a directory
+        # listing or a backup manifest.
+        digest = hashlib.sha256(self._user_id.encode("utf-8")).hexdigest()[:32]
+        path = base / "users" / digest
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    # -- lazily built, so importing this module never touches the keychain ----
+
+    @property
+    def vault(self):
+        if self._vault is None:
+            from .vault import CredentialVault
+
+            self._vault = CredentialVault(directory=self._store_dir())
+        return self._vault
+
+    @property
+    def sessions(self):
+        if self._sessions is None:
+            from .storage import SessionStore
+
+            self._sessions = SessionStore(directory=self._store_dir())
+        return self._sessions
+
+    @property
+    def backoff(self):
+        """
+        Challenge state and failure pacing, persisted across restarts.
+
+        Surviving a restart is the whole point: restarting is exactly what
+        people do after failures, and an in-memory counter would reset at the
+        moment it matters most.
+        """
+        if self._backoff is None:
+            from .backoff import BackoffStore
+
+            # Per-user as well: pacing exists to keep a PARTICULAR account off a
+            # platform's restriction radar, so counting one user's failures
+            # against another's account would throttle the wrong person and
+            # leak that somebody else is being challenged.
+            self._backoff = BackoffStore(directory=self._store_dir())
+        return self._backoff
+
+    # -- credentials ---------------------------------------------------------
+
+    def save_credentials(self, platform: str, username: str, password: str) -> None:
+        """
+        Store a login for pre-filling. Encrypted at rest, never logged.
+
+        Note what this does NOT enable: the password is not used to log in
+        unattended. It fills two fields in a real browser and stops.
+        """
+        platform = platform.lower()
+        if platform not in SUPPORTED_PLATFORMS:
+            raise ValueError(f"Unsupported platform: {platform}")
+        if not username.strip() or not password:
+            raise ValueError("Both a username and a password are required")
+
+        self.vault.save(platform, username.strip(), password)
+        # Deliberately no password, and no length, in the log line.
+        logger.info("[social] stored credentials for %s (this machine only)", platform)
+
+    def forget_credentials(self, platform: str) -> bool:
+        return self.vault.forget(platform.lower())
+
+    def saved_usernames(self) -> Dict[str, str]:
+        """Usernames only. The vault has no method that returns a password."""
+        return self.vault.describe()
+
+    # -- connect -------------------------------------------------------------
+
+    def start_connect(self, platform: str) -> Job:
+        """
+        Open a browser and begin a login. Returns immediately.
+
+        The browser opens on the machine running THIS PROCESS. When that is the
+        user's laptop -- the case this is built for -- it is the machine in
+        front of them.
+        """
+        platform = platform.lower()
+        if platform not in SUPPORTED_PLATFORMS:
+            raise ValueError(f"Unsupported platform: {platform}")
+
+        with self._lock:
+            existing = self._jobs.get(platform)
+            if existing and existing.state in ("starting", "awaiting_login", "saving"):
+                return existing
+
+            job = Job(platform=platform, state="starting",
+                      message="Opening a browser window...")
+            self._jobs[platform] = job
+
+        thread = threading.Thread(
+            target=self._run_connect, args=(job,),
+            name=f"social-connect-{platform}", daemon=True,
+        )
+        thread.start()
+        return job
+
+    def job(self, platform: str) -> Optional[Job]:
+        return self._jobs.get(platform.lower())
+
+    def _run_connect(self, job: Job) -> None:
+        """
+        The whole login, on a background thread.
+
+        Playwright's sync API cannot run inside the asyncio event loop, and this
+        blocks for minutes regardless, so a thread is the right shape.
+        """
+        platform = job.platform
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            self._fail(job, "Playwright is not installed on the server. "
+                            "pip install playwright && playwright install chromium")
+            return
+
+        from .browser_login import (
+            LOGIN_URLS, _detect_handle, _launch_browser, _persist, _prefill_login,
+        )
+        from src.scrapers.credentials import missing_required
+
+        prefill = None
+        try:
+            prefill = self.vault.get(platform)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[social] could not read saved credentials: %s", exc)
+
+        try:
+            with sync_playwright() as p:
+                browser = _launch_browser(p, headless=False)
+                try:
+                    context = browser.new_context()
+                    page = context.new_page()
+                    page.goto(LOGIN_URLS[platform], wait_until="domcontentloaded")
+
+                    if prefill:
+                        # Fills username and password into the platform's own
+                        # form and stops. Never submits, never answers a
+                        # challenge -- see connector/connect.py.
+                        _prefill_login(page, platform, prefill)
+                        job.message = ("Signed-in form pre-filled. Finish the login "
+                                       "in the browser window, including any 2FA.")
+                    else:
+                        job.message = ("Sign in normally in the browser window. "
+                                       "Save your login below to have it pre-filled "
+                                       "next time.")
+                    job.state = "awaiting_login"
+
+                    state = self._await_login(context, platform, missing_required, job)
+                    if state is None:
+                        self._fail(
+                            job,
+                            "Timed out waiting for the login to complete. Nothing "
+                            "was saved. The browser window was closed.",
+                        )
+                        return
+
+                    job.state = "saving"
+                    job.message = "Login detected. Capturing the session..."
+                    handle = _detect_handle(page, platform)
+                finally:
+                    browser.close()
+
+            summary = _persist(platform, state, handle, self.sessions)
+
+            job.handle = summary.get("handle")
+            job.state = "done"
+            job.finished_at = datetime.now(timezone.utc)
+            job.message = (
+                f"Connected{' as ' + job.handle if job.handle else ''}. "
+                f"Kept {summary.get('cookies_kept')} first-party cookies; the "
+                f"session is encrypted on this machine."
+            )
+            logger.info("[social] connected %s", platform)
+
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("[social] connect %s failed", platform)
+            self._fail(job, str(exc)[:300])
+
+    @staticmethod
+    def _await_login(context, platform: str, missing_required, job: Job):
+        """
+        Wait for the platform's auth cookies to appear.
+
+        Better than asking the user to confirm: it cannot be answered before
+        the login has actually happened, and it notices the moment it has. The
+        CLI's `input("Press Enter...")` could be pressed too early, which
+        produced a half-captured session and a confusing failure later.
+        """
+        deadline = time.monotonic() + LOGIN_TIMEOUT_SECONDS
+
+        while time.monotonic() < deadline:
+            try:
+                state = context.storage_state()
+            except Exception:
+                # The user closed the window. Nothing to capture.
+                return None
+
+            if not missing_required(state, platform):
+                return state
+
+            remaining = int(deadline - time.monotonic())
+            job.message = (
+                f"Waiting for you to finish signing in... ({remaining}s left). "
+                "Complete any 2FA in the browser window."
+            )
+            time.sleep(LOGIN_POLL_SECONDS)
+
+        return None
+
+    def _fail(self, job: Job, message: str) -> None:
+        job.state = "failed"
+        job.message = message
+        job.finished_at = datetime.now(timezone.utc)
+
+    # -- state ---------------------------------------------------------------
+
+    def disconnect(self, platform: str) -> bool:
+        return self.sessions.delete(platform.lower())
+
+    def resume(self, platform: str) -> None:
+        """
+        Clear a challenge and let this account collect again.
+
+        Never automatic. A challenge means the platform asked for proof a human
+        is present; resuming on a timer answers that with "no", and retrying
+        into a challenge is what converts it into a lasting restriction. So the
+        cooldown lifts only when a person says they have checked the account.
+        """
+        self.backoff.resume(platform.lower())
+        logger.info("[social] %s resumed by the user", platform)
+
+    def challenge_state(self, platform: str) -> Optional[dict]:
+        """Why this account is paused, if it is."""
+        platform = platform.lower()
+        try:
+            if self.backoff.is_challenged(platform):
+                return {"paused": True, "kind": "challenged",
+                        "detail": self.backoff.describe(platform)}
+            if not self.backoff.ready(platform):
+                return {"paused": True, "kind": "backing_off",
+                        "detail": self.backoff.describe(platform)}
+        except Exception:  # noqa: BLE001
+            return None
+        return None
+
+    def accounts(self) -> List[dict]:
+        """
+        Everything the dashboard needs to render the Accounts tab.
+
+        Reports credential and session presence separately, because they fail
+        differently: saved credentials with no session means "connect not run
+        yet", while a session with no credentials is perfectly normal for
+        someone who signed in by hand.
+        """
+        connected = set(self.sessions.available())
+        try:
+            usernames = self.vault.describe()
+        except Exception:  # noqa: BLE001
+            usernames = {}
+
+        out = []
+        for platform in SUPPORTED_PLATFORMS:
+            job = self._jobs.get(platform)
+            record = self.sessions.load(platform) if platform in connected else None
+            out.append({
+                "platform": platform,
+                "connected": platform in connected,
+                "handle": (record or {}).get("handle"),
+                "has_credentials": platform in usernames,
+                "username": usernames.get(platform),
+                "job": job.as_dict() if job else None,
+                "budget": self._budget(platform),
+                # Why collection is paused, if it is. Without this a challenged
+                # account looks identical to a working one that happens to be
+                # quiet, and the user has nothing to act on.
+                "paused": self.challenge_state(platform),
+            })
+        return out
+
+    @staticmethod
+    def _budget(platform: str) -> Optional[dict]:
+        """Today's pacing consumption, or None if nothing has run."""
+        try:
+            from src.scrapers.base import budget_snapshot
+
+            return budget_snapshot(f"local:{platform}", platform)
+        except Exception:  # noqa: BLE001
+            return None
+
+    # -- collect -------------------------------------------------------------
+
+    def collect(self, platform: str, query: str = DEFAULT_QUERY,
+                max_items: int = 20) -> dict:
+        """
+        Collect once, in-process, and hand the posts back to the caller.
+
+        Storage is the caller's job -- this module knows about sessions and
+        scrapers, not about the ingest pipeline.
+        """
+        platform = platform.lower()
+
+        from src.scrapers import registry
+        from src.scrapers.base import run_scrape
+        from src.scrapers.credentials import SocialCredential, derive_expiry
+
+        scraper = COLLECTORS.get(platform)
+        if scraper is None:
+            return {"platform": platform, "status": "unsupported", "posts": []}
+
+        # A challenge stops this account until a human resumes it, and a run of
+        # failures backs off exponentially. Both survive a restart.
+        #
+        # This was lost when collection moved out of the connector and into the
+        # backend, and the tests that caught it were the ones asserting the old
+        # Collector consulted the store. Without it a challenged account gets
+        # retried on the very next cycle -- which is the behaviour most likely
+        # to turn a recoverable challenge into a lasting restriction.
+        if self.backoff.is_challenged(platform):
+            return {"platform": platform, "status": "challenged", "posts": [],
+                    "reason": self.backoff.describe(platform)}
+        if not self.backoff.ready(platform):
+            return {"platform": platform, "status": "backing_off", "posts": [],
+                    "reason": self.backoff.describe(platform)}
+
+        record = self.sessions.load(platform)
+        if record is None:
+            return {"platform": platform, "status": "not_connected", "posts": []}
+
+        state = record.get("storage_state") or {}
+        credential = SocialCredential(
+            platform=platform,
+            storage_state=state,
+            handle=record.get("handle"),
+            account_key=f"local:{platform}",
+            expires_at=derive_expiry(state, platform),
+            source="dashboard",
+        )
+        if credential.is_expired:
+            return {"platform": platform, "status": "expired", "posts": []}
+
+        result = run_scrape(credential, registry.REGISTRY[scraper].fn,
+                            query, max_items=max_items)
+
+        # Platforms rotate cookies during ordinary use. Discarding them makes a
+        # stored session drift stale until it stops working, which the user
+        # experiences as "it randomly logs me out every few weeks".
+        if result.rotated_state and result.status != "challenged":
+            try:
+                self.sessions.save(platform, result.rotated_state,
+                                   handle=credential.handle)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[social] could not persist rotated %s session: %s",
+                               platform, exc)
+
+        if result.status == "challenged":
+            self.backoff.record_challenge(platform, result.reason)
+            logger.error(
+                "[social] %s served a challenge. Collection for this account is "
+                "stopped until you resume it. It will NOT retry on its own.",
+                platform,
+            )
+        elif result.status in ("ok", "budget_exhausted"):
+            self.backoff.record_success(platform)
+        else:
+            # `expired` counts as a failure for pacing: retrying a dead session
+            # every cycle is pointless traffic against an account the platform
+            # is already watching.
+            self.backoff.record_failure(platform, result.reason)
+
+        return {
+            "platform": platform,
+            "status": result.status,
+            "reason": result.reason,
+            "posts": [{
+                "platform": platform,
+                "poster": post.get("poster"),
+                "text": post.get("text", ""),
+                "url": post.get("url"),
+                "posted_at": post.get("timestamp"),
+                "likes": int(post.get("likes") or 0),
+                "shares": int(post.get("retweets") or post.get("shares") or 0),
+                "comments": int(post.get("replies") or post.get("comments") or 0),
+                # Carried through so the caller can fetch and read them. A post
+                # can now arrive with no text at all -- an image-only post used
+                # to be discarded by the scraper, which threw away exactly the
+                # ones whose content lives in the picture.
+                "images": post.get("images") or [],
+            } for post in result.posts],
+        }
+
+
+_services: Dict[Optional[str], SocialService] = {}
+_service_lock = threading.Lock()
+
+
+def get_service(user_id: Optional[str] = None) -> SocialService:
+    """
+    The service for one user. Instances are cached because each one owns an
+    in-flight job map, and a login started by one request must still be
+    observable by the next poll from the same user.
+
+    Callers MUST pass a user_id for anything reached from an HTTP route. The
+    unscoped instance still exists for the collector, which runs as the machine
+    rather than on behalf of a signed-in person.
+    """
+    svc = _services.get(user_id)
+    if svc is None:
+        with _service_lock:
+            svc = _services.get(user_id)
+            if svc is None:
+                svc = SocialService(user_id=user_id)
+                _services[user_id] = svc
+    return svc
+
+
+def reset_service() -> None:
+    """Tests."""
+    _services.clear()

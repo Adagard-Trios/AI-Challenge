@@ -1,0 +1,8 @@
+# Smaller requests so everything fits beside a dev environment. Requests, not
+# limits: requests are what the scheduler packs against.
+- op: replace
+  path: /spec/template/spec/containers/0/resources/requests/cpu
+  value: "50m"
+- op: replace
+  path: /spec/template/spec/containers/0/resources/requests/memory
+  value: "200Mi"

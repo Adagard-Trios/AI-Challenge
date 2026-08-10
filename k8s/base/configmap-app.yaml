@@ -1,0 +1,55 @@
+# Non-secret configuration shared by api and worker.
+#
+# Secrets (GROQ_API_KEY, DATABASE_URL, AUTH_SECRET, BOOTSTRAP_ADMIN_*) are NOT
+# here. Create them out of band:
+#
+#   kubectl -n roger create secret generic roger-secrets \
+#     --from-literal=GROQ_API_KEY=... \
+#     --from-literal=DATABASE_URL='postgresql+psycopg://...' \
+#     --from-literal=AUTH_SECRET="$(python -c 'import secrets;print(secrets.token_urlsafe(48))')" \
+#     --from-literal=BOOTSTRAP_ADMIN_EMAIL=you@example.com \
+#     --from-literal=BOOTSTRAP_ADMIN_PASSWORD='at least ten characters'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: roger-config
+data:
+  PYTHONUNBUFFERED: "1"
+
+  # Shared state. Without these the app silently reverts to per-process state,
+  # which is correct for one pod and wrong for the moment you scale -- the
+  # pacing gate protecting a personal social account is the sharpest example.
+  REDIS_URL: "redis://redis:6379/0"
+  CHROMA_HOST: "chroma"
+  CHROMA_PORT: "8000"
+
+  # Seconds between agent cycles.
+  #
+  # Deliberately 180 rather than the code default of 60. Groq's free tier is
+  # 8,000 tokens per MINUTE and this project already hits it at ONE replica.
+  # Adding api replicas does not change that -- they spend no tokens. This is
+  # the only knob that does.
+  AGENT_LOOP_INTERVAL_SECONDS: "180"
+
+  # Let the readiness probe pass before five scraping agents start competing
+  # for the CPU.
+  AGENT_LOOP_START_DELAY: "45"
+
+  # Training in a serving container delays the port bind past the probe window
+  # and OOMs small nodes. Ship the committed artefacts under models/*/artifacts.
+  DISABLE_AUTO_TRAIN: "1"
+
+  # Social collection CANNOT run in a pod, at any memory size: connecting an
+  # account opens a VISIBLE browser for a human to complete 2FA, and the
+  # session is encrypted to the OS keyring of the machine that made it. A
+  # container has neither. It runs on the host and shares the same Redis gate
+  # and the same Postgres. See HOSTING.md.
+  DISABLE_LOCAL_SOCIAL_SESSIONS: "1"
+
+  # Anyone with the URL could otherwise create an account and read the
+  # intelligence feed. New accounts are viewers and every social route requires
+  # admin, so a connected account is not reachable -- but the feed is.
+  # Read per request, so flipping it needs no restart.
+  ALLOW_SELF_REGISTRATION: "0"
+
+  AUTH_ENFORCED: "1"

@@ -1,0 +1,15 @@
+{
+    "dependencies": [
+        "."
+    ],
+    "graphs": {
+        "data_retrieval_agent_graph": "./src/graphs/dataRetrievalAgentGraph.py:graph",
+        "meteorological_agent_graph": "./src/graphs/meteorologicalAgentGraph.py:graph",
+        "political_agent_graph": "./src/graphs/politicalAgentGraph.py:graph",
+        "economical_agent_graph": "./src/graphs/economicalAgentGraph.py:graph",
+        "social_agent_graph": "./src/graphs/socialAgentGraph.py:graph",
+        "intelligence_agent_graph": "./src/graphs/intelligenceAgentGraph.py:graph",
+        "combined_agent_graph": "./src/graphs/combinedAgentGraph.py:graph"
+    },
+    "env": "./env"
+}

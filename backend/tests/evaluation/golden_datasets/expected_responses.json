@@ -1,0 +1,95 @@
+[
+    {
+        "id": "weather_query_1",
+        "category": "meteorological",
+        "query": "What is the current flood risk in Colombo?",
+        "expected_tools": [
+            "tool_rivernet_status",
+            "tool_dmc_alerts",
+            "tool_district_weather"
+        ],
+        "expected_response_contains": [
+            "Colombo",
+            "flood",
+            "risk"
+        ],
+        "expected_sentiment": "informative",
+        "quality_threshold": 0.7
+    },
+    {
+        "id": "weather_query_2",
+        "category": "meteorological",
+        "query": "Is there a weather warning for Galle district?",
+        "expected_tools": [
+            "tool_dmc_alerts",
+            "tool_district_weather"
+        ],
+        "expected_response_contains": [
+            "Galle",
+            "weather"
+        ],
+        "expected_sentiment": "informative",
+        "quality_threshold": 0.7
+    },
+    {
+        "id": "economic_query_1",
+        "category": "economical",
+        "query": "What are the latest stock market trends in Sri Lanka?",
+        "expected_tools": [
+            "scrape_cse_stock_data"
+        ],
+        "expected_response_contains": [
+            "stock",
+            "CSE",
+            "market"
+        ],
+        "expected_sentiment": "informative",
+        "quality_threshold": 0.7
+    },
+    {
+        "id": "political_query_1",
+        "category": "political",
+        "query": "What are the recent government announcements?",
+        "expected_tools": [
+            "scrape_government_gazette",
+            "scrape_parliament_minutes"
+        ],
+        "expected_response_contains": [
+            "government",
+            "announcement"
+        ],
+        "expected_sentiment": "informative",
+        "quality_threshold": 0.7
+    },
+    {
+        "id": "social_query_1",
+        "category": "social",
+        "query": "What are people saying about the economy on social media?",
+        "expected_tools": [
+            "scrape_twitter",
+            "scrape_reddit"
+        ],
+        "expected_response_contains": [
+            "social",
+            "economy"
+        ],
+        "expected_sentiment": "analytical",
+        "quality_threshold": 0.6
+    },
+    {
+        "id": "multi_domain_1",
+        "category": "intelligence",
+        "query": "Give me a comprehensive overview of current risks in Sri Lanka",
+        "expected_tools": [
+            "tool_rivernet_status",
+            "tool_dmc_alerts",
+            "scrape_local_news"
+        ],
+        "expected_response_contains": [
+            "risk",
+            "Sri Lanka"
+        ],
+        "expected_sentiment": "comprehensive",
+        "quality_threshold": 0.7
+    }
+]

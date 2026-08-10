@@ -1,0 +1,19 @@
+# Serving-only dependencies for service.py.
+#
+# StockPredictor loads its model with `pickle`, not Keras — so unlike weather and
+# currency this service needs no TensorFlow. requirements.txt lists tensorflow,
+# streamlit and plotly, which are for training and the Streamlit dashboard
+# (app.py) rather than this JSON API.
+#
+# scikit-learn is required at import time to unpickle the estimator.
+
+fastapi
+uvicorn[standard]
+
+scikit-learn
+joblib
+numpy
+pandas
+yfinance            # live CSE/market data for fresh predictions
+pyyaml
+python-dotenv

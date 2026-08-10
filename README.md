@@ -108,9 +108,9 @@ it is.
 | **Relevance scoring**, ranks the feed against your declared exposure, with `matched_on` reasons | Deterministic scorer | ✅ **Live** |
 | **Anomaly detection**, isolation forest over sentence embeddings | scikit-learn + 384-dim ONNX all-MiniLM-L6-v2 | ✅ **Live, in-process** |
 | **RAG chatbot** over collected intelligence | LLM + ChromaDB | ✅ **Live** |
-| Weather prediction (temp, rainfall, flood risk) | LSTM (Keras) | ⚠️ Local only, needs TensorFlow |
-| Currency prediction (USD/LKR) | GRU (Keras) | ⚠️ Local only, needs TensorFlow |
-| Stock price prediction (10 CSE stocks) | LSTM/GRU/BiLSTM/BiGRU + Optuna | ⚠️ Local only, needs TensorFlow |
+| Weather prediction (temp, rainfall, flood risk) | LSTM (Keras) | ✅ **Live** |
+| Currency prediction (USD/LKR) | GRU (Keras) | ✅ **Live** |
+| Stock price prediction (10 CSE stocks) | LSTM/GRU/BiLSTM/BiGRU + Optuna | ✅ **Live** |
 
 The three Keras pipelines are real and trained, they simply do not fit
 alongside the API in 512 MB. In the deployed build they report `unavailable`

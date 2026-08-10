@@ -110,12 +110,26 @@ it is.
 | **RAG chatbot** over collected intelligence | LLM + ChromaDB | ✅ **Live** |
 | Weather prediction (temp, rainfall, flood risk) | LSTM (Keras) | ✅ **Live** |
 | Currency prediction (USD/LKR) | GRU (Keras) | ✅ **Live** |
-| Stock price prediction (10 CSE stocks) | LSTM/GRU/BiLSTM/BiGRU + Optuna | ✅ **Live** |
+| CSE share prices (live quotes, **no forecast**) | cse.lk trade summary | ✅ **Live prices** |
 
-The three Keras pipelines are real and trained, they simply do not fit
-alongside the API in 512 MB. In the deployed build they report `unavailable`
-and the dashboard says so, rather than rendering an empty card. Set their
-`*_SERVICE_URL` to a dedicated instance to switch them on.
+The weather and currency pipelines are trained and serving on the host machine,
+which is the whole reason the API runs there rather than on a 512 MB instance.
+Set their `*_SERVICE_URL` to move either to a dedicated service.
+
+**On stock prediction specifically, because the honest answer is "not yet".**
+There is no trained CSE model and it is not a training problem. Yahoo Finance
+carries no Colombo Stock Exchange listing in any symbol format, so every ticker
+returned zero rows and the panel had been filled with US tickers wearing "CSE"
+and "LKR" labels. Prices now come from the exchange's own API, and cse.lk
+publishes only current values, so a per-company history has to be accumulated
+before a model has anything to learn from:
+
+```bash
+python backend/scripts/snapshot_cse.py     # append today's closes, run daily
+```
+
+Until roughly a year of trading days exists, the card shows real prices and
+states that it has no forecast. That is the position, not a placeholder for one.
 
 **On anomaly detection specifically.** The originally committed isolation
 forests take 768-dim distilBERT vectors, which the deployed image cannot
@@ -223,35 +237,81 @@ moving social collection onto the user's machine.
 
 ## 🏗️ System Architecture
 
+The deployment is split on purpose. The browser and the API are on different
+machines, and the credentialed half never leaves the host.
+
+```mermaid
+graph TB
+    subgraph Browser["🌐 Browser"]
+        UI["Next.js dashboard<br/>roger.nivakaran.dev<br/><i>Render</i>"]
+    end
+
+    subgraph Edge["☁️ Cloudflare"]
+        TUN["Named tunnel<br/>api.nivakaran.dev<br/><i>outbound only, no open port</i>"]
+    end
+
+    subgraph Host["💻 Host machine — holds every credential"]
+        API["FastAPI<br/><i>JWT auth, per-user scoping</i>"]
+        WS["WebSocket<br/><i>single-use tickets</i>"]
+
+        subgraph Pipeline["LangGraph cycle"]
+            FAN["Fan-out to 5 domain agents<br/>social · economic · political<br/>meteorological · intelligence"]
+            AGG["Feed aggregator<br/><i>classify · dedupe · rank on exposure</i>"]
+            REF["Data refresher<br/><i>risk snapshot</i>"]
+            FAN --> AGG --> REF
+        end
+
+        subgraph Board["Blackboard — shadow mode"]
+            SENS["Sensors<br/><i>entries + foci</i>"]
+            CTRL["Controller<br/><i>plans, records, runs nothing</i>"]
+            SENS --> CTRL
+        end
+
+        subgraph Models["Models, in-process"]
+            M1["Weather LSTM · 25 districts"]
+            M2["Currency GRU · next-day return"]
+            M3["Anomaly · MiniLM + isolation forest"]
+        end
+
+        VAULT["Per-user vault<br/><i>AES-256-GCM, own key per user<br/>never leaves this machine</i>"]
+    end
+
+    subgraph Sources["📡 Public sources"]
+        S1["rivernet.lk · CEB · CEYPETCO"]
+        S2["CBSL · WFP · cse.lk"]
+        S3["News + connected social accounts"]
+    end
+
+    subgraph Data["🗄️ State"]
+        PG[("PostgreSQL<br/><i>users · posts · stories · ledger</i>")]
+        RD[("Redis<br/><i>pacing · dedup · shared state</i>")]
+        CH[("ChromaDB<br/><i>vectors</i>")]
+    end
+
+    UI -->|HTTPS| TUN --> API
+    UI <-.->|wss| WS
+    API --> Pipeline
+    REF --> SENS
+    Pipeline --> Sources
+    VAULT -.->|"scoped to the signed-in user"| Pipeline
+    Pipeline --> PG & RD & CH
+    API --> Models
+    CTRL --> PG
+
+    classDef shadow stroke-dasharray: 5 5
+    class Board,CTRL,SENS shadow
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                       Roger Combined Graph                              │
-│  ┌────────────────────────────────────────────────────────────────┐    │
-│  │                    Graph Initiator (Reset)                      │    │
-│  └────────────────────────────────────────────────────────────────┘    │
-│                              │ Fan-Out                                   │
-│    ┌────────────┬────────────┼────────────┬────────────┬────────────┐  │
-│    ▼            ▼            ▼            ▼            ▼            ▼  │
-│ ┌──────┐   ┌──────┐   ┌──────────┐   ┌──────┐   ┌──────────┐   ┌────┐│
-│ │Social│   │Econ  │   │Political │   │Meteo │   │Intellig- │   │Data││
-│ │Agent │   │Agent │   │Agent     │   │Agent │   │ence Agent│   │Retr││
-│ └──────┘   └──────┘   └──────────┘   └──────┘   └──────────┘   └────┘│
-│    │            │            │            │            │            │  │
-│    └────────────┴────────────┴────────────┴────────────┴────────────┘  │
-│                              │ Fan-In                                   │
-│                    ┌─────────▼──────────┐                              │
-│                    │   Feed Aggregator   │                              │
-│                    │  (Rank & Dedupe)    │                              │
-│                    └─────────┬──────────┘                              │
-│                    ┌─────────▼──────────┐                              │
-│                    │  Vectorization     │                          │
-│                    │  Agent (Optional)  │                              │
-│                    └─────────┬──────────┘                              │
-│                    ┌─────────▼──────────┐                              │
-│                    │  Router (Loop/End) │                              │
-│                    └────────────────────┘                              │
-└─────────────────────────────────────────────────────────────────────────┘
-```
+
+**Reading it.** The blackboard is dashed because it is in **shadow**: it plans a
+schedule every cycle and writes the decision to a ledger, while the fan-out
+keeps doing the collecting. That is deliberate, and the reasoning is in
+`src/blackboard/controller.py` — opportunistic control produces *less* data, not
+obviously smarter data, and the ledger exists to prove the triggers are right
+before anything is handed over.
+
+The host box is the point of the split: the tunnel connects **outward**, so no
+router port is opened and the home IP is never published, and social credentials
+are encrypted per user under a key derived from that user's own directory.
 
 ---
 

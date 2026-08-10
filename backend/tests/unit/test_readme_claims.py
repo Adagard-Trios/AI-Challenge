@@ -92,18 +92,33 @@ def test_every_probed_source_appears_in_the_readme_table(readme):
 
 # --- ML claims --------------------------------------------------------------
 
-def test_tensorflow_models_are_not_claimed_as_live(readme):
+def test_no_stock_forecast_is_claimed(readme):
     """
-    Weather, currency and stock are Keras models that cannot fit in the 512 MB
-    instance alongside the API. Presenting them as running on the live URL is
-    the same class of error as the source count.
+    There is no trained CSE model and there cannot be one yet.
+
+    Yahoo Finance carries no Colombo Stock Exchange listing in any symbol
+    format, so every ticker returned zero rows; cse.lk publishes current prices
+    but no per-company history, so a series has to be accumulated first. The
+    endpoint returns status="prices_only" with predictions=None.
+
+    This replaces an older check that required weather and currency to be
+    marked unavailable too. That was true of the 512 MB Render deployment and
+    is no longer true of the API: it runs on a host with TensorFlow, and both
+    models were retrained and verified serving. Stock is the claim that is
+    still false, and it was reintroduced once already.
     """
-    for model in ("Weather prediction", "Currency prediction", "Stock price prediction"):
-        row = next((line for line in readme.splitlines() if model in line), None)
-        assert row is not None, f"{model} row missing from the capability table"
-        assert "Local only" in row or "⚠️" in row, (
-            f"{model} is not marked as unavailable on the live URL: {row.strip()[:120]}"
-        )
+    row = next((line for line in readme.splitlines()
+                if "CSE" in line and "|" in line and "price" in line.lower()), None)
+    assert row is not None, "the CSE row is missing from the capability table"
+
+    lowered = row.lower()
+    assert "no forecast" in lowered or "prices" in lowered, (
+        f"the CSE row does not make clear it is prices rather than a forecast: "
+        f"{row.strip()[:120]}"
+    )
+    assert "prediction" not in lowered.replace("no forecast", ""), (
+        f"the CSE row still claims a prediction: {row.strip()[:120]}"
+    )
 
 
 def test_anomaly_detection_claim_matches_the_shipped_model(readme):
